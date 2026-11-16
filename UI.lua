@@ -217,8 +217,10 @@ SlashCmdList.CRAFTINGFOREVER = function(msg)
     ns.Safe(ns.AuctionScan.Start)
   elseif msg == "berufe" or msg == "b" then
     ns.PlannerUI.Toggle()
+  elseif msg == "handel" or msg == "h" then
+    ns.PlannerUI.Show("ledger")
   elseif msg == "hilfe" or msg == "help" then
-    print("|cffffd100CraftingForever:|r /cf – Fenster an/aus, /cf berufe – Berufe-Fenster, /cf scan – AH-Vollscan, /cf neu – neue Sitzung")
+    print("|cffffd100CraftingForever:|r /cf – Fenster an/aus, /cf berufe – Berufe-Fenster, /cf handel – Handelsbuch, /cf scan – AH-Vollscan, /cf neu – neue Sitzung")
   else
     UI.SetShown(not (frame and frame:IsShown()))
   end

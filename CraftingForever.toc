@@ -25,6 +25,7 @@ Inventory.lua
 Deals.lua
 Selling.lua
 Sniper.lua
+Ledger.lua
 BagMarks.lua
 Patterns.lua
 UI.lua

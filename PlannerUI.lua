@@ -500,6 +500,51 @@ local function showInventory()
   addText(GREY .. "AH, wenn es pro Stück mindestens 20 % und für den ganzen Stapel mindestens 10s mehr als der Händler bringt.|r")
 end
 
+local KIND_TEXT = { buy = "gekauft", post = "eingestellt", sale = "verkauft", expired = "abgelaufen",
+  cancelled = "abgebrochen" }
+
+local function showLedger()
+  title:SetText("Handel  –  gekauft, eingestellt, verkauft")
+  local list, total = ns.Ledger.Summary()
+  if #list == 0 then
+    addText("Noch nichts erfasst. Käufe und Einstellungen werden ab jetzt mitgeschrieben,")
+    addText("Verkäufe, abgelaufene und abgebrochene Auktionen beim Öffnen des Briefkastens.")
+    return
+  end
+  addText(string.format("Gekauft %s%s|r   ·   Verkauft netto %s%s|r   ·   Gewinn aus Handel %s   ·   Noch auf Lager (Einkauf) %s",
+    GOLD, money(total.spent), GREEN, money(total.net), profit(total.profit), money(total.held)))
+  if total.ownNet > 0 then
+    addText(GREY .. "Davon Verkauf eigener Ware (nicht gekauft): " .. money(total.ownNet) .. "|r")
+  end
+  addText(GREY .. "Verkäufe kommen aus den AH-Mails: Briefkasten öffnen, dann stehen sie hier. Gewinn = Verkauf netto minus Ø Einkaufspreis, nur für gekaufte Stücke.|r")
+  addBlank()
+  columns = { { 210 }, { 105, "RIGHT" }, { 50, "RIGHT" }, { 105, "RIGHT" }, { 60, "RIGHT" }, { 50, "RIGHT" }, { 90, "RIGHT" } }
+  addCells(GOLD .. "Item|r", GOLD .. "Gekauft|r", GOLD .. "Einges.|r", GOLD .. "Verkauft netto|r",
+    GOLD .. "Abgel./abg.|r", GOLD .. "Lager|r", GOLD .. "Gewinn|r")
+  for _, it in ipairs(list) do
+    local name = it.itemID and withIcon(it.itemID, ns.ItemName(it.itemID)) or (it.name or "?")
+    addItemCells(it.itemID, name,
+      it.bought > 0 and string.format("%dx %s", it.bought, money(it.spent)) or GREY .. "–|r",
+      it.posted > 0 and tostring(it.posted) or GREY .. "–|r",
+      it.sold > 0 and string.format("%dx %s", it.sold, money(it.net)) or GREY .. "–|r",
+      (it.expired + it.cancelled) > 0 and tostring(it.expired + it.cancelled) or GREY .. "–|r",
+      it.open > 0 and tostring(it.open) or GREY .. "–|r",
+      it.bought > 0 and it.sold > 0 and profit(it.profit) or GREY .. "–|r")
+  end
+  addBlank()
+  addText(GOLD .. "Letzte Vorgänge|r")
+  columns = { { 90 }, { 80 }, { 230 }, { 50, "RIGHT" }, { 120, "RIGHT" } }
+  for _, e in ipairs(ns.Ledger.Recent(25)) do
+    local amount = e.k == "buy" and money(e.c or 0)
+      or e.k == "sale" and (money((e.c or 0) - (e.cut or 0)) .. GREY .. " netto|r")
+      or e.k == "post" and e.p and (money(e.p) .. GREY .. (e.u and e.u > 1 and " /Stk|r" or "|r"))
+      or ""
+    local name = e.i and withIcon(e.i, ns.ItemName(e.i)) or (e.n or "?")
+    addItemCells(e.i, GREY .. date("%d.%m. %H:%M", e.t) .. "|r", KIND_TEXT[e.k] or e.k, name,
+      tostring(e.u or 1), amount)
+  end
+end
+
 local VIEWS = {
   { key = "path", label = "Skillen", fn = showPath },
   { key = "profit", label = "Lohnt sich", fn = showProfit },
@@ -507,6 +552,7 @@ local VIEWS = {
   { key = "spots", label = "Farmen", fn = showSpots },
   { key = "farming", label = "Farm-Items", fn = showFarming },
   { key = "inventory", label = "Bestand", fn = showInventory },
+  { key = "ledger", label = "Handel", fn = showLedger },
 }
 
 function PlannerUI.Refresh()
@@ -583,6 +629,14 @@ local function createFrame()
   scroll:SetPoint("TOPLEFT", 10, -(HEADER + TABBAR + 10))
   scroll:SetPoint("BOTTOMRIGHT", -18, 10)
   content:SetSize(WIDTH - 40, 1)
+end
+
+-- Opens the window on one tab.
+function PlannerUI.Show(key)
+  if not frame then createFrame() end
+  current = key
+  frame:Show()
+  ns.Safe(PlannerUI.Refresh)
 end
 
 function PlannerUI.Toggle()

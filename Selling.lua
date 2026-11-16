@@ -15,7 +15,7 @@ local DURATIONS = { { 1, "2 h" }, { 2, "8 h" }, { 3, "24 h" } }
 local panel, rowsFrames, durationButtons, status
 local duration = 3
 local mode = "sell" -- "sell", "deals" or "sniper"
-local control, sniperLines
+local control, sniperLines, ledgerButton
 local SNIPER_ROWS = 14 -- leaves room for the status block
 local modeTabs
 local entries = {}       -- current list
@@ -150,6 +150,11 @@ local function createPanel(parent)
     modeTabs[def[1]] = tab
     mx = mx + 72
   end
+
+  ledgerButton = Style.Button(panel, "Handelsbuch", 84, 20, function()
+    ns.Safe(ns.PlannerUI.Show, "ledger")
+  end)
+  ledgerButton:SetPoint("TOPRIGHT", -8, -5)
 
   durationButtons = {}
   local x = -8
@@ -294,6 +299,7 @@ function Selling.Refresh()
   for key, tab in pairs(modeTabs) do tab:SetActive(key == mode) end
   for _, b in pairs(durationButtons) do b:SetShown(mode == "sell") end
   control:SetShown(mode == "sniper")
+  ledgerButton:SetShown(mode ~= "sell")
   for i = 1, 4 do sniperLines[i]:SetShown(mode == "sniper") end
   sniperLines.rule:SetShown(mode == "sniper")
   status:SetShown(mode ~= "sniper")
