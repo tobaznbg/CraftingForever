@@ -340,9 +340,10 @@ handlers.ITEM_SEARCH_RESULTS_UPDATED = function(itemKey)
   local listings = {}
   for i = 1, (api.GetNumItemSearchResults(itemKey) or 0) do
     local r = api.GetItemSearchResultInfo(itemKey, i)
+    -- One result = r.quantity auctions of one item each at buyoutAmount (as TSM reads it:
+    -- quantity is the number of auctions, not a stack size).
     if r and r.buyoutAmount and r.buyoutAmount > 0 then
-      local n = r.quantity or 1
-      table.insert(listings, { unit = r.buyoutAmount / n, count = n, buyout = r.buyoutAmount,
+      table.insert(listings, { unit = r.buyoutAmount, count = r.quantity or 1, buyout = r.buyoutAmount,
         auctionID = r.auctionID, own = r.containsOwnerItem })
     end
   end
@@ -469,12 +470,11 @@ end
 handlers.AUCTION_HOUSE_PURCHASE_COMPLETED = function(auctionID)
   if not buying or buying.auction.auctionID ~= auctionID then return end
   local hit, a = buying.hit, buying.auction
-  bought(hit, a.count, a.buyout)
+  bought(hit, 1, a.buyout)
   note = "Gekauft: " .. ns.ItemName(hit.itemID) .. " für " .. ns.FormatMoney(a.buyout, true)
-  table.remove(hit.auctions, 1)
-  hit.units, hit.cost = hit.units - a.count, hit.cost - a.buyout
-  hit.profit = hit.profit - ((hit.ref * (1 - ns.Deals.CUT)) * a.count - a.buyout)
-  if #hit.auctions == 0 then hits[hit.key] = nil else hit.best = hit.auctions[1].unit end
+  -- The group's auction id is used up; search the item again right away for fresh ids.
+  hits[hit.key] = nil
+  table.insert(candidates, 1, { itemKey = hit.itemKey, itemID = hit.itemID, key = hit.key })
   buying = nil
   changed()
   later(0.5, nextStep)
