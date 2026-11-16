@@ -1,0 +1,35 @@
+## Interface: 16001
+## Title: CraftingForever
+## Notes: Tracks gathering and crafting value against its own auction house scans.
+## Author: Tobias Vonau
+## Version: 0.4.0-dev
+## SavedVariables: CraftingForeverDB
+
+Core.lua
+Style.lua
+Prices.lua
+Tracker.lua
+Data_Leatherworking.lua
+Recipes.lua
+Merchant.lua
+Planner.lua
+AuctionStats.lua
+Data_Market.lua
+Data_AH113.lua
+Data_Gathering.lua
+Data_FarmSpots.lua
+Market.lua
+Farming.lua
+Costs.lua
+Inventory.lua
+Deals.lua
+Selling.lua
+Sniper.lua
+BagMarks.lua
+Patterns.lua
+UI.lua
+PlannerUI.lua
+AuctionScan.lua
+AuctionProbe.lua
+Tooltip.lua
+VendorPrices.lua
