@@ -41,6 +41,8 @@ local SCALE = { money = 10000, pct = 0.01, num = 1 }
 
 local defs = {}       -- in tab order
 local created = false
+local detail = { t = nil, entry = nil, count = 1 }   -- detail panel state (see below)
+local showDetail      -- defined with the detail panel below, used by row clicks
 
 local function settings(t)
   ns.db.ahTable = ns.db.ahTable or {}
@@ -364,7 +366,6 @@ end
 -- Detail panel -------------------------------------------------------------------------
 
 local DETAIL_W, DETAIL_ROWS, DETAIL_ROW = 400, 14, 26
-local detail = { t = nil, entry = nil, count = 1 }
 
 local function renderDetail()
   local d, t = detail, detail.t
@@ -513,7 +514,7 @@ local function createDetail(parent)
   f:Hide()
 end
 
-local function showDetail(t, entry)
+function showDetail(t, entry)
   if not detail.frame then createDetail(AuctionHouseFrame) end
   if detail.entry ~= entry then detail.count = 1 end
   detail.t, detail.entry = t, entry
