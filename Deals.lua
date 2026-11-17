@@ -79,14 +79,16 @@ Deals.CUT = CUT
 -- price. Buying means clearing the stair below P: all foreign units cheaper than P are bought
 -- (N units, cost C) and sold again at resale = min(P - 1, cap). P is valid only when
 --   1. N <= perDay * sellDays (sells within sellDays; perDay = certain sales, else demand)
---   2. the foreign units in [P, P * 1.10] are >= MIDFIELD (a real middle field, no outlier)
+--   2. a real middle field: the foreign units in [P, P * 1.25] are at least MIDFIELD and at
+--      least as many as the units bought. Otherwise the cheap units ARE the market and the
+--      few above them are just overpriced offers (Bauplan: Thoriumpatronen, 20 cheap, 4 above)
 --   3. resale never above cap (ns.Item average, else the reference)
 --   4. every bought level pays off on its own: unit <= resale * (1 - CUT) * (1 - minGap)
 -- The P with the highest profit N * resale * (1 - CUT) - C wins.
 -- listings = { { unit, count, own }... }. Returns nil or
 --   { level = P, sellAt = resale, sellSource = "Mittelfeld" | "Ø-Obergrenze", buyUpTo, units,
 --     cost, profit, best, auctions = bought listings (cheapest first) }.
-Deals.MIDFIELD, Deals.MIDFIELD_SPAN = 3, 1.10
+Deals.MIDFIELD, Deals.MIDFIELD_SPAN = 3, 1.25
 function Deals.Staircase(listings, cap, perDay, set)
   if not cap or cap <= 0 then return nil end
   set = set or Deals.Settings()
@@ -115,7 +117,7 @@ function Deals.Staircase(listings, cap, perDay, set)
           if foreign[j].unit > P * Deals.MIDFIELD_SPAN then break end
           mid = mid + foreign[j].count
         end
-        ok = mid >= Deals.MIDFIELD
+        ok = mid >= Deals.MIDFIELD and mid >= units
       end
       if ok then
         local profit = units * resale * (1 - CUT) - cost

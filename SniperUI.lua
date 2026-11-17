@@ -87,6 +87,12 @@ local function itemList(parent, columns)
           GameTooltip:Show()
         end)
         r:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        -- Alt+click: item detail window (ItemDetail.lua).
+        r:SetScript("OnMouseUp", function(self, button)
+          if button == "LeftButton" and self.itemID and ns.ItemDetail then
+            ns.Safe(ns.ItemDetail.AltClick, self.itemID)
+          end
+        end)
         rows[i] = r
       end
       r.itemID = e.itemID

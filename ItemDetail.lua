@@ -1,23 +1,32 @@
--- SniperDetail: detail window for one item of the sniper list at the auction house,
--- docked right of the Selling panel (click on a hit row opens it, again or × closes it).
--- Shows why the offer is a hit (ns.Sniper hit + ns.Deals reference), the hourly price and
--- quantity of the last 48 hours (ns.Item.History), the item's market figures (ns.Item),
--- the offers of the sniper's last search (ns.Sniper.Listings) and the crafting cost
--- (ns.CraftInfo from Tooltip.lua). No own price logic here.
+-- ItemDetail: detail window for any item. With the auction house open it docks right of the
+-- AH panel (the Selling panel, else the auction house frame); otherwise it is a movable
+-- window of its own (position in ns.db.itemDetail), closed by × or ESC.
+-- Opened from everywhere: a click on a sniper hit at the auction house (Selling.lua),
+-- Alt+left click on an item (bags, bank, character, loot, chat links, Blizzard's AH lists via
+-- HandleModifiedItemClick; the addon's own tables via ItemDetail.AltClick) and /m4 item.
+-- Shows why the offer is a sniper hit (only while it is one), the hourly price and quantity
+-- of the last 48 hours (ns.Item.History), the market figures (ns.Item), the price stair
+-- (the sniper's last search, else the own full scan via ns.Item.Listings) and the crafting
+-- cost (ns.CraftInfo from Tooltip.lua). No own price logic here.
 local ADDON, ns = ...
 
 local Detail = {}
-ns.SniperDetail = Detail
+ns.ItemDetail = Detail
+ns.SniperDetail = Detail -- old name, kept for callers that still use it
 
 local WIDTH = 340
+local FREE_HEIGHT = 560 -- height as a window of its own (docked it follows the anchor)
 local LINE = 16
 local CHART_H, SLOTS = 96, 48
 local GREEN, ORANGE = "|cff5fd38d", "|cffffb547"
 
 local frame, body, scroll, itemID
+local origin   -- "sniper" when opened from the sniper list at the auction house
+local docked   -- anchor frame while docked at the auction house, nil as a window of its own
 local lines, sections = {}, {}
 local chart
-local render -- forward declared: used by Toggle/Refresh, defined below
+local render -- forward declared: used by Show/Toggle/Refresh, defined below
+local place  -- forward declared: used by create and the auction house events
 
 local function money(c) return ns.FormatMoney(c, true) end
 
@@ -25,7 +34,8 @@ local function ago(t)
   local s = math.max(0, time() - t)
   if s < 60 then return string.format("vor %d s", s) end
   if s < 3600 then return string.format("vor %d min", math.floor(s / 60)) end
-  return string.format("vor %d h", math.floor(s / 3600))
+  if s < 2 * 86400 then return string.format("vor %d h", math.floor(s / 3600)) end
+  return string.format("vor %d Tagen", math.floor(s / 86400))
 end
 
 local WEEKDAYS = { "So", "Mo", "Di", "Mi", "Do", "Fr", "Sa" }
@@ -269,11 +279,28 @@ end
 
 -- Content ------------------------------------------------------------------------------
 
-local function findRow(id)
-  local st = ns.Sniper.State()
-  for _, e in ipairs(st.rows) do
-    if e.itemID == id then return e end
+-- The sniper's current hit for the item, nil if it is none right now.
+local function currentHit(id)
+  if not (ns.Sniper and ns.Sniper.State) then return nil end
+  for _, e in ipairs(ns.Sniper.State().rows) do
+    if e.itemID == id and e.hit then return e.hit end
   end
+end
+
+-- Offers of the own full scan grouped by unit price, cheapest first, and the scan time.
+local function scanLevels(id)
+  local list, t = ns.Item.Listings(id)
+  if not list or #list == 0 then return nil end
+  local levels = {}
+  for _, l in ipairs(list) do
+    local last = levels[#levels]
+    if last and last.unit == l.unit then
+      last.count = last.count + l.count
+    else
+      table.insert(levels, { unit = l.unit, count = l.count })
+    end
+  end
+  return levels, t
 end
 
 render = function()
@@ -283,13 +310,12 @@ render = function()
   frame.icon:SetTexture(getIcon and getIcon(itemID) or nil)
   frame.name:SetText(ns.ItemName(itemID) or ("#" .. itemID))
   y, used, usedSections = 0, 0, 0
-  local row = findRow(itemID)
-  local h = row and row.hit
+  local h = currentHit(itemID)
   local item = ns.Item(itemID)
 
-  -- 1. Why it is a hit
-  section("Warum Treffer")
+  -- 1. Why it is a hit (only while the item is one)
   if h then
+    section("Warum Treffer")
     line("Kaufen", string.format("%dx bis %s  (zus. %s)", h.units, money(h.buyUpTo), money(h.cost)))
     line("Einstellen zu", money(h.sellAt) .. "  " .. Style.MUTED .. (h.sellSource or "") .. "|r")
     line("Obergrenze (Ø)", h.cap and money(h.cap) or "–")
@@ -299,8 +325,6 @@ render = function()
         Detail.Days(h.perDay), h.perDaySource or ""))
     end
     line("Treffer seit", ago(h.firstSeen or time()))
-  else
-    line("Kein Treffer (mehr)", row and row.price and money(row.price) or "")
   end
 
   -- 2. History of the last 48 hours
@@ -327,23 +351,30 @@ render = function()
   line("Nachfrage", demand or "–")
   line("Im AH", string.format("%s Angebote  ·  %s Stück", count(item.offers), count(item.quantity)))
 
-  -- 4. Price stair: offers of the sniper's last search; bought levels green, the level
-  -- the units are sold under highlighted.
-  local levels, t
-  if ns.Sniper.Listings then levels, t = ns.Sniper.Listings(itemID) end
-  section(levels and ("Preistreppe (letzte Suche " .. ago(t) .. ")") or "Preistreppe")
-  if not levels or #levels == 0 then
-    line(levels and "keine Angebote" or "noch nicht gesucht", "")
+  -- 4. Price stair: offers of the sniper's last search, else of the own full scan; left out
+  -- without either. With a hit: bought levels green, the level sold under highlighted.
+  local levels, t, from
+  if ns.Sniper and ns.Sniper.Listings then levels, t = ns.Sniper.Listings(itemID) end
+  local mark = h and levels -- hit markers only on the levels the hit was computed from
+  if levels then
+    from = "letzte Suche " .. ago(t)
   else
+    levels, t = scanLevels(itemID)
+    from = levels and ("Scan " .. ago(t or time()))
+  end
+  if levels then section("Preistreppe (" .. from .. ")") end
+  if levels and #levels == 0 then
+    line("keine Angebote", "")
+  elseif levels then
     local MAX = 9
     for i = 1, math.min(MAX, #levels) do
       local l = levels[i]
       local price, amount = money(l.unit), count(l.count) .. " Stück"
       if l.own then
         price = price .. Style.MUTED .. "  eigenes|r"
-      elseif h and l.unit <= h.buyUpTo then
+      elseif mark and l.unit <= h.buyUpTo then
         price, amount = GREEN .. price .. "  kaufen|r", GREEN .. amount .. "|r"
-      elseif h and l.unit == h.level then
+      elseif mark and l.unit == h.level then
         price = Style.ACCENT .. price .. "  einstellen knapp darunter|r"
       end
       line(price, amount)
@@ -365,19 +396,60 @@ render = function()
   if scroll.UpdateBar then scroll.UpdateBar() end
 end
 
-local function create(parent)
+-- Window ----------------------------------------------------------------------------
+
+local FRAME_NAME = "M4CompanionItemDetail"
+
+local function savePosition()
+  local point, _, relPoint, x, yy = frame:GetPoint()
+  if not (point and ns.db) then return end
+  ns.db.itemDetail = ns.db.itemDetail or {}
+  ns.db.itemDetail.pos = { point, relPoint, x, yy }
+end
+
+-- The AH panel to dock at: the Selling panel, else the auction house frame; nil when closed.
+local function dockAnchor()
+  local sell = ns.Selling and ns.Selling.Frame and ns.Selling.Frame()
+  if sell and sell:IsShown() then return sell end
+  local ah = AuctionHouseFrame
+  if ah and ah.IsShown and ah:IsShown() then return ah end
+end
+
+-- Docks right of `anchor` (or the current AH panel), else places the own window.
+place = function(anchor)
+  anchor = anchor or dockAnchor()
+  docked = anchor
+  frame:ClearAllPoints()
+  if anchor then
+    frame:SetPoint("TOPLEFT", anchor, "TOPRIGHT", 4, 0)
+    frame:SetPoint("BOTTOMLEFT", anchor, "BOTTOMRIGHT", 4, 0)
+  else
+    frame:SetHeight(FREE_HEIGHT)
+    local pos = ns.db and ns.db.itemDetail and ns.db.itemDetail.pos
+    if pos then
+      frame:SetPoint(pos[1], UIParent, pos[2], pos[3], pos[4])
+    else
+      frame:SetPoint("CENTER", UIParent, "CENTER", 260, 40)
+    end
+  end
+end
+
+local function create()
   local Style = ns.Style
-  frame = CreateFrame("Frame", "M4CompanionSniperDetail", parent)
+  frame = CreateFrame("Frame", FRAME_NAME, UIParent)
   frame:SetWidth(WIDTH)
-  frame:SetPoint("TOPLEFT", parent, "TOPRIGHT", 4, 0)
-  frame:SetPoint("BOTTOMLEFT", parent, "BOTTOMRIGHT", 4, 0)
   frame:SetFrameStrata("HIGH")
   frame:EnableMouse(true)
+  frame:SetMovable(true)
+  frame:SetClampedToScreen(true)
   Style.Panel(frame, 30)
+  -- ESC closes the window (Blizzard's CloseSpecialWindows).
+  if UISpecialFrames then tinsert(UISpecialFrames, FRAME_NAME) end
+  frame:SetScript("OnHide", function() origin = nil end)
   local close = Style.Close(frame, function() Detail.Hide() end)
   close:SetPoint("TOPRIGHT", -4, -4)
   frame.close = close
-  -- Head: icon and name, item tooltip on hover.
+  -- Head: icon and name, item tooltip on hover; dragging it moves the own window.
   local head = CreateFrame("Button", nil, frame)
   head:SetPoint("TOPLEFT", 6, -4)
   head:SetPoint("RIGHT", frame, "RIGHT", -32, 0)
@@ -396,6 +468,14 @@ local function create(parent)
     GameTooltip:Show()
   end)
   head:SetScript("OnLeave", function() GameTooltip:Hide() end)
+  head:RegisterForDrag("LeftButton")
+  head:SetScript("OnDragStart", function()
+    if not docked then frame:StartMoving() end
+  end)
+  head:SetScript("OnDragStop", function()
+    frame:StopMovingOrSizing()
+    if not docked then ns.Safe(savePosition) end
+  end)
   frame.head = head
   scroll, body = Style.Scroll(frame)
   scroll:SetPoint("TOPLEFT", 8, -36)
@@ -403,22 +483,124 @@ local function create(parent)
   frame:Hide()
 end
 
--- Opens the detail of the item next to `parent` (the Selling panel); a second click on
--- the same item closes it.
-function Detail.Toggle(id, parent)
-  if not frame then create(parent) end
-  if frame:IsShown() and itemID == id then return Detail.Hide() end
-  itemID = id
+-- Item id from an id, an item link or an item string; nil otherwise.
+local function toID(item)
+  if type(item) == "number" then return item end
+  if type(item) == "string" then return tonumber(item:match("item:(%d+)")) end
+end
+
+-- Opens the detail of the item (docked at the auction house or as a window of its own).
+--   opts.anchor  dock right of this frame instead of the current AH panel
+--   opts.origin  "sniper" when opened from the sniper list
+function Detail.Show(item, opts)
+  local id = toID(item)
+  if not id then return end
+  opts = opts or {}
+  if not frame then create() end
+  itemID, origin = id, opts.origin
+  place(opts.anchor)
   frame:Show()
   render()
 end
 
+-- Click on a sniper hit: opens the detail next to `parent` (the Selling panel); a second click
+-- on the same item closes it.
+function Detail.Toggle(id, parent)
+  if frame and frame:IsShown() and itemID == id then return Detail.Hide() end
+  Detail.Show(id, { anchor = parent, origin = "sniper" })
+end
+
 function Detail.Hide()
   if frame then frame:Hide() end
-  itemID = nil
+  itemID, origin = nil, nil
+end
+
+-- Closes the window only if it was opened from the sniper list (leaving the sniper mode).
+function Detail.HideSniper()
+  if origin == "sniper" then Detail.Hide() end
 end
 
 function Detail.IsShown() return frame ~= nil and frame:IsShown() end
 function Detail.ItemID() return frame and frame:IsShown() and itemID or nil end
 
 function Detail.Refresh() render() end
+
+-- Alt+left click without other modifiers.
+function Detail.IsAltClick()
+  return IsAltKeyDown and IsAltKeyDown() and not (IsShiftKeyDown and IsShiftKeyDown())
+    and not (IsControlKeyDown and IsControlKeyDown()) or false
+end
+
+-- For the addon's item tables: opens the detail on Alt+click and returns true; returns false
+-- otherwise, so the table keeps its normal click behaviour.
+function Detail.AltClick(item)
+  local id = toID(item)
+  if not id or not Detail.IsAltClick() then return false end
+  ns.Safe(Detail.Show, id)
+  return true
+end
+
+-- /m4 item <link | name | id>: the item id, or nil and a message.
+function Detail.Resolve(text)
+  text = (text or ""):gsub("^%s+", ""):gsub("%s+$", "")
+  if text == "" then return nil, "Item fehlt: /m4 item <Item-Link, Name oder ID>" end
+  local id = toID(text) or tonumber(text)
+  if id then return id end
+  local getInfo = (C_Item and C_Item.GetItemInfo) or GetItemInfo
+  local link = getInfo and select(2, getInfo(text))
+  id = toID(link)
+  if id then return id end
+  -- Names the addon ships (Data_ItemNames.lua): exact first, else one unique partial match.
+  local want = text:lower()
+  local partial = {}
+  for itemId, name in pairs(ns.ItemNames or {}) do
+    local lower = name:lower()
+    if lower == want then return itemId end
+    if lower:find(want, 1, true) then table.insert(partial, itemId) end
+  end
+  if #partial == 1 then return partial[1] end
+  if #partial > 1 then
+    table.sort(partial, function(a, b) return ns.ItemNames[a] < ns.ItemNames[b] end)
+    local names = {}
+    for i = 1, math.min(5, #partial) do names[i] = ns.ItemNames[partial[i]] end
+    return nil, string.format("%d Items passen zu „%s“: %s%s", #partial, text, table.concat(names, ", "),
+      #partial > 5 and ", …" or "")
+  end
+  return nil, "Item nicht gefunden: " .. text
+end
+
+function Detail.Open(text)
+  local id, err = Detail.Resolve(text)
+  if id then return Detail.Show(id) end
+  print("|cffffd100M4:|r " .. err)
+end
+
+-- Alt+left click on any item of the game UI (bags, bank, character, loot, chat links,
+-- Blizzard's auction house lists): a post hook, the original keeps running untouched.
+if hooksecurefunc and HandleModifiedItemClick then
+  hooksecurefunc("HandleModifiedItemClick", function(link)
+    if type(link) ~= "string" or not Detail.IsAltClick() then return end
+    local button = GetMouseButtonClicked and GetMouseButtonClicked()
+    if button and button ~= "LeftButton" then return end
+    local id = toID(link)
+    if id then ns.Safe(Detail.Show, id) end
+  end)
+end
+
+if ns.On then
+  -- The auction house opens: an open own window docks at it (after the Selling panel exists).
+  ns.On("AUCTION_HOUSE_SHOW", function()
+    if not C_Timer then return end
+    C_Timer.After(0.3, function()
+      if frame and frame:IsShown() and not docked then ns.Safe(place); ns.Safe(render) end
+    end)
+  end)
+  -- It closes: a docked window closes with it.
+  ns.On("AUCTION_HOUSE_CLOSED", function()
+    if docked then Detail.Hide() end
+  end)
+  -- The name arrives from the server after the window opened.
+  ns.On("GET_ITEM_INFO_RECEIVED", function(_, id)
+    if id == itemID then render() end
+  end)
+end

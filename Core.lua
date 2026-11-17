@@ -59,8 +59,27 @@ function ns.OnReady(fn)
   end
 end
 
+-- The companion app keeps a data addon (m4-companion_Data, global M4CompanionData) with the
+-- hourly cloud export. Its auction data replaces the copy shipped with this addon when it
+-- is newer, so every reader of ns.AHData gets the fresh one.
+local function adoptLiveData()
+  local live = rawget(_G, "M4CompanionData")
+  if type(live) ~= "table" or type(live.AHData) ~= "table" then return end
+  ns.AHData = ns.AHData or {}
+  for house, data in pairs(live.AHData) do
+    local own = ns.AHData[house]
+    if type(data) == "table" and data.items
+        and (not own or tostring(data.updated or "") > tostring(own.updated or "")) then
+      ns.AHData[house] = data
+    end
+  end
+end
+ns.AdoptLiveData = adoptLiveData
+
 ns.On("ADDON_LOADED", function(_, loadedName)
+  if loadedName == "m4-companion_Data" then adoptLiveData() return end
   if loadedName ~= ADDON then return end
+  adoptLiveData()
   M4CompanionDB = M4CompanionDB or {}
   local db = M4CompanionDB
   db.schema = 1

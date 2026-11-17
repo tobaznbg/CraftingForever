@@ -2,8 +2,12 @@
 -- here; nothing else reads price sources (collector export, own scans, searches).
 --
 -- ns.Item(itemID) -> {
---   now        cheapest offer right now (copper per unit), nil if not on offer; from
---              the newest of: collector snapshot, own full scan, single item searches
+--   now        market value right now (copper per unit), nil if not on offer: mean of the
+--              cheapest 15-30 % of the units listed, outliers dropped, so one lone cheap or
+--              lowball offer does not move it; from the newest of collector snapshot and own
+--              full scan. This is "AH jetzt" in every view.
+--   cheapest   the single cheapest offer right now (also from single item searches); only
+--              for views about single offers (sniper, merchant flips)
 --   offers, quantity   auctions / units listed at that time (internal, not shown)
 --   min, avg, max      lowest / average / highest hourly cheapest offer of the last
 --                      two weeks (collector; at the start blended with TSM start values)
@@ -78,18 +82,24 @@ function Item.Get(itemID)
   local bestT = -1
   if row then
     bestT = epoch(house.updated) or 0
-    e.now, e.offers, e.quantity = row[1], row[7], row[8]
+    e.cheapest, e.now, e.offers, e.quantity = row[1], row[2] or row[1], row[7], row[8]
   end
   local ah = ns.db and ns.db.ah
   if ah and ah.currentT and ah.currentT > bestT then
     local live = ah.current and ah.current[itemID]
     -- own scan row: { min, marketValue, quantity, offers, sellers }
-    e.now = live and live[1] and live[1] > 0 and live[1] or nil
+    e.cheapest = live and live[1] and live[1] > 0 and live[1] or nil
+    e.now = live and live[2] and live[2] > 0 and live[2] or e.cheapest
     e.quantity, e.offers = live and live[3] or 0, live and live[4] or 0
     bestT = ah.currentT
   end
   local o = observed[itemID]
-  if o and o.t > bestT then e.now = o.now end
+  if o and o.t > bestT then
+    e.cheapest = o.now
+    -- The cheap offers are gone: the market is at least where the cheapest one is now.
+    if o.now and e.now and o.now > e.now then e.now = o.now end
+    if not o.now then e.now = nil end
+  end
   if row then
     e.min, e.avg, e.max = row[11], row[12], row[13]
     e.demand, e.certain = row[18], row[19]
@@ -121,9 +131,18 @@ end
 -- Hourly history of the last 48 hours from the collector (Data_History.lua, only items
 -- the sniper may watch): { start = epoch of the first slot, step = 3600,
 --   prices = { cheapest offer per hour, 0 = not listed, false = no snapshot }, qty = {...} }
--- or nil.
+-- or nil. The live copy from the data addon (m4-companion_Data, kept current by the
+-- companion app, global M4CompanionData) wins over the one shipped with this addon.
+-- Looked up per call: the data addon loads after this one.
+local function historyTable()
+  local live = rawget(_G, "M4CompanionData")
+  if type(live) == "table" and type(live.History) == "table" then return live.History end
+  return ns.History
+end
+
 function Item.History(itemID)
-  local h = ns.History and ns.History[itemID]
+  local history = historyTable()
+  local h = history and history[itemID]
   if not h then return nil end
   return { start = h[1], step = h.step or 3600, prices = h.prices or {}, qty = h.qty or {} }
 end

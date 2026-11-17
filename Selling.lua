@@ -4,7 +4,8 @@
 -- every post).
 -- Mode "Sniper": the sniper's whole watch list live (ns.Sniper.State) with progress,
 -- last cheapest price and last check per item; hits on top with a buy button. A click on a
--- hit row opens the item's detail window (SniperDetail.lua) right of the panel.
+-- hit row opens the item's detail window (ItemDetail.lua) right of the panel.
+-- Alt+click on any row opens the detail too (ns.ItemDetail.AltClick).
 local ADDON, ns = ...
 
 local Selling = {}
@@ -169,7 +170,7 @@ local function sniperTooltip(self)
     GameTooltip:AddLine(" ")
     GameTooltip:AddLine(string.format("%dx kaufen bis %s  ·  einstellen zu %s", h.units, money(h.buyUpTo), money(h.sellAt)), 0.37, 0.83, 0.55)
     GameTooltip:AddLine(string.format("Gewinn ~%s%s", money(h.profit),
-      h.days and string.format("  ·  verkauft in ~%s Tagen", ns.SniperDetail.Days(h.days)) or ""), 0.37, 0.83, 0.55)
+      h.days and string.format("  ·  verkauft in ~%s Tagen", ns.ItemDetail.Days(h.days)) or ""), 0.37, 0.83, 0.55)
     if h.cost > GetMoney() then GameTooltip:AddLine("Gold reicht nicht für alle.", 1, 0.71, 0.28) end
   end
   GameTooltip:AddLine("Klick: Details", 0.31, 0.76, 0.63)
@@ -212,7 +213,7 @@ local function sniperRow(body, i)
   -- Click on the row (not the buy button): detail window right of the panel, again closes it.
   r:SetScript("OnMouseUp", function(self, button)
     if button ~= "RightButton" and self.entry then
-      ns.Safe(ns.SniperDetail.Toggle, self.entry.itemID, panel)
+      ns.Safe(ns.ItemDetail.Toggle, self.entry.itemID, panel)
       ns.Safe(Selling.Refresh)
     end
   end)
@@ -357,6 +358,9 @@ local function createPanel(parent)
       GameTooltip:Show()
     end)
     r:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    r:SetScript("OnMouseUp", function(self, button)
+      if button == "LeftButton" and self.entry then ns.Safe(ns.ItemDetail.AltClick, self.entry.itemID) end
+    end)
     rowsFrames[i] = r
   end
   control = Style.Button(panel, "Start", 70, 22, function()
@@ -401,7 +405,7 @@ local function refreshSniper()
   local pending = Sniper.Pending()
   local lines = Sniper.StatusLines()
   local v = sniperView
-  local detailID = ns.SniperDetail.ItemID()
+  local detailID = ns.ItemDetail.ItemID()
   local getIcon = (C_Item and C_Item.GetItemIconByID) or GetItemIcon
   -- Only hits (offers worth buying); the watched items are on the main window's Sniper page.
   local shown, current = {}, nil
@@ -455,8 +459,11 @@ local function refreshSniper()
   control.label:SetText(Sniper.NeedsClick() and "Suchen" or (Sniper.IsRunning() and "Stop" or "Start"))
   for i = 2, 4 do sniperLines[i]:SetText(lines[i] or "") end
   status:SetText("")
-  ns.SniperDetail.Refresh()
+  ns.ItemDetail.Refresh()
 end
+
+-- The panel at the auction house (the item detail docks right of it), nil before the first visit.
+function Selling.Frame() return panel end
 
 function Selling.Refresh()
   if not panel or not panel:IsShown() then return end
@@ -469,7 +476,7 @@ function Selling.Refresh()
   sniperLines.rule:SetShown(mode == "sniper")
   sniperView:SetShown(mode == "sniper")
   status:SetShown(mode ~= "sniper")
-  if mode ~= "sniper" then ns.SniperDetail.Hide() end
+  if mode ~= "sniper" then ns.ItemDetail.HideSniper() end
   if mode == "sniper" then
     for _, r in ipairs(rowsFrames) do r.entry, r.button.entry = nil, nil; r:Hide() end
     return refreshSniper()
@@ -537,7 +544,7 @@ ns.On("AUCTION_HOUSE_SHOW", function()
 end)
 ns.On("AUCTION_HOUSE_CLOSED", function()
   queue, searching = {}, nil
-  ns.SniperDetail.Hide()
+  ns.ItemDetail.HideSniper()
   if panel then panel:Hide() end
 end)
 ns.On("BAG_UPDATE_DELAYED", function() ns.Safe(Selling.Refresh) end)

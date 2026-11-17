@@ -494,11 +494,13 @@ local function createFrame(t, parent, embedded)
       GameTooltip:Show()
     end)
     r:SetScript("OnLeave", function() hover:Hide(); GameTooltip:Hide() end)
-    if t.detail then
-      r:SetScript("OnMouseUp", function(self, button)
-        if button == "LeftButton" and self.entry then ns.Safe(showDetail, t, self.entry) end
-      end)
-    end
+    -- Alt+click: item detail window (ItemDetail.lua); a plain click keeps the table's own
+    -- behaviour (the crafting detail panel where the table has one).
+    r:SetScript("OnMouseUp", function(self, button)
+      if button ~= "LeftButton" or not self.entry then return end
+      if ns.ItemDetail and ns.ItemDetail.AltClick(self.entry.itemID) then return end
+      if t.detail then ns.Safe(showDetail, t, self.entry) end
+    end)
     t.rowFrames[i] = r
   end
   layoutRows(t)
@@ -722,7 +724,11 @@ local function createDetail(parent)
       r.cells[j] = fs
     end
     -- Click: search the reagent in Blizzard's buy tab.
-    r:SetScript("OnClick", function(self) if self.itemID then search(self.itemID) end end)
+    r:SetScript("OnClick", function(self)
+      if not self.itemID then return end
+      if ns.ItemDetail and ns.ItemDetail.AltClick(self.itemID) then return end
+      ns.Safe(search, self.itemID)
+    end)
     r:SetScript("OnEnter", function(self)
       hover:Show()
       if not self.itemID then return end

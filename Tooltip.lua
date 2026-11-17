@@ -150,6 +150,8 @@ local function addLines(tooltip, itemID)
     tooltip:AddDoubleLine(C .. "Händler zahlt", item.vendorSell and ns.FormatMoney(item.vendorSell) or "nichts",
       1, 1, 1, 1, 1, 1)
   end
+  -- Where the full detail opens (ItemDetail.lua); switchable like the other lines.
+  if on("hint") then tooltip:AddLine(C .. "Alt+Klick: Details", 0.55, 0.55, 0.55) end
   tooltip:Show()
 end
 

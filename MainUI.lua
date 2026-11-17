@@ -62,6 +62,7 @@ local DURATIONS = { [1] = 12 * 3600, [2] = 24 * 3600, [3] = 48 * 3600 }
 local TOOLTIP_LINES = {
   { "price", "Preis" }, { "range", "Preisspanne" }, { "trend", "Trend" },
   { "demand", "Nachfrage" }, { "crafting", "Crafting" }, { "advice", "Empfehlung" }, { "vendor", "Händlerpreis" },
+  { "hint", "Hinweis „Alt+Klick: Details“" },
 }
 
 local frame, statusText
@@ -280,7 +281,11 @@ local function grid(parent, w, h, columns, opts)
       end
     end)
     r:SetScript("OnLeave", function(self) self.hover:Hide(); GameTooltip:Hide() end)
-    r:SetScript("OnClick", function(self) if self.onClick then ns.Safe(self.onClick) end end)
+    -- Alt+click on an item row: item detail window (ItemDetail.lua); a plain click keeps onClick.
+    r:SetScript("OnClick", function(self)
+      if self.itemID and ns.ItemDetail and ns.ItemDetail.AltClick(self.itemID) then return end
+      if self.onClick then ns.Safe(self.onClick) end
+    end)
     rows[i] = r
     return r
   end

@@ -206,8 +206,13 @@ end
 SLASH_M4COMPANION1 = "/cf"
 SLASH_M4COMPANION2 = "/m4"
 SlashCmdList.M4COMPANION = function(msg)
-  msg = strtrim(msg or ""):lower()
-  if msg == "neu" or msg == "new" then
+  local raw = strtrim(msg or "")
+  msg = raw:lower()
+  local cmd, rest = raw:match("^(%S+)%s*(.-)$")
+  if cmd and cmd:lower() == "item" then
+    -- /m4 item <link, name or id>: the item detail window. Keeps the case of names and links.
+    ns.Safe(ns.ItemDetail.Open, rest)
+  elseif msg == "neu" or msg == "new" then
     ns.Tracker.Start()
     print("|cffffd100M4:|r neue Sitzung gestartet.")
     UI.SetShown(true)
@@ -220,7 +225,7 @@ SlashCmdList.M4COMPANION = function(msg)
   elseif msg == "farm" then
     UI.SetShown(not (frame and frame:IsShown()))
   elseif msg == "hilfe" or msg == "help" then
-    print("|cffffd100M4:|r /m4 – Fenster, /m4 handel – Handelsbuch, /m4 scan – AH-Vollscan, /m4 farm – Farm-Tracker")
+    print("|cffffd100M4:|r /m4 – Fenster, /m4 handel – Handelsbuch, /m4 scan – AH-Vollscan, /m4 farm – Farm-Tracker, /m4 item <Link/Name/ID> – Item-Details (oder Alt+Klick aufs Item)")
   else
     if ns.MainUI then ns.MainUI.Toggle() else ns.PlannerUI.Toggle() end
   end
