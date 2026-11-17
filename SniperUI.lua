@@ -135,7 +135,7 @@ local function build(page, width, height)
   -- Settings ---------------------------------------------------------------------
   local settings = card(page, "Einstellungen")
   settings:SetPoint("TOPLEFT", PAD, -PAD)
-  settings:SetSize(leftW, 346)
+  settings:SetSize(leftW, 372)
   local function set(key, v) Deals.Set(key, v) end
   local updates = {}
   local function S() return Deals.Settings() end
@@ -194,6 +194,8 @@ local function build(page, width, height)
   table.insert(updates, stepper(settings, -294, "Maximalpreis pro Item",
     function() return S().maxPrice == 0 and "Kein Limit" or money(S().maxPrice) end,
     function() stepMaxPrice(-1) end, function() stepMaxPrice(1) end))
+  table.insert(updates, toggle(settings, -320, "Fallende Items auslassen",
+    function() return S().skipFalling end, function() set("skipFalling", not S().skipFalling) end))
   local reset = Style.Button(settings, "Standard", 80, 18, function()
     ns.db.settings.sniper = nil
   end)

@@ -21,8 +21,19 @@ Deals.DEFAULTS = {
   minGap = 0.15,        -- price stair: every bought level at least 15 % below the net resale price
   recipeWatch = true,   -- watch the tradeable recipes of ns.RecipeWatch as well (own category)
   recipeMax = 0.7,      -- recipe hit: offer at most this share of its usual price (most are listed near it)
+  skipFalling = true,   -- leave out items whose price is falling (Deals.Falling): buying into a falling
+                        -- market means reselling below today's price
 }
 local CUT = 0.05
+
+-- An item whose price is falling (cloud trend, ns.Item): the 3-day average below the 7- and
+-- 14-day ones (direction -1), or at least FALLING_PPO below the 14-day one. Same rule as the
+-- cloud's snipes (collector ahnotify.falling).
+Deals.FALLING_PPO = -0.10
+function Deals.Falling(itemID)
+  local e = ns.Item(itemID)
+  return e.direction == -1 or (e.trend ~= nil and e.trend <= Deals.FALLING_PPO)
+end
 
 function Deals.Settings()
   local s = ns.db and ns.db.settings and ns.db.settings.sniper or {}

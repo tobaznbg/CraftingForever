@@ -114,7 +114,8 @@ function Sniper.WatchCandidates()
     if candidateLimit and set.maxPrice > 0 then candidateLimit = math.min(candidateLimit, set.maxPrice) end
     -- Maximalpreis also limits the watch list: no items whose usual price is above it.
     local tooExpensive = avg and set.maxPrice > 0 and avg > set.maxPrice
-    if avg and not tooExpensive and demand and demand >= set.watchMinDemand and candidateLimit <= money then
+    local falling = set.skipFalling and ns.Deals.Falling(itemID)
+    if avg and not tooExpensive and not falling and demand and demand >= set.watchMinDemand and candidateLimit <= money then
       local stack = math.max(1, math.min(20, (item.quantity or 1) / math.max(1, item.offers or 1)))
       if discount * avg * stack >= set.minProfit then
         table.insert(list, { itemID = itemID, score = avg * math.min(demand, 20), avg = avg, demand = demand })
@@ -366,6 +367,8 @@ local function evaluate(c, listings, commodity)
   -- sales assume at most one unit a day.
   local perDay, perDaySource = item.demand and math.min(item.demand, 1), "vorsichtig geschätzt"
   if item.certain and item.certain > 0 then perDay, perDaySource = item.certain, "sicher verkauft" end
+  -- Falling price: no hit (the resale price would not hold).
+  if set.skipFalling and ns.Deals.Falling(c.itemID) then return nil end
   local stair = ns.Deals.Staircase(listings, cap, perDay, set)
   if not stair or stair.profit < ns.Deals.MinProfit() then return nil end
   local hit = { key = c.key, itemKey = c.itemKey, itemID = c.itemID, commodity = commodity, ref = ref,
