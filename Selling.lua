@@ -22,7 +22,7 @@ local sniperView         -- watch list view of the sniper mode (createSniperView
 local SNIPER_ROW = 20
 local GREEN, MUTED = "|cff5fd38d", "|cff99999e"
 -- Sniper columns right of the item name: buy up to, cheapest now, checked.
-local SNIPER_COLS = { { "Kauf bis", 62 }, { "billigst jetzt", 74 }, { "geprüft", 58 } }
+local SNIPER_COLS = { { "Kauf bis", 62 }, { "Angebot", 74 }, { "", 58 } }
 local modeTabs
 local entries = {}       -- current list
 local live = {}          -- itemID -> { price, own, t } from live searches
@@ -240,6 +240,12 @@ local function createSniperView()
   v.scroll:SetPoint("TOPLEFT", 0, -36)
   v.scroll:SetPoint("BOTTOMRIGHT", -10, 0)
   v.rows = {}
+  -- Shown while there is no hit: the list only holds what is worth buying.
+  v.empty = Style.Text(v, 11)
+  v.empty:SetPoint("TOPLEFT", 8, -44)
+  v.empty:SetPoint("RIGHT", -8, 0)
+  v.empty:SetJustifyH("LEFT")
+  v.empty:SetTextColor(unpack(Style.C.muted))
   return v
 end
 
@@ -386,8 +392,22 @@ local function refreshSniper()
   local lines = Sniper.StatusLines()
   local v = sniperView
   local getIcon = (C_Item and C_Item.GetItemIconByID) or GetItemIcon
-  v.body:SetSize(WIDTH - 26, math.max(1, #st.rows * SNIPER_ROW))
-  for i, e in ipairs(st.rows) do
+  -- Only hits (offers worth buying); the watched items are on the main window's Sniper page.
+  local shown, current = {}, nil
+  for _, e in ipairs(st.rows) do
+    if e.hit then table.insert(shown, e) end
+    if e.current then current = e end
+  end
+  if #shown == 0 then
+    local text = "Noch kein Treffer."
+    if current then text = text .. "\nPrüfe gerade: " .. (ns.ItemName(current.itemID) or ("#" .. current.itemID)) end
+    v.empty:SetText(text .. "\n\nBeobachtete Items: Hauptfenster (/m4) → Sniper")
+    v.empty:Show()
+  else
+    v.empty:Hide()
+  end
+  v.body:SetSize(WIDTH - 26, math.max(1, #shown * SNIPER_ROW))
+  for i, e in ipairs(shown) do
     local r = v.rows[i]
     if not r then r = sniperRow(v.body, i); v.rows[i] = r end
     local h = e.hit
@@ -412,7 +432,7 @@ local function refreshSniper()
     r.stripe:SetShown((h or e.current or i % 2 == 0) and true or false)
     r:Show()
   end
-  for i = #st.rows + 1, #v.rows do
+  for i = #shown + 1, #v.rows do
     v.rows[i].entry, v.rows[i].button.entry = nil, nil
     v.rows[i]:Hide()
   end
