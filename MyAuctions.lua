@@ -214,13 +214,16 @@ local ORDER = { under = 1, failed = 2, unknown = 3, best = 4, alone = 5, bid = 6
 function My.Rows()
   local groups, order = {}, {}
   for _, a in ipairs(owned) do
-    local g = groups[a.itemID]
-    if not g then
-      g = { itemID = a.itemID, itemKey = a.itemKey, list = {} }
-      groups[a.itemID] = g
-      table.insert(order, g)
+    -- Sold auctions only wait for the mail: not shown.
+    if not a.sold then
+      local g = groups[a.itemID]
+      if not g then
+        g = { itemID = a.itemID, itemKey = a.itemKey, list = {} }
+        groups[a.itemID] = g
+        table.insert(order, g)
+      end
+      table.insert(g.list, a)
     end
-    table.insert(g.list, a)
   end
   local rows = {}
   for _, g in ipairs(order) do
