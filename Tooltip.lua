@@ -9,7 +9,9 @@ local function addLines(tooltip, itemID)
   if item.now then
     local change = item.change and string.format("  (%+d %% zu gestern)",
       math.floor(item.change * 100 + (item.change >= 0 and 0.5 or -0.5))) or ""
-    tooltip:AddDoubleLine(C .. "AH jetzt", ns.FormatMoney(item.now) .. change, 1, 1, 1, 1, 1, 1)
+    local unsure = ns.Item.Unsure(item)
+    tooltip:AddDoubleLine(C .. "AH jetzt", ns.FormatMoney(item.now) .. change .. (unsure and "  unsicher" or ""),
+      1, 1, 1, 1, unsure and 0.71 or 1, unsure and 0.28 or 1)
   else
     tooltip:AddLine(C .. "nicht im AH", 0.7, 0.7, 0.7)
   end

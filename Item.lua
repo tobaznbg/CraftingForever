@@ -145,6 +145,12 @@ function Item.BuyCost(e)
   return e.now or e.avg, false
 end
 
+-- The current price is far from the average (more than 50 % above or below): a single
+-- offer that may not be the market. Views mark such prices as "unsicher".
+function Item.Unsure(e)
+  return e.now ~= nil and e.avg ~= nil and e.avg > 0 and (e.now > e.avg * 1.5 or e.now < e.avg * 0.5)
+end
+
 function Item.Value(e)
   return (Item.SellNet(e))
 end

@@ -86,6 +86,7 @@ local function rows(filter, professionID)
           local group = learned and 0 or (tooHigh and 2 or 1)
           table.insert(list, { itemID = out, recipe = rec[1], profession = data.name,
             score = (2 - group) * 1e12 + profit, learned = learned, learn = learn, tooHigh = tooHigh,
+            unsure = ns.Item.Unsure(ns.Item(out)), nowPrice = ns.Item(out).now,
             cost = cost, value = value, profit = profit, onAH = onAH, demand = ns.Item(out).demand or 0,
             produced = quantity, reagents = reagents })
         end
@@ -93,6 +94,33 @@ local function rows(filter, professionID)
     end
   end
   return list
+end
+
+-- Material cost per unit of an item the character can make with a learned recipe (the
+-- cheapest such recipe), or nil. Used as the lowest sensible selling price.
+function ns.CraftingCost(itemID)
+  local best
+  for pid, mine in pairs(ownScans()) do
+    local known = mine.byItem[itemID]
+    if known and known.r.learned then
+      local data = ns.RecipeData and ns.RecipeData[pid]
+      for _, rec in pairs(data and data.recipes or {}) do
+        if rec[2] == itemID then
+          local cost, list = 0, rec[4] or {}
+          for i = 1, #list, 2 do
+            local unit = buy(list[i])
+            if not unit then cost = nil break end
+            cost = cost + unit * list[i + 1]
+          end
+          if cost then
+            cost = cost / (rec[3] or 1)
+            if not best or cost < best then best = cost end
+          end
+        end
+      end
+    end
+  end
+  return best
 end
 
 -- Crafting professions for the chooser, ranked by the cloud's rating (Data_Professions.lua):
@@ -147,7 +175,8 @@ local function detail(e, count)
     { string.format("%d× herstellen", count), string.format("ergibt %g Stück", produced) },
     { "Material gesamt", money(total) },
     { "davon noch kaufen", "|cffffb547" .. money(buyTotal) .. "|r" },
-    { "Verkauf netto", money(value) },
+    { "Verkauf netto", money(value) .. (e.unsure and e.nowPrice
+      and ("  |cffffb547(jetzt " .. money(e.nowPrice) .. ", unsicher)|r") or "") },
     { "Gewinn", (profit >= 0 and "|cff5fd38d" or "|cffff6b6b-") .. money(math.abs(profit)) .. "|r" },
     { "dein Gold", money(GetMoney()) },
   }
@@ -183,7 +212,10 @@ ns.AHTable.Add({
     { key = "cost", title = "Material", width = 95, muted = true, filter = "money",
       fmt = function(e) return money(e.cost) end },
     { key = "value", title = "Verkauf", width = 95, filter = "money",
-      fmt = function(e) return (e.onAH and "" or "|cff99999eH |r") .. money(e.value) end },
+      fmt = function(e)
+        local text = (e.onAH and "" or "|cff99999eH |r") .. money(e.value)
+        return e.unsure and ("|cffffb547" .. text .. " ?|r") or text
+      end },
     { key = "profit", title = "Gewinn", width = 95, filter = "money", fmt = function(e)
       return (e.profit >= 0 and "|cff5fd38d" or "|cffff6b6b") .. (e.profit < 0 and "-" or "")
         .. money(math.abs(e.profit)) .. "|r"

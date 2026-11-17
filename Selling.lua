@@ -113,6 +113,12 @@ local function askPrice(e)
     return nil, "kein Angebot – Preis selbst setzen"
   end
   if ask * (1 - ns.Item.CUT) <= vendor then return nil, "unter Händlerpreis" end
+  -- Lowest sensible price: what it costs to make (own learned recipe) or the average,
+  -- whichever is higher. Below it, better wait than join the undercutting.
+  local floor = math.max(ns.CraftingCost and ns.CraftingCost(e.itemID) or 0, item.avg or 0)
+  if floor > 0 and ask < floor then
+    return ask, "unter Mindestpreis " .. money(floor) .. " – besser liegen lassen", true
+  end
   local warn
   if item.avg and ask < item.avg * CRASH_SHARE then
     warn = string.format("%d %% unter Ø", math.floor((1 - ask / item.avg) * 100))
@@ -297,12 +303,12 @@ function Selling.Refresh()
       local qty = commodity and e.n or 1
       r.icon:SetTexture(((C_Item and C_Item.GetItemIconByID) or GetItemIcon)(e.itemID))
       r.name:SetText(ns.ItemName(e.itemID))
-      local ask, note = askPrice(e)
+      local ask, note, belowFloor = askPrice(e)
       if ask then
         local deposit = commodity and api.CalculateCommodityDeposit and api.CalculateCommodityDeposit(e.itemID, duration, qty)
           or (api.CalculateItemDeposit and api.CalculateItemDeposit(e.location, duration, qty))
         r.price:SetText(money(ask))
-        r.button.label:SetText("Einstellen")
+        r.button.label:SetText(belowFloor and "Trotzdem" or "Einstellen")
         r.info:SetText(string.format("%dx  ·  Gebühr %s%s", qty, money(deposit or 0),
           note and ("  ·  |cffffb547" .. note .. "|r") or ""))
         r.button:Show()

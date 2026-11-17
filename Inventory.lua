@@ -10,7 +10,7 @@ local CUT = 0.05
 -- The auction house is worth the effort when it beats the vendor by 20 % per unit
 -- and by at least 10 silver for the whole stack.
 local AH_OVER_VENDOR = 1.2
-local AH_MIN_GAIN = 1000
+local AH_MIN_GAIN = 100     -- AH must bring at least 1 silver more than the merchant (whole stack)
 local CLASS_CONSUMABLE, CLASS_QUEST = 0, 12
 -- Consumables you use yourself: potion, elixir, flask, scroll, food, enhancement, bandage.
 -- Other consumables (e.g. Forever's intercepted crates) are judged like goods.
