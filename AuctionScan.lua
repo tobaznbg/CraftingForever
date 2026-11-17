@@ -341,12 +341,25 @@ local function createButton()
   button:HookScript("OnLeave", function() GameTooltip:Hide() end)
 end
 
+-- Opening the auction house starts the full scan by itself (every 15 min at most).
+-- If the game demands a click for it (ADDON_ACTION_BLOCKED), auto scans stop for the
+-- session and the tabs start the scan on their click instead (EnsureFresh).
+local autoBlocked = false
+ns.On("ADDON_ACTION_BLOCKED", function(_, addon, fn)
+  if addon == ADDON and type(fn) == "string" and fn:find("ReplicateItems") then
+    autoBlocked = true
+    if state then abort() end
+  end
+end)
+
 ns.On("AUCTION_HOUSE_SHOW", function()
   -- The auction UI is load-on-demand; its frame exists only from now on.
   C_Timer.After(0, function()
     ns.Safe(createButton)
     if button then button:Show() end
-    print("|cffffd100CraftingForever:|r Vollscan mit dem Knopf \"CF Scan\" unter dem AH-Fenster oder mit /cf scan.")
+  end)
+  C_Timer.After(1, function()
+    if not autoBlocked then ns.Safe(Scan.EnsureFresh) end
   end)
 end)
 ns.On("AUCTION_HOUSE_CLOSED", abort)
