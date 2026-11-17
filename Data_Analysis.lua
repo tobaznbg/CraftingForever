@@ -1,0 +1,3 @@
+-- Market analysis from the collector (ahmarket.py). Placeholder until the first export.
+local ADDON, ns = ...
+ns.MarketAnalysis = nil

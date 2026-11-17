@@ -1,0 +1,3 @@
+-- Profit: profit and loss per profession from the trading ledger (placeholder, being built).
+local ADDON, ns = ...
+ns.Profit = ns.Profit or {}
