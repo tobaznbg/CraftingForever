@@ -26,7 +26,7 @@ local function addLines(tooltip, itemID)
   local row = house and house.items[itemID]
   if row and row[11] then
     -- Until 14 days of own data exist, the collector blends in the TSM start value.
-    tooltip:AddDoubleLine(C .. "14 Tage min / Ø / max",
+    tooltip:AddDoubleLine(C .. "min / Ø / max",
       ns.FormatMoney(row[11]) .. " / " .. ns.FormatMoney(row[12]) .. " / " .. ns.FormatMoney(row[13]),
       0.7, 0.7, 0.7, 1, 1, 1)
   end
