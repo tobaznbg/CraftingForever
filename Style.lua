@@ -1,4 +1,4 @@
--- Style: flat, dark look for all CraftingForever windows (no Blizzard templates).
+-- Style: flat, dark look for all m4-companion windows (no Blizzard templates).
 -- Solid panels with a one-pixel border, flat buttons and tabs, a thin scrollbar
 -- and a single font family.
 local ADDON, ns = ...
@@ -31,7 +31,7 @@ local fonts = {}
 function Style.Font(size, flags)
   local key = size .. (flags or "")
   if not fonts[key] then
-    local font = CreateFont("CraftingForeverFont" .. key:gsub("%W", ""))
+    local font = CreateFont("M4CompanionFont" .. key:gsub("%W", ""))
     font:SetFont(FONT, size, flags or "")
     font:SetTextColor(unpack(Style.C.text))
     fonts[key] = font

@@ -1,9 +1,9 @@
 ## Interface: 16001
-## Title: CraftingForever
+## Title: m4-companion
 ## Notes: Tracks gathering and crafting value against its own auction house scans.
 ## Author: Tobias Vonau
-## Version: 0.4.0-dev
-## SavedVariables: CraftingForeverDB
+## Version: 0.5.0
+## SavedVariables: M4CompanionDB
 
 Core.lua
 Style.lua

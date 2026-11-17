@@ -141,7 +141,7 @@ end
 
 local function createPanel(parent)
   local Style = ns.Style
-  panel = CreateFrame("Frame", "CraftingForeverSelling", parent)
+  panel = CreateFrame("Frame", "M4CompanionSelling", parent)
   panel:SetWidth(WIDTH)
   panel:SetPoint("TOPLEFT", parent, "TOPRIGHT", 4, 0)
   panel:SetPoint("BOTTOMLEFT", parent, "BOTTOMRIGHT", 4, 0)

@@ -549,7 +549,7 @@ end
 
 local function createDetail(parent)
   local Style = ns.Style
-  local f = CreateFrame("Frame", "CraftingForeverAHDetail", parent)
+  local f = CreateFrame("Frame", "M4CompanionAHDetail", parent)
   detail.frame = f
   f:SetWidth(DETAIL_W)
   f:SetPoint("TOPLEFT", parent, "TOPRIGHT", 4, 0)
@@ -712,7 +712,7 @@ local function createAll(parent)
   local offsetX = 3
   for _, t in ipairs(defs) do
     createFrame(t, parent)
-    local tab = CreateFrame("Button", "CraftingForeverAHTab" .. t.id, parent, "AuctionHouseFrameDisplayModeTabTemplate")
+    local tab = CreateFrame("Button", "M4CompanionAHTab" .. t.id, parent, "AuctionHouseFrameDisplayModeTabTemplate")
     t.tab = tab
     tab:SetText(t.label)
     PanelTemplates_TabResize(tab, 20, nil, 70)

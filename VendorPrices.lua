@@ -1,7 +1,7 @@
 -- VendorPrices: records what merchants pay for every item seen in the auction
 -- house, straight from the client's item data. Forever changed many vendor
 -- prices, so outside data (classic values) cannot be trusted for this.
--- Result: CraftingForeverDB.vendorSell[itemID] = copper (0 = cannot be sold).
+-- Result: M4CompanionDB.vendorSell[itemID] = copper (0 = cannot be sold).
 local ADDON, ns = ...
 
 local BATCH = 100      -- items per step

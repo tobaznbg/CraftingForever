@@ -8,7 +8,7 @@ local MAX_ERRORS = 50
 
 -- Errors are kept in the saved variables so they can be read outside the game.
 local function logError(err, stack)
-  local db = CraftingForeverDB
+  local db = M4CompanionDB
   if type(db) == "table" then
     db.errors = db.errors or {}
     table.insert(db.errors, { t = time(), e = tostring(err), s = stack })
@@ -16,7 +16,7 @@ local function logError(err, stack)
       table.remove(db.errors, 1)
     end
   end
-  print("|cffff5555CraftingForever Fehler:|r " .. tostring(err))
+  print("|cffff5555M4 Fehler:|r " .. tostring(err))
 end
 
 local function errorHandler(err)
@@ -61,8 +61,8 @@ end
 
 ns.On("ADDON_LOADED", function(_, loadedName)
   if loadedName ~= ADDON then return end
-  CraftingForeverDB = CraftingForeverDB or {}
-  local db = CraftingForeverDB
+  M4CompanionDB = M4CompanionDB or {}
+  local db = M4CompanionDB
   db.schema = 1
   db.errors = db.errors or {}
   db.chars = db.chars or {}

@@ -2,7 +2,7 @@
 -- Supports the classic auction API (QueryAuctionItems getAll) and the modern one
 -- (C_AuctionHouse.ReplicateItems); which one the client has is detected at runtime.
 --
--- Stored in CraftingForeverDB.ah:
+-- Stored in M4CompanionDB.ah:
 --   last     { t, items = { [itemID] = { fingerprint, ... } } }  previous scan, for the diff
 --   current  { [itemID] = { min, mv, qty, n, sellers } }         latest scan summary
 --   days     { [dayKey] = { [itemID] = day row } }               see AuctionStats.AddToDay
@@ -16,7 +16,7 @@ local THROTTLE = 15 * 60       -- the server allows a full scan every 15 minutes
 local BATCH = 200              -- listings read per frame
 local ITEM_BATCH = 300         -- items processed per frame when saving
 local MAX_DIFF_AGE = 24 * 3600 -- older previous scans say nothing about sales
-local PREFIX = "|cffffd100CraftingForever:|r "
+local PREFIX = "|cffffd100M4:|r "
 
 local state -- running scan: { api, started, listings = { [itemID] = { ... } }, count }
 local button
@@ -329,7 +329,7 @@ local function createButton()
   button:SetScript("OnClick", function() ns.Safe(Scan.Start) end)
   button:HookScript("OnEnter", function(self)
     GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
-    GameTooltip:AddLine("CraftingForever: Vollscan")
+    GameTooltip:AddLine("M4: Vollscan")
     local wait = Scan.Wait()
     if wait > 0 then
       GameTooltip:AddLine(string.format("Wieder möglich in %d:%02d", math.floor(wait / 60), wait % 60), 1, 1, 1)

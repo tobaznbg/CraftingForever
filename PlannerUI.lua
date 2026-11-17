@@ -571,7 +571,7 @@ local TABBAR = 30
 
 local function createFrame()
   local Style = ns.Style
-  frame = CreateFrame("Frame", "CraftingForeverPlanner", UIParent)
+  frame = CreateFrame("Frame", "M4CompanionPlanner", UIParent)
   frame:SetSize(WIDTH, HEIGHT)
   frame:SetFrameStrata("HIGH")
   frame:SetClampedToScreen(true)
@@ -591,7 +591,7 @@ local function createFrame()
   else
     frame:SetPoint("CENTER")
   end
-  table.insert(UISpecialFrames, "CraftingForeverPlanner") -- Escape closes it
+  table.insert(UISpecialFrames, "M4CompanionPlanner") -- Escape closes it
 
   local brand = Style.Text(frame, 14)
   brand:SetPoint("TOPLEFT", 14, -10)

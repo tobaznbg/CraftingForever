@@ -23,7 +23,7 @@ local HEADER = 26
 
 local function createFrame()
   local Style = ns.Style
-  frame = CreateFrame("Frame", "CraftingForeverFrame", UIParent)
+  frame = CreateFrame("Frame", "M4CompanionFrame", UIParent)
   frame:SetSize(WIDTH, 190)
   frame:SetFrameStrata("MEDIUM")
   frame:SetClampedToScreen(true)
@@ -64,15 +64,15 @@ local function createFrame()
   local controls = {
     { "Start", Style.C.accent, function()
         ns.Tracker.Start()
-        print("|cffffd100CraftingForever:|r neue Sitzung gestartet.")
+        print("|cffffd100M4:|r neue Sitzung gestartet.")
       end },
     { "Stop", { 1, 0.71, 0.28 }, function()
         ns.Tracker.Stop()
-        print("|cffffd100CraftingForever:|r Tracker gestoppt – es wird nichts mehr gezählt.")
+        print("|cffffd100M4:|r Tracker gestoppt – es wird nichts mehr gezählt.")
       end },
     { "Reset", nil, function()
         ns.Tracker.Reset()
-        print("|cffffd100CraftingForever:|r Sitzung verworfen.")
+        print("|cffffd100M4:|r Sitzung verworfen.")
       end },
   }
   local bw = math.floor((WIDTH - 2 * PADDING - 2 * 6) / 3)
@@ -205,13 +205,13 @@ ns.OnReady(function()
   if ns.db.ui.shown then UI.SetShown(true) end
 end)
 
-SLASH_CRAFTINGFOREVER1 = "/cf"
-SLASH_CRAFTINGFOREVER2 = "/craftingforever"
-SlashCmdList.CRAFTINGFOREVER = function(msg)
+SLASH_M4COMPANION1 = "/cf"
+SLASH_M4COMPANION2 = "/m4"
+SlashCmdList.M4COMPANION = function(msg)
   msg = strtrim(msg or ""):lower()
   if msg == "neu" or msg == "new" then
     ns.Tracker.Start()
-    print("|cffffd100CraftingForever:|r neue Sitzung gestartet.")
+    print("|cffffd100M4:|r neue Sitzung gestartet.")
     UI.SetShown(true)
   elseif msg == "scan" then
     ns.Safe(ns.AuctionScan.Start)
@@ -220,7 +220,7 @@ SlashCmdList.CRAFTINGFOREVER = function(msg)
   elseif msg == "handel" or msg == "h" then
     ns.PlannerUI.Show("ledger")
   elseif msg == "hilfe" or msg == "help" then
-    print("|cffffd100CraftingForever:|r /cf – Fenster an/aus, /cf berufe – Berufe-Fenster, /cf handel – Handelsbuch, /cf scan – AH-Vollscan, /cf neu – neue Sitzung")
+    print("|cffffd100M4:|r /cf – Fenster an/aus, /cf berufe – Berufe-Fenster, /cf handel – Handelsbuch, /cf scan – AH-Vollscan, /cf neu – neue Sitzung")
   else
     UI.SetShown(not (frame and frame:IsShown()))
   end
