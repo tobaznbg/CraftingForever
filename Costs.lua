@@ -1,43 +1,24 @@
--- Costs: what a reagent costs to buy and what a product sells for, from live
--- prices where possible and the last stored snapshot otherwise.
+-- Costs: profession helpers for the planner. Prices come from ns.Item only.
 local ADDON, ns = ...
 
 local Costs = {}
 ns.Costs = Costs
 
--- Classic vendor prices of common reagents, used until the merchant scan has
--- recorded the real price on this server.
-local VENDOR_ESTIMATE = {
-  [2320] = 10, [2321] = 100, [4291] = 500, [8343] = 2000, [14341] = 5000,
-  [4289] = 50, [4340] = 350, [2324] = 25, [2604] = 50, [2605] = 100,
-  [6260] = 50, [6261] = 1000, [2325] = 1000,
-}
-
-local function stored(itemID)
-  return ns.db.prices and ns.db.prices[itemID]
-end
-
--- Copper per unit, and where the price comes from.
+-- Copper per unit to buy a reagent, and where ("Händler" or "AH").
 function Costs.Buy(itemID)
-  local vendor = ns.db.vendorBuy and ns.db.vendorBuy[itemID]
-  if vendor then return vendor, "Händler" end
-  if VENDOR_ESTIMATE[itemID] then return VENDOR_ESTIMATE[itemID], "Händler" end
-  local ah = ns.Prices.Auction(itemID) or (stored(itemID) or {}).ah
-  if ah then return ah, "AH" end
-  -- Never seen in our auction house: the region market value is the best guess.
-  local market = ns.Market.Info(itemID)
-  if market and market.marketValue > 0 then return market.marketValue, "AH (TSM)" end
-  return nil
+  local unit, vendor = ns.Item.BuyCost(ns.Item(itemID))
+  if not unit then return nil end
+  return unit, vendor and "Händler" or "AH"
 end
 
 function Costs.VendorSell(itemID)
-  return ns.Prices.Vendor(itemID) or (stored(itemID) or {}).vs or 0
+  return ns.Item(itemID).vendorSell or 0
 end
 
--- Expected auction revenue per unit (see Market.Expected), or nil if it does not sell.
+-- Copper per unit an auction brings (Item.SellNet), or nil if it only goes to a merchant.
 function Costs.AuctionSell(itemID)
-  local ah = ns.Prices.Auction(itemID) or (stored(itemID) or {}).ah
-  return (ns.Market.Expected(itemID, ah, Costs.VendorSell(itemID)))
+  local net, viaAH = ns.Item.SellNet(ns.Item(itemID))
+  return viaAH and net or nil
 end
 
 -- Units in bags and bank.

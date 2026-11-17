@@ -72,6 +72,7 @@ end
 
 local function finishSearch(itemID, price, own)
   live[itemID] = { price = price, own = own, t = GetTime() }
+  ns.Item.Observe(itemID, price)
   if searching and searching.itemID == itemID then searching = nil end
   ns.Safe(Selling.Refresh)
   C_Timer.After(0.3, nextSearch)
@@ -100,21 +101,21 @@ end)
 local function askPrice(e)
   local l = live[e.itemID]
   if not l then return nil, "Preis wird abgefragt …" end
-  local market = ns.Farming.Market(e.itemID)
-  local vendor = select(11, ((C_Item and C_Item.GetItemInfo) or GetItemInfo)(e.itemID)) or 0
+  local item = ns.Item(e.itemID)
+  local vendor = item.vendorSell or 0
   local ask
   if l.price then
     -- Our own auction already leads: match it instead of undercutting ourselves.
     ask = l.own and l.price or math.max(1, l.price - 1)
-  elseif market then
-    ask = market.price
+  elseif item.avg then
+    ask = item.avg
   else
     return nil, "kein Angebot – Preis selbst setzen"
   end
-  if ask * 0.95 <= vendor then return nil, "unter Händlerpreis" end
+  if ask * (1 - ns.Item.CUT) <= vendor then return nil, "unter Händlerpreis" end
   local warn
-  if market and market.price and ask < market.price * CRASH_SHARE then
-    warn = string.format("%d %% unter Marktwert", math.floor((1 - ask / market.price) * 100))
+  if item.avg and ask < item.avg * CRASH_SHARE then
+    warn = string.format("%d %% unter Ø", math.floor((1 - ask / item.avg) * 100))
   end
   return ask, warn
 end
@@ -311,7 +312,8 @@ function Selling.Refresh()
   for _, e in pairs(bagItems()) do
     local action = ns.Inventory.Advise(e.itemID, e)
     if action == "AH" then
-      e.value = (ns.Farming.Market(e.itemID) or {}).price or 0
+      local item = ns.Item(e.itemID)
+      e.value = item.now or item.avg or 0
       table.insert(entries, e)
     end
   end

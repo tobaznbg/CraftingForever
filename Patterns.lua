@@ -107,13 +107,9 @@ function Patterns.ForScan(scan)
   return list
 end
 
--- Usual price: median of the daily lowest prices from our own scans, or nil
--- if the item was seen on fewer than `minDays` days.
-function Patterns.UsualPrice(itemID, minDays)
-  local ah = ns.db and ns.db.ah
-  local history = ah and ns.AuctionStats.History(ah.days, itemID)
-  if not history or history.days < (minDays or 3) or not history.min then return nil end
-  return history.min, history.days
+-- Usual price: the average cheapest offer of the last two weeks (ns.Item), or nil.
+function Patterns.UsualPrice(itemID)
+  return ns.Item(itemID).avg
 end
 
 ns.OnReady(function()

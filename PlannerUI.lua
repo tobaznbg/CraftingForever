@@ -222,8 +222,8 @@ local function showPath()
     addItemCells(c.out, string.format("%d-%d", seg.from, seg.to), withIcon(c.out, name), tostring(math.ceil(seg.crafts)),
       money(outlay), cost(safe), cost(potential))
     if safe - potential >= BET_GAP then
-      local demand, color = ns.Market.Demand(c.out)
-      addText(ORANGE .. "      Wette: im AH mehr wert – erst 1 Stück testen. Nachfrage EU: |r" .. color .. demand .. "|r")
+      local demand = ns.Item.DemandText(ns.Item(c.out)) or "keine Daten"
+      addText(ORANGE .. "      Wette: im AH mehr wert – erst 1 Stück testen. Verkäufe: |r" .. demand)
     end
     -- How far the current gold reaches, paying everything up front.
     if spent + outlay <= gold and reachable == seg.from then
@@ -291,7 +291,7 @@ local function showProfit()
   columns = { { 190 }, { 30, "RIGHT" }, { 95 }, { 70, "RIGHT" }, { 85, "RIGHT" }, { 85, "RIGHT" }, { 120 } }
   addText(GREY .. "Gewinn pro Herstellung. SICHER = Händler. POTENZIAL = erwarteter AH-Erlös (siehe unten).|r")
   addCells(GOLD .. "Rezept|r", GOLD .. "ab|r", GOLD .. "Muster|r", GOLD .. "Material|r",
-    GOLD .. "SICHER|r", GOLD .. "POTENZIAL|r", GOLD .. "Nachfrage EU|r")
+    GOLD .. "SICHER|r", GOLD .. "POTENZIAL|r", GOLD .. "Verkäufe|r")
   local shown = 0
   for _, row in ipairs(result) do
     if row.safeDeal or row.potentialDeal then
@@ -306,19 +306,15 @@ local function showProfit()
       local name = c.name
       if c.learnAt > prof.rank then name = GREY .. name .. "|r" end
       addItemCells(c.out, withIcon(c.out, name), tostring(c.learnAt), status, money(c.cost), profit(row.safe),
-        c.hasAuction and profit(row.potential) or GREY .. "kein AH|r", (function()
-          local demand, color = ns.Market.Demand(c.out)
-          return color .. demand .. "|r"
-        end)())
+        c.hasAuction and profit(row.potential) or GREY .. "kein AH|r",
+        ns.Item.DemandText(ns.Item(c.out)) or (GREY .. "keine Daten|r"))
       shown = shown + 1
     end
   end
   if shown == 0 then addText("Gerade lohnt sich nichts – nach dem nächsten AH-Scan neu ansehen.") end
   addBlank()
   addText(GREY .. "Grau = Skill noch zu niedrig.|r")
-  addText(GREY .. "POTENZIAL = Verkaufsquote x echter Verkaufspreis (TSM, ganz EU) minus 5 %; was liegen bleibt, geht an den Händler.|r")
-  addText(GREY .. "Nachfrage = wie oft ein Angebot verkauft wird, und Verkäufe pro Tag in ganz EU. Stand: " ..
-    (ns.Market.Updated() or "?"):sub(1, 10) .. "|r")
+  addText(GREY .. "POTENZIAL = billigstes Angebot minus 1 Kupfer, minus 5 % Gebühr.|r")
 end
 
 local function showPatterns()
@@ -340,9 +336,9 @@ local function showPatterns()
   for _, pattern in ipairs(ns.Patterns.ForScan(prof.scan)) do
     local recipe = prof.scan.recipes[pattern.recipeID]
     if recipe and not recipe.learned then
-      local price = ns.Prices.Auction(pattern.itemID)
+      local price = ns.Item(pattern.itemID).now
       if price then
-        local usual = ns.Patterns.UsualPrice(pattern.itemID, 3)
+        local usual = ns.Patterns.UsualPrice(pattern.itemID)
         local vendor = ns.Costs.VendorSell(pattern.itemID)
         local row = profitByRecipe[pattern.recipeID]
         local safePayback = row and row.safe > 0 and math.ceil(price / row.safe) or nil
@@ -406,8 +402,8 @@ local function showFarming()
   for _, group in ipairs(ns.Farming.Evaluate()) do
     addBlank()
     addText(GOLD .. group.label .. "|r")
-    addCells(GOLD .. "Item|r", GOLD .. "Erlös/Stück|r", GOLD .. "Marktwert|r", GOLD .. "im AH|r",
-      GOLD .. "Absatz/Tag|r", GOLD .. "Signal|r", GOLD .. "Zugang|r")
+    addCells(GOLD .. "Item|r", GOLD .. "Erlös/Stück|r", GOLD .. "AH jetzt|r", GOLD .. "Ø|r",
+      GOLD .. "Verkäufe/Tag|r", GOLD .. "Signal|r", GOLD .. "Zugang|r")
     for _, row in ipairs(group.rows) do
       local m = row.market
       local name = ns.ItemName(row.itemID)
@@ -415,9 +411,9 @@ local function showFarming()
       local color = SIGNAL_COLORS[row.color] or GREY
       addItemCells(row.itemID, withIcon(row.itemID, name),
         m and money(row.value) or GREY .. "–|r",
-        m and money(m.price) or "",
-        m and tostring(m.quantity) or "",
-        m and m.soldPerDay and string.format("%.0f", m.soldPerDay) or GREY .. "?|r",
+        m and m.now and money(m.now) or GREY .. "–|r",
+        m and m.avg and money(m.avg) or "",
+        m and m.perDay and string.format("%.0f", m.perDay) or GREY .. "?|r",
         color .. row.signal .. "|r",
         (row.reachable and GREEN or GREY) .. row.access .. "|r")
     end

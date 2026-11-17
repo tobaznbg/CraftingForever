@@ -1,28 +1,19 @@
--- Tooltip: adds what a merchant pays for the item, from the client's own item
--- data, so vendor prices can be checked anywhere (the AH tooltip may omit them).
+-- Tooltip: the item's market data (ns.Item) and the recommendation, everywhere.
 local ADDON, ns = ...
-
-local function sellPrice(itemID)
-  local getInfo = (C_Item and C_Item.GetItemInfo) or GetItemInfo
-  local price = getInfo and select(11, getInfo(itemID))
-  return type(price) == "number" and price or nil
-end
 
 local function addLines(tooltip, itemID)
   if not itemID or tooltip.cfDone == itemID then return end
   tooltip.cfDone = itemID
   local C = "|cff4fc2a1M4|r "
   local item = ns.Item(itemID)
-  local net, viaAH = ns.Item.SellNet(item)
-  if item.now and viaAH then
-    tooltip:AddDoubleLine(C .. "AH-Gewinn", ns.FormatMoney(net), 1, 1, 1, 1, 1, 1)
-  elseif not item.now then
+  if item.now then
+    tooltip:AddDoubleLine(C .. "AH jetzt", ns.FormatMoney(item.now), 1, 1, 1, 1, 1, 1)
+  else
     tooltip:AddLine(C .. "nicht im AH", 0.7, 0.7, 0.7)
   end
-  if item.avg then
-    tooltip:AddDoubleLine(C .. "min / Ø / max",
-      ns.FormatMoney(item.min) .. " / " .. ns.FormatMoney(item.avg) .. " / " .. ns.FormatMoney(item.max),
-      0.7, 0.7, 0.7, 1, 1, 1)
+  if item.min and item.max then
+    tooltip:AddDoubleLine(C .. "Preisspanne", ns.FormatMoney(item.min) .. " – " .. ns.FormatMoney(item.max)
+      .. "  (Ø " .. ns.FormatMoney(item.avg) .. ")", 0.7, 0.7, 0.7, 1, 1, 1)
   end
   if item.perDay then
     tooltip:AddDoubleLine(C .. "Verkäufe pro Tag", string.format("%.0f", item.perDay), 0.7, 0.7, 0.7, 1, 1, 1)
@@ -42,10 +33,8 @@ local function addLines(tooltip, itemID)
     local c = colors[action] or colors.behalten
     tooltip:AddDoubleLine(C .. "Empfehlung", action, 1, 1, 1, c[1], c[2], c[3])
   end
-  local price = sellPrice(itemID)
-  if price then
-    tooltip:AddDoubleLine(C .. "Händler zahlt", price > 0 and ns.FormatMoney(price) or "nichts", 1, 1, 1, 1, 1, 1)
-  end
+  tooltip:AddDoubleLine(C .. "Händler zahlt", item.vendorSell and ns.FormatMoney(item.vendorSell) or "nichts",
+    1, 1, 1, 1, 1, 1)
   tooltip:Show()
 end
 

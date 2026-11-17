@@ -60,15 +60,6 @@ end
 Scan.LIVE_MAX = 60 * 60   -- a scan counts as live for an hour
 local LIVE_EVERY = 15 * 60
 
--- Cheapest offer in the own full scan and whether that scan is live (recent).
--- (nil, true): live scan, item not on offer; (nil, false): no live scan.
-function Scan.LiveMin(itemID)
-  local age = Scan.Age()
-  if not age or age > Scan.LIVE_MAX then return nil, false end
-  local row = ns.db.ah and ns.db.ah.current and ns.db.ah.current[itemID]
-  return row and row[1] and row[1] > 0 and row[1] or nil, true
-end
-
 -- Starts a full scan when the last one is older than 15 minutes and the server
 -- allows one. Must run inside a click (hardware event).
 function Scan.EnsureFresh()

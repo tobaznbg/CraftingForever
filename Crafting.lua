@@ -15,9 +15,7 @@ local function money(c) return c and ns.FormatMoney(c, true) or "–" end
 -- Copper per unit to buy a reagent (merchant, else cheapest offer, else the average
 -- when it is not on offer right now), and whether it comes from a merchant.
 local function buy(itemID)
-  local e = ns.Item(itemID)
-  local unit, vendor = ns.Item.BuyCost(e)
-  return unit or e.avg, vendor
+  return ns.Item.BuyCost(ns.Item(itemID))
 end
 
 -- Copper per unit the product brings (undercut, minus cut; or a merchant), and

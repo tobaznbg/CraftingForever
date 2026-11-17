@@ -145,8 +145,8 @@ function Recipes.SnapshotPrices(scan)
     if not itemID then return end
     ns.db.prices[itemID] = {
       n = ns.ItemName(itemID),
-      ah = ns.Prices.Auction(itemID),
-      vs = ns.Prices.Vendor(itemID),
+      ah = ns.Item(itemID).now,
+      vs = ns.Item(itemID).vendorSell,
       t = now,
     }
   end

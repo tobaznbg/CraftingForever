@@ -4,8 +4,8 @@
 -- (Deals.Reference) and lists the hits.
 -- No bulk request: SearchForItemKeys with 400 keys got the character disconnected
 -- (16 Nov 2026). Searches are paced to at most one per SEARCH_SPACING seconds.
--- Watch list = items of our own auction house (collector data) that sell at least
--- WATCH_MIN_PER_DAY a day and sell well in the EU data (Deals.Liquid), where a 40 % discount is worth Deals.MIN_PROFIT and that
+-- Watch list = items of our own auction house (ns.Item) that sell at least
+-- WATCH_MIN_PER_DAY a day, where a 40 % discount is worth Deals.MIN_PROFIT and that
 -- we can afford; the WATCH_MAX best by expected profit. Without the collector data
 -- or the API it falls back to browsing the whole auction house (slow). A hit is an offer at or below Deals.MAX_SHARE of the reference, for an
 -- item that sells well, with at least Deals.MIN_PROFIT after the cut.
@@ -77,11 +77,9 @@ local function keyOf(itemKey)
   return table.concat({ itemKey.itemID, itemKey.itemSuffix or 0, itemKey.battlePetSpeciesID or 0 }, ":")
 end
 
--- Market value of this item in our own auction house (collector, at most ~1 h old).
+-- Usual price of this item in our auction house (ns.Item average).
 local function houseValue(itemID)
-  local house = ns.AHData and ns.AHData[113]
-  local row = house and house.items[itemID]
-  return row and row[2]
+  return ns.Item(itemID).avg
 end
 
 -- Same item variant as the reference prices (random suffixes and pets differ in value).
@@ -93,21 +91,19 @@ local function ready()
   return not api.IsThrottledMessageSystemReady or api.IsThrottledMessageSystemReady()
 end
 
--- Watch list from the collector data of our own auction house.
+-- Watch list from the items of our own auction house (ns.Item).
 local function buildWatchlist()
   local house = ns.AHData and ns.AHData[113]
   if not house or not api.SendSearchQuery or not api.MakeItemKey then return nil end
   local money, list = GetMoney(), {}
   local discount = 1 - ns.Deals.MAX_SHARE - ns.Deals.CUT
-  for itemID, row in pairs(house.items) do
-    local mv, perDay, offers, qty = row[2], row[5], row[7], row[8]
-    -- The collector's sale estimate is unreliable for rare items (cancel and repost looks
-    -- like a sale), so EU sales must confirm the demand as well.
-    if mv and perDay and perDay >= WATCH_MIN_PER_DAY and mv * ns.Deals.MAX_SHARE <= money
-        and ns.Deals.Liquid(itemID) then
-      local stack = math.max(1, math.min(20, (qty or 1) / math.max(1, offers or 1)))
-      if discount * mv * stack >= ns.Deals.MIN_PROFIT then
-        table.insert(list, { itemID = itemID, score = mv * math.min(perDay, 100) })
+  for itemID in pairs(house.items) do
+    local item = ns.Item(itemID)
+    local avg, perDay = item.avg, item.perDay
+    if avg and perDay and perDay >= WATCH_MIN_PER_DAY and avg * ns.Deals.MAX_SHARE <= money then
+      local stack = math.max(1, math.min(20, (item.quantity or 1) / math.max(1, item.offers or 1)))
+      if discount * avg * stack >= ns.Deals.MIN_PROFIT then
+        table.insert(list, { itemID = itemID, score = avg * math.min(perDay, 100) })
       end
     end
   end
@@ -221,8 +217,12 @@ end
 -- Detail ---------------------------------------------------------------------------
 
 local function evaluate(c, listings, commodity)
-  local plain = {}
-  for _, l in ipairs(listings) do table.insert(plain, { unit = l.unit, count = l.count }) end
+  local plain, cheapest = {}, nil
+  for _, l in ipairs(listings) do
+    table.insert(plain, { unit = l.unit, count = l.count })
+    if not cheapest or l.unit < cheapest then cheapest = l.unit end
+  end
+  ns.Item.Observe(c.itemID, cheapest)
   local house = #plain > 0 and ns.Deals.HousePrice(plain, 0.25) or nil
   local ref, source = ns.Deals.Reference(c.itemID, house)
   if not ref then return nil end

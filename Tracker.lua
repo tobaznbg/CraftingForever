@@ -155,15 +155,9 @@ local function lootKind()
 end
 
 local function recordItem(session, kind, itemID, count, sourceGuid, mapID, x, y)
-  local value, ah, vendor = ns.Prices.Value(itemID)
-  -- Prefer what the item realistically sells for (recorded sales), not the asking price.
-  if ns.Market then
-    local expected, known = ns.Market.Expected(itemID, ah, vendor)
-    if known then
-      value = math.max(vendor or 0, expected or 0)
-      ah = ah or 0
-    end
-  end
+  local item = ns.Item(itemID)
+  local value = ns.Item.Value(item)
+  local ah, vendor = item.now, item.vendorSell
   local entry = session.items[itemID]
   if not entry then
     entry = { n = 0, v = 0 }

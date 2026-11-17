@@ -1,9 +1,7 @@
 -- Farming: rates every gatherable item by what it brings in your auction house
 -- and whether you can get it. Pure logic plus thin data accessors.
 --
--- Prices come from the hourly collector export (ns.AHData[113]) or, when newer,
--- from the player's own in-game scan. Sales figures only come from the collector
--- and count only once it has observed enough hours.
+-- Prices and sales come from ns.Item.
 local ADDON, ns = ...
 
 local Farming = {}
@@ -20,44 +18,6 @@ local LEVEL_REACH = 3      -- mobs up to this many levels above you are fine
 function Farming.SkinSkill(level)
   if level >= 20 then return level * 5 end
   return math.max(1, (level - 10) * 10)
-end
-
-local function ownScan(itemID)
-  local ah = ns.db and ns.db.ah
-  local row = ah and ah.current and ah.current[itemID]
-  return row, ah and ah.currentT
-end
-
-local function parseUTC(text)
-  local y, m, d, H, M, S = (text or ""):match("(%d+)-(%d+)-(%d+)T(%d+):(%d+):(%d+)")
-  if not y then return nil end
-  -- time() reads the table as local time; shift by the local UTC offset.
-  local t = time({ year = y, month = m, day = d, hour = H, min = M, sec = S })
-  return t + (time(date("*t", t)) - time(date("!*t", t)))
-end
-
--- Market data for one item: { price, quantity, offers, soldPerDay, saleRate, source }.
-function Farming.Market(itemID)
-  local house = ns.AHData and ns.AHData[HOUSE]
-  local row = house and house.items[itemID]
-  local m = {}
-  if row then
-    m.price, m.min, m.quantity, m.offers = row[2] or row[1], row[1], row[8] or 0, row[7] or 0
-    if (house.hours or 0) >= MIN_HOURS then
-      m.soldPerDay, m.saleRate, m.avgSale = row[5], row[6], row[4]
-    end
-    m.source = "Sammler"
-  end
-  -- The player's own scan is live; use it when it is newer than the export.
-  local own, ownT = ownScan(itemID)
-  local exportT = house and parseUTC(house.updated)
-  if own and ownT and (not exportT or ownT > exportT) then
-    -- own scan row: { min, marketValue, quantity, offers, sellers }
-    m.price, m.min, m.quantity, m.offers = own[2] or own[1], own[1], own[3] or 0, own[4] or 0
-    m.source = "eigener Scan"
-  end
-  if not m.price then return nil end
-  return m
 end
 
 local function professionSkill(name)
@@ -94,12 +54,11 @@ end
 -- sells next: revenue is (current minimum - 1 copper) after the cut, and speed is
 -- the daily demand. The size of the stock behind does not matter.
 function Farming.Signal(m)
-  local ask = math.max(1, (m.min or m.price) - 1)
-  local value = ask * (1 - CUT)
+  local value = ns.Item.SellNet(m)
   if value < Farming.MIN_VALUE then return "wenig wert", "grey", value end
-  if not m.soldPerDay then return "Absatz offen", "grey", value end
-  if m.soldPerDay >= Farming.MIN_DEMAND then return "lohnt", "green", value end
-  if m.soldPerDay > 0 then return "wenig Nachfrage", "yellow", value end
+  if not m.perDay then return "Absatz offen", "grey", value end
+  if m.perDay >= Farming.MIN_DEMAND then return "lohnt", "green", value end
+  if m.perDay > 0 then return "wenig Nachfrage", "yellow", value end
   return "kein Absatz", "orange", value
 end
 
@@ -111,7 +70,8 @@ function Farming.Evaluate()
     local rows = {}
     for _, entry in ipairs(group.items) do
       local itemID = entry[1]
-      local m = Farming.Market(itemID)
+      local m = ns.Item(itemID)
+      if not (m.now or m.avg) then m = nil end
       local ok, reason = access(group, entry, level)
       local row = { itemID = itemID, market = m, reachable = ok, access = reason }
       if m then
@@ -132,8 +92,7 @@ end
 
 function Farming.DataInfo()
   local house = ns.AHData and ns.AHData[HOUSE]
-  local _, ownT = ownScan(0)
-  return house and house.updated, house and house.hours or 0, ownT, MIN_HOURS
+  return house and house.updated, house and house.hours or 0, ns.db and ns.db.ah and ns.db.ah.currentT, MIN_HOURS
 end
 
 -- Farm spots ---------------------------------------------------------------
@@ -179,12 +138,7 @@ end
 local function unitRevenue(itemID, cache)
   local v = cache[itemID]
   if v then return v end
-  local m = Farming.Market(itemID)
-  if m then
-    v = math.max(1, (m.min or m.price) - 1) * (1 - CUT)
-  else
-    v = ns.db and ns.db.vendorSell and ns.db.vendorSell[itemID] or 0
-  end
+  v = ns.Item.Value(ns.Item(itemID))
   cache[itemID] = v
   return v
 end

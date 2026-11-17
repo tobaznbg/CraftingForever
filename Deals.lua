@@ -1,22 +1,19 @@
--- Deals: outliers in the last own full scan, i.e. offers far below the price at
--- which this auction house normally trades the item.
+-- Deals: rules for "far below its usual price", used by the Schnäppchen view (own
+-- full scan) and the sniper (live searches). Market data comes from ns.Item.
 --   house price  = unit price at which a quarter of the listed quantity is reached
 --                  (a few cheap outliers don't move it; a flooded market does)
---   reference    = lowest of house price, EU sale price, EU market value and,
---                  with a day of collector data, the 7-day median here
--- An offer is a deal at or below 60 % of the reference, for items that sell
--- well (EU data), when at least 20 silver profit remain after the cut.
+--   reference    = the lower of the house price and the average (ns.Item)
+-- An offer is a deal at or below 60 % of the reference, for items that sell at least
+-- MIN_PER_DAY a day in our house, when at least 20 silver profit remain after the cut.
 local ADDON, ns = ...
 
 local Deals = {}
 ns.Deals = Deals
 
 Deals.MAX_SHARE = 0.6     -- offer at most 60 % of the reference
-Deals.MIN_RATE = 0.5      -- at least half of the listings sell (EU)
-Deals.MIN_PER_DAY = 10    -- sold per day (EU)
+Deals.MIN_PER_DAY = 10    -- sold per day in our house (ns.Item)
 Deals.MIN_PROFIT = 2000   -- 20 silver per item line after the 5 % cut
 local CUT = 0.05
-local MIN_COLLECTOR_HOURS = 24
 
 -- Unit price at which `share` of the listed quantity is reached.
 -- listings = { { unit = copper, count = n }, ... } (sorted in place).
@@ -33,25 +30,15 @@ end
 
 -- Reference value and a short source text, or nil.
 function Deals.Reference(itemID, house)
-  local ref, source
-  if house then ref, source = house, "AH-Preis" end
-  local function take(value, text)
-    if value and value > 0 and (not ref or value < ref) then ref, source = value, text end
-  end
-  local m = ns.MarketData and ns.MarketData.items[itemID]
-  if m then
-    take(m[2], "EU-Verkauf")
-    take(m[1], "EU-Marktwert")
-  end
-  local house = ns.AHData and ns.AHData[113]
-  local row = house and house.items[itemID]
-  if row and (house.hours or 0) >= MIN_COLLECTOR_HOURS then take(row[3], "Median 7 T") end
-  return ref, source
+  local avg = ns.Item(itemID).avg
+  if house and (not avg or house < avg) then return house, "AH-Preis" end
+  if avg then return avg, "Ø" end
+  return nil
 end
 
 local function liquid(itemID)
-  local m = ns.MarketData and ns.MarketData.items[itemID]
-  return m and m[3] >= Deals.MIN_RATE and m[4] >= Deals.MIN_PER_DAY
+  local perDay = ns.Item(itemID).perDay
+  return perDay ~= nil and perDay >= Deals.MIN_PER_DAY
 end
 
 Deals.HousePrice = housePrice

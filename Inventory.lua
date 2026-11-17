@@ -59,13 +59,6 @@ function Inventory.ScanBank()
   inv.bank, inv.bankT = readContainers(ns.BankBags()), time()
 end
 
-local function vendorPrice(itemID)
-  local getInfo = (C_Item and C_Item.GetItemInfo) or GetItemInfo
-  local price = getInfo and select(11, getInfo(itemID))
-  if type(price) == "number" then return price end
-  return ns.db.vendorSell and ns.db.vendorSell[itemID] or 0
-end
-
 local function itemClass(itemID)
   local getInstant = (C_Item and C_Item.GetItemInfoInstant) or GetItemInfoInstant
   if not getInstant then return nil end
@@ -75,9 +68,10 @@ end
 
 -- Recommendation for one stack: action, reason, revenue per unit.
 function Inventory.Advise(itemID, entry)
-  local vendor = vendorPrice(itemID)
-  local market = ns.Farming.Market(itemID)
-  local ah = market and math.max(1, (market.min or market.price) - 1) * (1 - CUT) or nil
+  local item = ns.Item(itemID)
+  local vendor = item.vendorSell or 0
+  local net, viaAH = ns.Item.SellNet(item)
+  local ah = (item.now or item.avg) and viaAH and net or nil
   local classID, equipLoc, subclassID = itemClass(itemID)
 
   if entry.q == 0 then return "Händler", "grau", vendor, vendor end
@@ -93,7 +87,7 @@ function Inventory.Advise(itemID, entry)
   end
   if ah and ah > vendor * AH_OVER_VENDOR and (ah - vendor) * (entry.n or 1) >= AH_MIN_GAIN then
     local reason = equipLoc and equipLoc ~= "" and "falls nicht getragen" or "AH bringt mehr"
-    if market.soldPerDay and market.soldPerDay == 0 then reason = "AH, aber kaum Käufer" end
+    if item.perDay and item.perDay == 0 then reason = "AH, aber kaum Käufer" end
     return "AH", reason, ah, vendor
   end
   if vendor > 0 then return "Händler", ah and "AH bringt kaum mehr" or "nicht im AH", vendor, vendor end

@@ -134,7 +134,7 @@ function UI.Refresh()
   if not frame or not frame:IsShown() then return end
   local lines = {}
 
-  if not ns.Prices.HasScan() then
+  if not (ns.AuctionScan and ns.AuctionScan.HasData()) then
     table.insert(lines, "|cffffaa00Noch kein AH-Scan – am Auktionshaus \"CF Scan\" klicken|r")
   end
 
