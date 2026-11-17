@@ -19,7 +19,9 @@
 --   detail = function(entry, count) -> { title, subtitle, columns = { { title, width }... },
 --            rows = { { itemID, cells = { text... } }... }, footer = text }
 --            (click on a row opens it in a panel right of the auction house; with
---            detailCount = true the panel has a -/+ count that is passed in),
+--            detailCount = true the panel has a -/+ count that is passed in; the panel
+--            stays open while searching/buying in Blizzard's tabs, until its X or the
+--            auction house closes),
 -- }
 --
 -- Filters: one input per filterable column in a row under the header, shown with the
@@ -358,7 +360,6 @@ local function createFrame(t, parent)
     refresh(t)
   end)
   f:SetScript("OnShow", function() build(t); refresh(t) end)
-  f:SetScript("OnHide", function() if detail.t == t then AHTable.HideDetail() end end)
   f:SetScript("OnSizeChanged", function() refresh(t) end)
   f:Hide()
 end
@@ -607,6 +608,7 @@ end)
 ns.On("BAG_UPDATE_DELAYED", function() ns.Safe(renderDetail) end)
 
 ns.On("AUCTION_HOUSE_CLOSED", function()
+  AHTable.HideDetail()
   for _, t in ipairs(defs) do
     if t.frame then t.frame:Hide(); PanelTemplates_DeselectTab(t.tab) end
   end
