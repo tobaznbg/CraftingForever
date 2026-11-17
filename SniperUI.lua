@@ -135,7 +135,7 @@ local function build(page, width, height)
   -- Settings ---------------------------------------------------------------------
   local settings = card(page, "Einstellungen")
   settings:SetPoint("TOPLEFT", PAD, -PAD)
-  settings:SetSize(leftW, 372)
+  settings:SetSize(leftW, 346)
   local function set(key, v) Deals.Set(key, v) end
   local updates = {}
   local function S() return Deals.Settings() end
@@ -179,10 +179,6 @@ local function build(page, width, height)
     function() return string.format("%d %%", math.floor(S().recipeMax * 100 + 0.5)) end,
     function() set("recipeMax", math.max(0.5, S().recipeMax - 0.05)) end,
     function() set("recipeMax", math.min(2, S().recipeMax + 0.05)) end))
-  -- Discord: the companion server posts listed watched recipes in #wow-broker (settings.discord).
-  table.insert(updates, toggle(settings, -268, "Rezepte im Discord melden",
-    function() return ns.MyAuctions.Discord().recipes end,
-    function() local d = ns.MyAuctions.Discord(); d.recipes = not d.recipes end))
   local function stepMaxPrice(dir)
     local current, index = S().maxPrice, 1
     for i, step in ipairs(MAX_PRICE_STEPS) do
@@ -191,10 +187,10 @@ local function build(page, width, height)
     index = math.max(1, math.min(#MAX_PRICE_STEPS, index + dir))
     set("maxPrice", MAX_PRICE_STEPS[index])
   end
-  table.insert(updates, stepper(settings, -294, "Maximalpreis pro Item",
+  table.insert(updates, stepper(settings, -268, "Maximalpreis pro Item",
     function() return S().maxPrice == 0 and "Kein Limit" or money(S().maxPrice) end,
     function() stepMaxPrice(-1) end, function() stepMaxPrice(1) end))
-  table.insert(updates, toggle(settings, -320, "Fallende Items auslassen",
+  table.insert(updates, toggle(settings, -294, "Fallende Items auslassen",
     function() return S().skipFalling end, function() set("skipFalling", not S().skipFalling) end))
   local reset = Style.Button(settings, "Standard", 80, 18, function()
     ns.db.settings.sniper = nil
