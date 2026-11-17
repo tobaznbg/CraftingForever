@@ -129,10 +129,14 @@ function Sniper.RecipeInfo(itemID)
   return r
 end
 
--- Usual price of a watched recipe: the list's value, else our own house average (ns.Item).
+-- Usual price of a watched recipe: the list's value, else our own house average (ns.Item);
+-- never above yesterday's daily price (prices fall since the launch, older values run high).
 function Sniper.RecipeUsual(itemID)
   local r = ns.RecipeWatch and ns.RecipeWatch[itemID]
-  return r and r.usual or ns.Item(itemID).avg
+  local e = ns.Item(itemID)
+  local usual = r and r.usual or e.avg
+  if e.yesterday and (not usual or e.yesterday < usual) then usual = e.yesterday end
+  return usual
 end
 
 -- Highest price a recipe hit may cost (nil = every offer, no usual price known).
