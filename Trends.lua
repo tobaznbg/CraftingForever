@@ -1,18 +1,6 @@
--- Trends: auction house tab with items whose price moves away from its average.
---   trend = cheapest offer now against the average of the last two weeks (ns.Item)
+-- Trends: auction house tab with rising and falling items (ns.Item: trend = PPO of the
+-- daily prices, EMA 3 days against EMA 14 days; direction from EMA 3 / 7 / 14).
 local ADDON, ns = ...
-
-local MIN_MOVE = 0.10   -- at least 10 % away from the average
-
-local Trends = {}
-ns.Trends = Trends
-
--- Price now, average and the change between them, or nil without data.
-function Trends.Info(itemID)
-  local item = ns.Item(itemID)
-  if not item.now or not item.avg or item.avg <= 0 then return nil end
-  return item.now, item.avg, item.now / item.avg - 1, item
-end
 
 local function money(c) return c and ns.FormatMoney(c, true) or "–" end
 local function pct(v)
@@ -22,7 +10,7 @@ local function pct(v)
 end
 
 ns.AHTable.Add({
-  id = "Trends", label = "Trends", title = "Trends – Preise in deinem Auktionshaus",
+  id = "Trends", label = "Trends", title = "Trends – steigende und fallende Preise",
   -- Much sold first: in thin markets one odd listing makes a "trend" of +5000 %.
   sort = "perDay",
   views = { { "up", "Steigend" }, { "down", "Fallend" } },
@@ -31,18 +19,19 @@ ns.AHTable.Add({
   columns = {
     { key = "name", title = "Item", width = 0, align = "LEFT" },
     { key = "now", title = "Preis jetzt", width = 95, filter = "money", fmt = function(e) return money(e.now) end },
-    { key = "avg", title = "Ø", width = 95, muted = true, filter = "money", fmt = function(e) return money(e.avg) end },
-    { key = "change", title = "Jetzt vs. Ø", width = 90, filter = "pct", fmt = function(e) return pct(e.change) end },
+    { key = "change", title = "seit gestern", width = 90, filter = "pct", fmt = function(e) return pct(e.change) end },
+    { key = "trend", title = "Trend", width = 80, filter = "pct", fmt = function(e) return pct(e.trend) end },
     { key = "perDay", title = "Verk./Tag", width = 80, muted = true, filter = "num",
       fmt = function(e) return string.format("%.0f", e.perDay) end },
   },
   rows = function(view)
     local list, house = {}, ns.AHData and ns.AHData[113]
+    local want = view == "up" and 1 or -1
     for itemID in pairs(house and house.items or {}) do
-      local now, avg, change, item = Trends.Info(itemID)
-      if now and ((view == "up" and change >= MIN_MOVE) or (view == "down" and change <= -MIN_MOVE)) then
-        table.insert(list, { itemID = itemID, now = now, avg = avg, change = change, perDay = item.perDay or 0,
-          strength = math.abs(change) })
+      local item = ns.Item(itemID)
+      if item.direction == want and item.trend then
+        table.insert(list, { itemID = itemID, now = item.now, change = item.change, trend = item.trend,
+          perDay = item.perDay or 0 })
       end
     end
     return list

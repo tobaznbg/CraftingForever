@@ -7,13 +7,21 @@ local function addLines(tooltip, itemID)
   local C = "|cff4fc2a1M4|r "
   local item = ns.Item(itemID)
   if item.now then
-    tooltip:AddDoubleLine(C .. "AH jetzt", ns.FormatMoney(item.now), 1, 1, 1, 1, 1, 1)
+    local change = item.change and string.format("  (%+d %% zu gestern)",
+      math.floor(item.change * 100 + (item.change >= 0 and 0.5 or -0.5))) or ""
+    tooltip:AddDoubleLine(C .. "AH jetzt", ns.FormatMoney(item.now) .. change, 1, 1, 1, 1, 1, 1)
   else
     tooltip:AddLine(C .. "nicht im AH", 0.7, 0.7, 0.7)
   end
   if item.min and item.max then
     tooltip:AddDoubleLine(C .. "Preisspanne", ns.FormatMoney(item.min) .. " – " .. ns.FormatMoney(item.max)
       .. "  (Ø " .. ns.FormatMoney(item.avg) .. ")", 0.7, 0.7, 0.7, 1, 1, 1)
+  end
+  local trend = ns.Item.TrendText(item)
+  if trend then
+    local up, down = item.direction == 1, item.direction == -1
+    tooltip:AddDoubleLine(C .. "Trend", trend, 0.7, 0.7, 0.7, up and 0.37 or (down and 1 or 0.8),
+      up and 0.83 or (down and 0.42 or 0.8), up and 0.55 or (down and 0.42 or 0.8))
   end
   if item.perDay then
     tooltip:AddDoubleLine(C .. "Verkäufe pro Tag", string.format("%.0f", item.perDay), 0.7, 0.7, 0.7, 1, 1, 1)

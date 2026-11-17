@@ -9,6 +9,9 @@
 --                      two weeks (collector; at the start blended with TSM start values)
 --   perDay     units sold per day in our auction house (collector estimate: vanished
 --              before expiry; a cancelled cheapest offer counts as a sale, so rather high)
+--   yesterday  daily price of the previous day (cloud); change = now / yesterday - 1
+--   trend      PPO of the daily prices, EMA 3 days / EMA 14 days - 1 (cloud)
+--   direction  1 rising, -1 falling, 0 sideways (EMA 3 / 7 / 14 in order or not)
 --   vendorSell what a merchant pays, vendorBuy what a merchant charges (nil if unknown)
 -- }
 -- Derived (the only formulas for these):
@@ -87,7 +90,10 @@ function Item.Get(itemID)
   if row then
     e.min, e.avg, e.max = row[11], row[12], row[13]
     e.perDay = row[5]
+    e.yesterday, e.trend, e.direction = row[15], row[16], row[17]
   end
+  -- Same formula as the cloud (ahmetrics change24), with the newest price we have.
+  if e.now and e.yesterday and e.yesterday > 0 then e.change = e.now / e.yesterday - 1 end
   local vs = clientVendorSell(itemID)
   e.vendorSell = vs and vs > 0 and vs or nil
   e.vendorBuy = (ns.db and ns.db.vendorBuy and ns.db.vendorBuy[itemID]) or VENDOR_ESTIMATE[itemID]
@@ -114,6 +120,15 @@ end
 
 function Item.Value(e)
   return (Item.SellNet(e))
+end
+
+local DIRECTION = { [1] = "steigt", [-1] = "fällt", [0] = "seitwärts" }
+
+-- "+49 % steigt" for views; nil without data.
+function Item.TrendText(e)
+  if not e.trend then return nil end
+  return string.format("%+d %% %s", math.floor(e.trend * 100 + (e.trend >= 0 and 0.5 or -0.5)),
+    DIRECTION[e.direction or 0] or "")
 end
 
 -- "12 / Tag" for views; nil without data.
