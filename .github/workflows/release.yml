@@ -1,0 +1,48 @@
+# Publishes the addon to all m4-companion apps after the owner approved it.
+# The job waits in the "release" environment (required reviewer) and then
+# hands the commit sha to the release server via SSH (user m4deploy, forced
+# command). Signing happens on the server; this workflow never sees the
+# release key and can only ask for a commit on main to be published.
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "LICENSE*"
+      - ".gitignore"
+      - ".github/**"
+  workflow_dispatch:
+
+# Only the newest release counts: a new push cancels a run still waiting for approval.
+concurrency:
+  group: release
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: release
+    timeout-minutes: 20
+    steps:
+      - name: Publish to all apps
+        env:
+          DEPLOY_KEY: ${{ secrets.M4_DEPLOY_KEY }}
+          KNOWN_HOSTS: ${{ secrets.M4_DEPLOY_KNOWN_HOSTS }}
+        run: |
+          set -o pipefail
+          install -d -m 700 ~/.ssh
+          (umask 077 && printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/m4deploy)
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          echo "publishing $GITHUB_SHA"
+          # The server warns when the toc "## Version:" was not increased; show it as an annotation.
+          ssh -i ~/.ssh/m4deploy -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            -o ServerAliveInterval=30 m4deploy@128.140.76.238 "$GITHUB_SHA" 2>&1 \
+            | sed -u 's/^WARNING: /::warning title=Addon version::/'
+      - name: Remove key
+        if: always()
+        run: rm -f ~/.ssh/m4deploy

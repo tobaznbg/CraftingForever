@@ -18,3 +18,7 @@ Manually (without the app): download the ZIP (Code → Download ZIP), extract it
 - Tooltips: price now, range, trend, demand, recommendation
 
 The data files (`Data_*.lua`) are snapshots; the companion app keeps them current.
+
+## Releases
+
+Push to `main` → GitHub asks the owner to approve the release (e-mail / GitHub app, "Review deployments") → after the click the addon is published to all companion apps within minutes. Bump `## Version:` in `m4-companion.toc` for every release; without a bump it is still published, the job only warns. Changes to README or `.github` alone do not trigger a release.
