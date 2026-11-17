@@ -4,25 +4,17 @@ World of Warcraft addon for **WoW Forever** (Interface 16001) by made four: auct
 
 ## Install
 
-The folder in `Interface\AddOns` must be named `m4-companion`.
+**Recommended: the companion app (Windows).**
+[Download m4-companion.exe](https://github.com/tobaznbg/m4-companion/releases/latest/download/m4-companion.exe), start it and log in with Discord. It installs the addon into `Interface\AddOns\m4-companion`, keeps the addon and its price data current and updates itself. After an update type `/reload` in game. Windows may warn about an unsigned app: *More info → Run anyway*.
 
-With git:
-
-```
-cd "C:\Program Files (x86)\World of Warcraft\_forever_\Interface\AddOns"
-git clone https://github.com/tobaznbg/m4-companion.git
-```
-
-Update later with `git pull` in that folder, then `/reload` in game.
-
-Without git: download the ZIP (Code → Download ZIP), extract it into `Interface\AddOns` and rename the folder `m4-companion-main` to `m4-companion`.
+Manually (without the app): download the ZIP (Code → Download ZIP), extract it into `Interface\AddOns` and rename the folder `m4-companion-main` to `m4-companion`. Data files then stay as old as the download.
 
 **Coming from CraftingForever:** close WoW, rename the folder `CraftingForever` to `m4-companion` (or clone anew and delete the old one), and in `WTF\Account\<account>\SavedVariables` rename `CraftingForever.lua` to `m4-companion.lua` and change its first line `CraftingForeverDB = {` to `M4CompanionDB = {` – otherwise the ledger and settings start empty.
 
 ## Use
 
-- `/cf` or `/m4` small tracker window, `/cf berufe` large window, `/cf handel` trading ledger
+- `/m4` (or `/cf`, or the minimap button) main window; right-click the minimap button for the trading ledger
 - Auction house: own tabs **Anlage**, **Trends**, **Crafting**, **Händler**; panel on the right with **Verkaufen** and **Sniper**
 - Tooltips: price now, range, trend, demand, recommendation
 
-The data files (`Data_*.lua`) are snapshots and only as fresh as the last commit; the companion app (in preparation) keeps them current.
+The data files (`Data_*.lua`) are snapshots; the companion app keeps them current.
