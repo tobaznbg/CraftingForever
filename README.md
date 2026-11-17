@@ -19,6 +19,23 @@ Manually (without the app): download the ZIP (Code → Download ZIP), extract it
 
 The data files (`Data_*.lua`) are snapshots; the companion app keeps them current.
 
-## Releases
+## Development and releases
 
-Push to `main` → GitHub asks the owner to approve the release (e-mail / GitHub app, "Review deployments") → after the click the addon is published to all companion apps within minutes. Bump `## Version:` in `m4-companion.toc` for every release; without a bump it is still published, the job only warns. Changes to README or `.github` alone do not trigger a release.
+Two branches:
+
+- **`dev`** – all development happens here. Push as often as you like; nothing is published.
+- **`main`** – what the players get. A push to `main` starts a release that waits for the owner's approval (e-mail / GitHub app, "Review deployments"); after the click the addon reaches all companion apps within minutes.
+
+Workflow:
+
+1. On your dev PC, clone the repo straight into the AddOns folder and work on `dev`:
+   ```
+   cd "C:\Program Files (x86)\World of Warcraft\_forever_\Interface\AddOns"
+   git clone -b dev https://github.com/tobaznbg/m4-companion.git m4-companion
+   ```
+   The companion app never touches an addon folder that contains `.git`, so your working copy stays as it is. Test with `/reload` (a new file in the `.toc` needs a game restart).
+2. Commit and push to `dev`. Pull before you start (`git pull --rebase`) – more than one person works here.
+3. Bump `## Version:` in `m4-companion.toc` for every release.
+4. "Go": merge `dev` into `main` (pull request `dev` → `main` on GitHub, or `git checkout main && git merge --ff-only dev && git push`). Then the owner approves the waiting release.
+
+Changes to README or `.github` alone do not start a release. Never push work in progress to `main`.
