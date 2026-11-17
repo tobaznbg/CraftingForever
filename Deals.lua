@@ -26,13 +26,13 @@ Deals.DEFAULTS = {
 }
 local CUT = 0.05
 
--- An item whose price is falling (cloud trend, ns.Item): the 3-day average below the 7- and
--- 14-day ones (direction -1), or at least FALLING_PPO below the 14-day one. Same rule as the
--- cloud's snipes (collector ahnotify.falling).
+-- An item whose price is clearly falling (cloud trend, ns.Item): the 3-day average at least
+-- 10 % below the 14-day one. (The direction 3 < 7 < 14 alone flagged most items, since prices
+-- drift down slightly after the launch.) Same rule as the cloud's snipes (ahnotify.falling_items).
 Deals.FALLING_PPO = -0.10
 function Deals.Falling(itemID)
   local e = ns.Item(itemID)
-  return e.direction == -1 or (e.trend ~= nil and e.trend <= Deals.FALLING_PPO)
+  return e.trend ~= nil and e.trend <= Deals.FALLING_PPO
 end
 
 function Deals.Settings()
