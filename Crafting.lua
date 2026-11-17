@@ -3,8 +3,8 @@
 -- else the auction house) and the product is sold on the auction house.
 --   reagent    merchant price, else cheapest offer (own scan, else collector data,
 --              else TSM region value)
---   product    market value in this house (collector), else own scan, after the
---              5 % cut; a merchant price counts if it is higher
+--   product    lower of market value and 7-day median in this house (collector),
+--              else own scan, after the 5 % cut; a merchant price counts if it is higher
 -- Only professions whose window was opened once are known (Recipes.Scan); the scan
 -- also holds the recipes not learned yet. Those are shown with a red background and
 -- how to learn them (planner data: trainer, merchant, drop, quest; the pattern price
@@ -32,10 +32,13 @@ local function buy(itemID)
   return unit, source == "Händler"
 end
 
--- Copper per unit the product brings after the cut (or from a merchant).
+-- Copper per unit the product brings after the cut (or from a merchant). The lower of
+-- the current market value and the 7-day median, so a short price spike shows no profit.
 local function sell(itemID)
   local row = houseRow(itemID)
-  local ah = (row and (row[2] or row[1])) or ns.Prices.Auction(itemID)
+  local ah = row and (row[2] or row[1])
+  if ah and row[3] then ah = math.min(ah, row[3]) end
+  ah = ah or ns.Prices.Auction(itemID)
   local value = ah and math.floor(ah * (1 - CUT)) or 0
   return math.max(value, ns.Prices.Vendor(itemID) or 0), ah ~= nil
 end

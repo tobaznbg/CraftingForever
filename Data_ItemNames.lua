@@ -4642,6 +4642,7 @@ ns.ItemNames = {
 [13913]="22-pfündiger Hummer",
 [13914]="70-pfündiger Machtfisch",
 [13915]="85-pfündiger Machtfisch",
+[13917]="103-pfündiger Machtfisch",
 [13926]="Goldene Perle",
 [13927]="Gekochter glänzender Machtfisch",
 [13928]="Gegrillter Kalmar",
