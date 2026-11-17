@@ -45,6 +45,7 @@ local watch = nil           -- { keys = {itemKey...}, set = {itemID = true} } or
 local seen = {}             -- key -> { price = cheapest offer or false (none), limit = buy-up-to, t = time() }
 local roundNo = 0           -- watch list rounds of this run
 local levels = {}           -- itemID -> { list = price levels of the last search, t = time() }
+local priority = {}         -- items asked for elsewhere (ns.AHSearch), searched before the watch list
 
 local function changed()
   if ns.Selling and ns.Selling.Refresh then ns.Safe(ns.Selling.Refresh) end
@@ -131,7 +132,10 @@ local lastSearch = 0
 -- Diagnostics: answered searches, summed answer time, throttle waits, late answers.
 local diag = { answered = 0, seconds = 0, waits = 0, late = 0, sent = 0 }
 local sentAt = {}
+-- The spacing is shared with ns.AHSearch, and no search while its own one waits for an answer.
 local function searchAllowed()
+  local shared = ns.AHSearch
+  if shared and (shared.Busy() or shared.Since() < SEARCH_SPACING) then return false end
   return GetTime() - lastSearch >= SEARCH_SPACING
 end
 
@@ -240,6 +244,7 @@ local function priceLevels(listings)
     end
     e.count = e.count + (l.count or 1)
     if l.own then e.own = true end
+    if l.ownCount then e.ownCount = (e.ownCount or 0) + l.ownCount end
   end
   table.sort(list, function(a, b) return a.unit < b.unit end)
   for i = #list, LEVELS_MAX + 1, -1 do list[i] = nil end
@@ -254,6 +259,8 @@ local function evaluate(c, listings, commodity)
   end
   ns.Item.Observe(c.itemID, cheapest)
   levels[c.itemID] = { list = priceLevels(listings), t = time() }
+  -- the shared "last search" store; answers whoever waits for this item (ns.AHSearch)
+  if ns.AHSearch then ns.AHSearch.Store(c.itemID, levels[c.itemID].list) end
   local house = #plain > 0 and ns.Deals.HousePrice(plain, 0.25) or nil
   local ref, source = ns.Deals.Reference(c.itemID, house)
   seen[c.key] = { price = cheapest or false, limit = ref and ref * ns.Deals.MaxShare(), t = time() }
@@ -318,6 +325,7 @@ local function sendDetail(c)
   if not ready() then diag.waits = diag.waits + 1 end
   if not ready() or not searchAllowed() then return later(0.25, function() sendDetail(c) end) end
   lastSearch = GetTime()
+  if ns.AHSearch then ns.AHSearch.Stamp() end
   diag.sent = diag.sent + 1
   sentAt[c.itemID] = GetTime()
   detailing = c
@@ -326,6 +334,7 @@ local function sendDetail(c)
     if detailing == c then
       detailing, timeouts = nil, timeouts + 1
       if c.minPrice then checked[c.key] = c.minPrice end
+      if ns.AHSearch then ns.AHSearch.Failed(c.itemID) end
       nextStep()
     end
   end)
@@ -358,7 +367,7 @@ handlers.COMMODITY_SEARCH_RESULTS_UPDATED = function(itemID)
     local r = api.GetCommoditySearchResultInfo(itemID, i)
     if r and r.unitPrice then
       table.insert(listings, { unit = r.unitPrice, count = r.quantity, auctionID = r.auctionID,
-        own = r.containsOwnerItem })
+        own = r.containsOwnerItem, ownCount = r.containsOwnerItem and r.numOwnerItems or nil })
     end
   end
   finishDetail(c, listings, true)
@@ -386,7 +395,7 @@ end
 nextStep = function()
   if not running or pending or buying then return end
   if phase == "detail" then
-    local c = table.remove(candidates, 1)
+    local c = table.remove(priority, 1) or table.remove(candidates, 1)
     if c then return sendDetail(c) end
     phase = "wait"
     round.seconds = GetTime() - (browseStarted or GetTime())
@@ -398,6 +407,7 @@ end
 
 local function stopAll(text)
   running, phase, detailing, candidates = false, "idle", nil, {}
+  priority = {} -- ns.AHSearch takes these back and searches them itself
   token = token + 1
   if pending and api.CancelCommoditiesPurchase then pcall(api.CancelCommoditiesPurchase) end
   pending, buying = nil, nil
@@ -544,6 +554,30 @@ end)
 -- Control --------------------------------------------------------------------------
 
 function Sniper.IsRunning() return running end
+
+-- An item asked for elsewhere (ns.AHSearch, e.g. the detail window): searched next, before
+-- the rest of the watch list, like the re-search after a purchase. Its result goes to
+-- ns.AHSearch.Store. front: ahead of the other asked items (a click beats a list check).
+-- Returns false when the sniper does not run (search it yourself then).
+function Sniper.Prioritize(itemID, front)
+  if not running or not itemID or not api.MakeItemKey then return false end
+  if detailing and detailing.itemID == itemID then return true end
+  for i, c in ipairs(priority) do
+    if c.itemID == itemID then
+      if front and i > 1 then table.insert(priority, 1, table.remove(priority, i)) end
+      return true
+    end
+  end
+  local itemKey = api.MakeItemKey(itemID)
+  table.insert(priority, front and 1 or #priority + 1, { itemKey = itemKey, itemID = itemID, key = keyOf(itemKey) })
+  if phase == "wait" and not pending and not buying then
+    -- between two rounds: search it now; the round pause starts again afterwards
+    token = token + 1
+    phase = "detail"
+    nextStep()
+  end
+  return true
+end
 function Sniper.NeedsClick() return running and manual and phase == "wait" end
 function Sniper.Pending() return pending end
 

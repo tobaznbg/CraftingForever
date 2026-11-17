@@ -3,7 +3,7 @@
 ## Notes: made four – Auktionshaus-Preise, Trends, Crafting-Gewinne und Handelsbuch für WoW Forever.
 ## IconTexture: Interface\AddOns\m4-companion\media\icon
 ## Author: Tobias Vonau
-## Version: 0.9.2
+## Version: 0.10.0
 ## SavedVariables: M4CompanionDB
 
 Core.lua
@@ -30,6 +30,8 @@ Farming.lua
 Costs.lua
 Inventory.lua
 Deals.lua
+AHSearch.lua
+MyAuctions.lua
 Selling.lua
 Sniper.lua
 ItemDetail.lua

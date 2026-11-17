@@ -6,6 +6,10 @@
 -- last cheapest price and last check per item; hits on top with a buy button. A click on a
 -- hit row opens the item's detail window (ItemDetail.lua) right of the panel.
 -- Alt+click on any row opens the detail too (ns.ItemDetail.AltClick).
+-- Mode "Meine": the own running auctions per item (ns.MyAuctions) with the cheapest offer of
+-- somebody else and whether the own price is still the best; opening the mode or "Prüfen"
+-- searches every item once (ns.AHSearch). "Abbrechen" cancels exactly one auction per click.
+-- Live prices of the sell mode come from ns.AHSearch too (one search a second).
 local ADDON, ns = ...
 
 local Selling = {}
@@ -18,9 +22,10 @@ local DURATIONS = { { 1, "2 h" }, { 2, "8 h" }, { 3, "24 h" } }
 
 local panel, rowsFrames, durationButtons, status
 local duration = 3
-local mode = "sell" -- "sell" or "sniper"
+local mode = "sell" -- "sell", "sniper" or "mine"
 local control, sniperLines, ledgerButton
 local sniperView         -- watch list view of the sniper mode (createSniperView)
+local createMineView, refreshMine -- forward declared: mode "Meine", defined below the sniper view
 local SNIPER_ROW = 20
 local GREEN, MUTED = "|cff5fd38d", "|cff99999e"
 -- Sniper columns right of the item name: buy up to, sell at (price stair of the hit), button.
@@ -28,7 +33,11 @@ local SNIPER_COLS = { { "Kauf bis", 62 }, { "Einstellen", 74 }, { "", 58 } }
 local modeTabs
 local entries = {}       -- current list
 local live = {}          -- itemID -> { price, own, t } from live searches
-local queue, searching = {}, nil
+local mineView, checkButton -- mode "Meine" (createMineView)
+local MINE_ROW = 30
+local RED, ORANGE = "|cffff6b6b", "|cffffb547"
+-- Columns of the mode "Meine" right of the item: own price, cheapest of others, cancel button.
+local MINE_COLS = { { "Mein Preis", 64 }, { "Billigst fremd", 70 }, { "", 66 } }
 
 local api = C_AuctionHouse or {}
 
@@ -63,47 +72,20 @@ local function isCommodity(e)
   return false
 end
 
--- Live price search, one at a time ---------------------------------------------
+-- Live price search through ns.AHSearch (one search a second, handed to the sniper while it
+-- runs; ns.AHSearch also reports the price to ns.Item.Observe). -----------------------------
 
-local function nextSearch()
-  if searching or #queue == 0 or not (panel and panel:IsShown()) then return end
-  local e = table.remove(queue, 1)
-  searching = e
-  local key = api.MakeItemKey and api.MakeItemKey(e.itemID)
-  if not key then searching = nil return end
-  api.SendSearchQuery(key, {}, true)
-  -- Give up on a search that never answers.
-  C_Timer.After(5, function()
-    if searching == e then searching = nil; nextSearch() end
-  end)
-end
-
-local function finishSearch(itemID, price, own)
-  live[itemID] = { price = price, own = own, t = GetTime() }
-  ns.Item.Observe(itemID, price)
-  if searching and searching.itemID == itemID then searching = nil end
+local function onPrice(offers, itemID)
+  if not offers then return end -- no answer: asked again on the next refresh
+  local best = offers[1]
+  live[itemID] = { price = best and best.unit, own = best and best.own, t = GetTime() }
   ns.Safe(Selling.Refresh)
-  C_Timer.After(0.3, nextSearch)
 end
 
-ns.On("COMMODITY_SEARCH_RESULTS_UPDATED", function(_, itemID)
-  if not searching or searching.itemID ~= itemID then return end
-  local r = api.GetNumCommoditySearchResults(itemID) > 0 and api.GetCommoditySearchResultInfo(itemID, 1)
-  finishSearch(itemID, r and r.unitPrice, r and r.containsOwnerItem)
-end)
-
-ns.On("ITEM_SEARCH_RESULTS_UPDATED", function(_, itemKey)
-  local itemID = itemKey and itemKey.itemID
-  if not searching or searching.itemID ~= itemID then return end
-  local best, own
-  for i = 1, api.GetNumItemSearchResults(itemKey) do
-    local r = api.GetItemSearchResultInfo(itemKey, i)
-    if r and r.buyoutAmount and (not best or r.buyoutAmount < best) then
-      best, own = r.buyoutAmount, r.containsOwnerItem
-    end
-  end
-  finishSearch(itemID, best, own)
-end)
+local function requestPrice(e)
+  if live[e.itemID] or not ns.AHSearch then return end
+  ns.AHSearch.Request(e.itemID, onPrice)
+end
 
 -- Price to post at, or nil with a reason.
 local function askPrice(e)
@@ -284,6 +266,205 @@ local function sniperProgress(st, lines)
   return string.format("Runde %d fertig  ·  %d/%d  ·  %s", st.round, st.index, st.total, lines[1] or "")
 end
 
+-- Mode "Meine": own auctions ------------------------------------------------------------
+
+local function mineTooltip(self)
+  local e = self.entry
+  if not e then return end
+  GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+  GameTooltip:SetItemByID(e.itemID)
+  GameTooltip:AddLine(" ")
+  GameTooltip:AddLine("Meine Auktionen:", 0.92, 0.92, 0.92)
+  for i, a in ipairs(e.auctions or {}) do
+    if i > 6 then GameTooltip:AddLine(string.format("… und %d weitere", #e.auctions - 6), 0.6, 0.6, 0.62); break end
+    local state = a.sold and "verkauft" or (a.expired and "abgelaufen")
+      or (a.timeLeftSeconds and string.format("noch %d h", math.ceil(a.timeLeftSeconds / 3600))) or ""
+    GameTooltip:AddLine(string.format("%dx zu %s  %s", a.quantity or 1, a.buyout and money(a.buyout) or "Gebot", state), 0.6, 0.6, 0.62)
+  end
+  GameTooltip:AddLine("Alt+Klick: Details", 0.31, 0.76, 0.63)
+  GameTooltip:Show()
+end
+
+local function cancelTooltip(self)
+  local a = self.row and ns.MyAuctions.CancelTarget(self.row)
+  if not a then return end
+  GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+  GameTooltip:AddLine("Eine Auktion abbrechen", 0.92, 0.92, 0.92)
+  GameTooltip:AddLine(string.format("%dx zu %s (die teuerste)", a.quantity or 1, money(self.row.top.unit)), 0.6, 0.6, 0.62)
+  GameTooltip:AddLine("Die Einstellgebühr ist dabei verloren.", 1, 0.71, 0.28)
+  local cost = api.GetCancelCost and api.GetCancelCost(a.auctionID)
+  if cost and cost > 0 then GameTooltip:AddLine("Abbruchkosten: " .. money(cost), 1, 0.71, 0.28) end
+  GameTooltip:AddLine("Ein Klick = genau eine Auktion.", 0.6, 0.6, 0.62)
+  GameTooltip:Show()
+end
+
+local function mineRow(body, i)
+  local Style = ns.Style
+  local r = CreateFrame("Frame", nil, body)
+  r:SetHeight(MINE_ROW)
+  r:SetPoint("TOPLEFT", 0, -(i - 1) * MINE_ROW)
+  r:SetPoint("RIGHT", body, "RIGHT")
+  r.stripe = Style.Solid(r, Style.C.row)
+  r.stripe:SetAllPoints()
+  r.icon = r:CreateTexture(nil, "ARTWORK")
+  r.icon:SetSize(20, 20)
+  r.icon:SetPoint("LEFT", 2, 0)
+  r.cells = {}
+  local x = 0
+  for c = #MINE_COLS, 1, -1 do
+    if c < #MINE_COLS then
+      local fs = Style.Text(r, 11)
+      fs:SetPoint("TOPRIGHT", r, "TOPRIGHT", -x - 4, -3)
+      fs:SetWidth(MINE_COLS[c][2] - 6)
+      fs:SetJustifyH("RIGHT")
+      r.cells[c] = fs
+    end
+    x = x + MINE_COLS[c][2]
+  end
+  r.name = Style.Text(r, 12)
+  r.name:SetPoint("TOPLEFT", r.icon, "TOPRIGHT", 5, 2)
+  r.name:SetPoint("RIGHT", r, "RIGHT", -x - 4, 0)
+  r.name:SetJustifyH("LEFT")
+  r.info = Style.Text(r, 11)
+  r.info:SetPoint("BOTTOMLEFT", r.icon, "BOTTOMRIGHT", 5, -3)
+  r.info:SetPoint("RIGHT", r, "RIGHT", -MINE_COLS[#MINE_COLS][2] - 4, 0)
+  r.info:SetJustifyH("LEFT")
+  -- Cancels exactly one auction of the row per click (ns.MyAuctions.Cancel).
+  r.button = Style.Button(r, "Abbrechen", MINE_COLS[#MINE_COLS][2] - 2, 20, function(self)
+    if self.row and ns.MyAuctions.Cancel(self.row) then
+      GameTooltip:Hide()
+      ns.Safe(Selling.Refresh)
+    end
+  end)
+  r.button:SetPoint("RIGHT", -1, 0)
+  r.button:HookScript("OnEnter", cancelTooltip)
+  r.button:HookScript("OnLeave", function() GameTooltip:Hide() end)
+  r:EnableMouse(true)
+  r:SetScript("OnEnter", mineTooltip)
+  r:SetScript("OnLeave", function() GameTooltip:Hide() end)
+  r:SetScript("OnMouseUp", function(self, button)
+    if button == "LeftButton" and self.entry then ns.Safe(ns.ItemDetail.AltClick, self.entry.itemID) end
+  end)
+  return r
+end
+
+createMineView = function()
+  local Style = ns.Style
+  local v = CreateFrame("Frame", nil, panel)
+  v:SetPoint("TOPLEFT", 8, -34)
+  v:SetPoint("BOTTOMRIGHT", -8, 36) -- "Prüfen" and the hint line below
+  v.info = Style.Text(v, 12)
+  v.info:SetPoint("TOPLEFT", 2, -2)
+  v.info:SetPoint("RIGHT", v, "RIGHT", -2, 0)
+  v.info:SetJustifyH("LEFT")
+  local head = CreateFrame("Frame", nil, v)
+  head:SetHeight(14)
+  head:SetPoint("TOPLEFT", 0, -20)
+  head:SetPoint("RIGHT", v, "RIGHT", -10, 0)
+  local x = 0
+  for c = #MINE_COLS, 1, -1 do
+    local fs = Style.Text(head, 10)
+    fs:SetPoint("RIGHT", head, "RIGHT", -x - 4, 0)
+    fs:SetWidth(MINE_COLS[c][2] - 6)
+    fs:SetJustifyH("RIGHT")
+    fs:SetTextColor(unpack(Style.C.muted))
+    fs:SetText(MINE_COLS[c][1])
+    x = x + MINE_COLS[c][2]
+  end
+  local itemHead = Style.Text(head, 10)
+  itemHead:SetPoint("LEFT", 2, 0)
+  itemHead:SetTextColor(unpack(Style.C.muted))
+  itemHead:SetText("Item")
+  v.scroll, v.body = Style.Scroll(v)
+  v.scroll:SetPoint("TOPLEFT", 0, -36)
+  v.scroll:SetPoint("BOTTOMRIGHT", -10, 0)
+  v.items = {}
+  v.empty = Style.Text(v, 11)
+  v.empty:SetPoint("TOPLEFT", 8, -44)
+  v.empty:SetPoint("RIGHT", -8, 0)
+  v.empty:SetJustifyH("LEFT")
+  v.empty:SetTextColor(unpack(Style.C.muted))
+  return v
+end
+
+-- Status text of a row: "bester Preis" (green), "unterboten um X (P %)" (red), "allein im AH",
+-- "verkauft", "abgelaufen", "–" before the check; with the age of the check.
+function Selling.MineStatus(e)
+  local text
+  if e.status == "best" then text = GREEN .. "bester Preis|r"
+  elseif e.status == "under" then text = RED .. string.format("unterboten um %s (%d %%)", money(e.diff), math.floor(e.pct + 0.5)) .. "|r"
+  elseif e.status == "alone" then text = MUTED .. "allein im AH|r"
+  elseif e.status == "sold" then text = MUTED .. "verkauft|r"
+  elseif e.status == "expired" then text = MUTED .. "abgelaufen|r"
+  elseif e.status == "bid" then text = MUTED .. "nur Gebot|r"
+  elseif e.searching then text = ns.Style.ACCENT .. "suche …|r"
+  elseif e.status == "failed" then text = ORANGE .. "keine Antwort|r"
+  else text = MUTED .. "–|r" end
+  if e.searching and e.checked and e.status ~= "unknown" then text = text .. ns.Style.ACCENT .. "  suche …|r" end
+  if e.checked and e.status ~= "sold" and e.status ~= "expired" then
+    text = text .. MUTED .. "  ·  geprüft " .. ago(e.checked) .. "|r"
+  end
+  return text
+end
+
+local function mineProgress(My, rows)
+  if not My.Supported() then return MUTED .. "Dieser Client meldet keine eigenen Auktionen.|r" end
+  local done, total, running = My.Progress()
+  if running and total == 0 then return "Lade eigene Auktionen …" end
+  if running then return string.format("%d/%d geprüft …", done, total) end
+  if not My.Updated() then return MUTED .. "Noch nicht geladen – „Prüfen“ klicken.|r" end
+  local under = 0
+  for _, e in ipairs(rows) do if e.status == "under" then under = under + 1 end end
+  local text = string.format("%d Items  ·  %d Auktionen", #rows, My.Count())
+  if total > 0 then text = text .. string.format("  ·  %d/%d geprüft", done, total) end
+  if under > 0 then text = text .. "  ·  " .. RED .. under .. " unterboten|r" end
+  return text
+end
+
+refreshMine = function()
+  local My, Style = ns.MyAuctions, ns.Style
+  local v = mineView
+  local rows = My and My.Rows() or {}
+  local getIcon = (C_Item and C_Item.GetItemIconByID) or GetItemIcon
+  v.info:SetText(My and mineProgress(My, rows) or "")
+  if #rows == 0 then
+    v.empty:SetText(My and My.Updated() and "Keine eigenen Auktionen." or "")
+    v.empty:Show()
+  else
+    v.empty:Hide()
+  end
+  v.body:SetSize(WIDTH - 26, math.max(1, #rows * MINE_ROW))
+  for i, e in ipairs(rows) do
+    local r = v.items[i]
+    if not r then r = mineRow(v.body, i); v.items[i] = r end
+    r.entry, r.button.row = e, e
+    r.icon:SetTexture(getIcon and getIcon(e.itemID) or nil)
+    local qty = e.active > 0 and e.quantity or (e.soldCount + e.expiredCount)
+    r.name:SetText((ns.ItemName(e.itemID) or ("#" .. e.itemID)) .. MUTED .. "  " .. qty .. "x|r"
+      .. (e.soldCount > 0 and e.active > 0 and (MUTED .. "  ·  " .. e.soldCount .. " verkauft|r") or ""))
+    r.cells[1]:SetText(e.unit and money(e.unit) or (MUTED .. "–|r"))
+    r.cells[2]:SetText(e.foreign and money(e.foreign) or (MUTED .. "–|r"))
+    r.info:SetText(Selling.MineStatus(e))
+    r.button:SetShown(e.active > 0 and My.CancelTarget(e) ~= nil)
+    if e.status == "under" then
+      r.stripe:SetColorTexture(1, 0.42, 0.42, 0.12)
+    elseif e.status == "best" then
+      r.stripe:SetColorTexture(0.37, 0.83, 0.55, 0.08)
+    else
+      r.stripe:SetColorTexture(unpack(Style.C.row))
+    end
+    r.stripe:SetShown((e.status == "under" or e.status == "best" or i % 2 == 0) and true or false)
+    r:Show()
+  end
+  for i = #rows + 1, #v.items do
+    v.items[i].entry, v.items[i].button.row = nil, nil
+    v.items[i]:Hide()
+  end
+  if v.scroll.UpdateBar then v.scroll.UpdateBar() end
+  status:SetText("Abbrechen: eine Auktion je Klick, Gebühr ist weg")
+  ns.ItemDetail.Refresh()
+end
+
 -- Panel --------------------------------------------------------------------------
 
 local function createPanel(parent)
@@ -295,9 +476,11 @@ local function createPanel(parent)
   Style.Panel(panel, 30)
   modeTabs = {}
   local mx = 6
-  for _, def in ipairs({ { "sell", "Verkaufen", 70 }, { "sniper", "Sniper", 70 } }) do
+  for _, def in ipairs({ { "sell", "Verkaufen", 70 }, { "sniper", "Sniper", 70 }, { "mine", "Meine", 60 } }) do
     local tab = Style.Tab(panel, def[2], def[3], function()
       mode = def[1]
+      -- Opening "Meine" is the player's action that checks the own auctions.
+      if mode == "mine" and ns.MyAuctions then ns.Safe(ns.MyAuctions.Check) end
       ns.Safe(Selling.Refresh)
     end)
     tab:SetPoint("TOPLEFT", mx, -2)
@@ -384,13 +567,19 @@ local function createPanel(parent)
   sniperLines.rule:SetPoint("BOTTOMLEFT", 8, 63)
   sniperLines.rule:SetPoint("BOTTOMRIGHT", -8, 63)
   sniperView = createSniperView()
+  mineView = createMineView()
+  checkButton = Style.Button(panel, "Prüfen", 70, 22, function()
+    if ns.MyAuctions then ns.Safe(ns.MyAuctions.Check) end
+    ns.Safe(Selling.Refresh)
+  end, Style.C.accent)
+  checkButton:SetPoint("BOTTOMRIGHT", -8, 8)
   -- "geprüft vor 40 s" and the time left run on: refresh the sniper view once a second.
   local elapsed = 0
   panel:SetScript("OnUpdate", function(_, dt)
     elapsed = elapsed + (dt or 0)
     if elapsed < 1 then return end
     elapsed = 0
-    if mode == "sniper" then ns.Safe(Selling.Refresh) end
+    if mode == "sniper" or mode == "mine" then ns.Safe(Selling.Refresh) end
   end)
   status = Style.Text(panel, 11)
   status:SetPoint("BOTTOMLEFT", 10, 10)
@@ -475,10 +664,14 @@ function Selling.Refresh()
   for i = 2, 4 do sniperLines[i]:SetShown(mode == "sniper") end
   sniperLines.rule:SetShown(mode == "sniper")
   sniperView:SetShown(mode == "sniper")
+  mineView:SetShown(mode == "mine")
+  checkButton:SetShown(mode == "mine")
   status:SetShown(mode ~= "sniper")
+  status:SetWidth(mode == "mine" and WIDTH - 100 or WIDTH - 20) -- room for "Prüfen"
   if mode ~= "sniper" then ns.ItemDetail.HideSniper() end
-  if mode == "sniper" then
+  if mode == "sniper" or mode == "mine" then
     for _, r in ipairs(rowsFrames) do r.entry, r.button.entry = nil, nil; r:Hide() end
+    if mode == "mine" then return refreshMine() end
     return refreshSniper()
   end
   for d, b in pairs(durationButtons) do b:SetActive(d == duration) end
@@ -518,11 +711,7 @@ function Selling.Refresh()
         r.info:SetText(string.format("%dx  ·  %s", qty, note or ""))
         r.button:Hide()
       end
-      if not live[e.itemID] and searching ~= e then
-        local queued = false
-        for _, q in ipairs(queue) do if q.itemID == e.itemID then queued = true end end
-        if not queued then table.insert(queue, e) end
-      end
+      requestPrice(e)
       r:Show()
     else
       r:Hide()
@@ -531,7 +720,6 @@ function Selling.Refresh()
   status:SetText(#entries == 0 and "Nichts in den Taschen, das ins AH gehört."
     or string.format("%d Items fürs AH  ·  Erlös nach Gebühr ca. %s  ·  ein Klick = eine Auktion",
       #entries, money(total)))
-  nextSearch()
 end
 
 ns.On("AUCTION_HOUSE_SHOW", function()
@@ -539,13 +727,20 @@ ns.On("AUCTION_HOUSE_SHOW", function()
     local parent = AuctionHouseFrame
     if not parent or not api.PostCommodity then return end
     if not panel then ns.Safe(createPanel, parent) end
-    if panel then panel:Show(); ns.Safe(Selling.Refresh) end
+    if not panel then return end
+    panel:Show()
+    -- Opening the auction house with "Meine" selected is opening that mode: check it.
+    if mode == "mine" and ns.MyAuctions then ns.Safe(ns.MyAuctions.Check) end
+    ns.Safe(Selling.Refresh)
   end)
 end)
 ns.On("AUCTION_HOUSE_CLOSED", function()
-  queue, searching = {}, nil
   ns.ItemDetail.HideSniper()
   if panel then panel:Hide() end
 end)
 ns.On("BAG_UPDATE_DELAYED", function() ns.Safe(Selling.Refresh) end)
-ns.On("AUCTION_HOUSE_AUCTION_CREATED", function() ns.Safe(Selling.Refresh) end)
+ns.On("AUCTION_HOUSE_AUCTION_CREATED", function()
+  -- a new own auction: the list of the mode "Meine" is loaded again (no item searches)
+  if mode == "mine" and panel and panel:IsShown() and ns.MyAuctions then ns.Safe(ns.MyAuctions.Query) end
+  ns.Safe(Selling.Refresh)
+end)

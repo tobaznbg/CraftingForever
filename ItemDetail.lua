@@ -8,6 +8,9 @@
 -- of the last 48 hours (ns.Item.History), the market figures (ns.Item), the price stair
 -- (the sniper's last search, else the own full scan via ns.Item.Listings) and the crafting
 -- cost (ns.CraftInfo from Tooltip.lua). No own price logic here.
+-- Opened while the auction house is open, it searches the item right away (ns.AHSearch,
+-- one search a second, through the sniper while it runs): "suche …", then the price stair
+-- and "AH jetzt" of that search ("Preistreppe (gerade gesucht)").
 local ADDON, ns = ...
 
 local Detail = {}
@@ -25,6 +28,7 @@ local origin   -- "sniper" when opened from the sniper list at the auction house
 local docked   -- anchor frame while docked at the auction house, nil as a window of its own
 local lines, sections = {}, {}
 local chart
+local live     -- { itemID, state = "searching"|"done"|"failed", offers, t } of the search on opening
 local render -- forward declared: used by Show/Toggle/Refresh, defined below
 local place  -- forward declared: used by create and the auction house events
 
@@ -303,6 +307,16 @@ local function scanLevels(id)
   return levels, t
 end
 
+-- Offers of the newest single search (the shared store of ns.AHSearch or the sniper's list),
+-- grouped by price, cheapest first, and its time; nil without one.
+local function lastSearch(id)
+  local a, ta, b, tb
+  if ns.AHSearch and ns.AHSearch.Last then a, ta = ns.AHSearch.Last(id) end
+  if ns.Sniper and ns.Sniper.Listings then b, tb = ns.Sniper.Listings(id) end
+  if a and (not b or (ta or 0) >= (tb or 0)) then return a, ta end
+  return b, tb
+end
+
 render = function()
   if not frame or not frame:IsShown() or not itemID then return end
   local Style = ns.Style
@@ -338,7 +352,16 @@ render = function()
 
   -- 3. Market figures (ns.Item)
   section("Markt")
-  line("AH jetzt", item.now and money(item.now) or (Style.MUTED .. "nicht im AH|r"))
+  local fresh = live and live.itemID == itemID and live
+  if fresh and fresh.state == "done" then
+    local cheapest = fresh.offers[1]
+    line("AH jetzt", cheapest and (money(cheapest.unit) .. "  " .. Style.MUTED .. "gerade gesucht|r")
+      or (Style.MUTED .. "nicht im AH (gerade gesucht)|r"))
+  elseif fresh and fresh.state == "searching" then
+    line("AH jetzt", (item.now and (money(item.now) .. "  ") or "") .. Style.ACCENT .. "suche …|r")
+  else
+    line("AH jetzt", item.now and money(item.now) or (Style.MUTED .. "nicht im AH|r"))
+  end
   line("Gestern (Tagespreis)", item.yesterday and money(item.yesterday) or "–")
   if item.min and item.max then
     line("Spanne 14 Tage", money(item.min) .. " – " .. money(item.max) .. (item.avg and ("  (Ø " .. money(item.avg) .. ")") or ""))
@@ -353,17 +376,29 @@ render = function()
 
   -- 4. Price stair: offers of the sniper's last search, else of the own full scan; left out
   -- without either. With a hit: bought levels green, the level sold under highlighted.
+  -- The search started on opening wins: "suche …" while it runs, then "gerade gesucht".
   local levels, t, from
-  if ns.Sniper and ns.Sniper.Listings then levels, t = ns.Sniper.Listings(itemID) end
-  local mark = h and levels -- hit markers only on the levels the hit was computed from
-  if levels then
-    from = "letzte Suche " .. ago(t)
+  if fresh and fresh.state == "done" then
+    levels, t = fresh.offers, fresh.t
+    from = time() - t < 60 and "gerade gesucht" or ("letzte Suche " .. ago(t))
   else
+    levels, t = lastSearch(itemID)
+    if levels then from = "letzte Suche " .. ago(t) end
+  end
+  local mark = h and levels -- hit markers only on the levels of a search
+  if not levels then
     levels, t = scanLevels(itemID)
     from = levels and ("Scan " .. ago(t or time()))
   end
-  if levels then section("Preistreppe (" .. from .. ")") end
-  if levels and #levels == 0 then
+  if fresh and fresh.state == "searching" then
+    from = "suche …" .. (from and ("  ·  " .. from) or "")
+  elseif fresh and fresh.state == "failed" then
+    from = "Suche ohne Antwort" .. (from and ("  ·  " .. from) or "")
+  end
+  if from then section("Preistreppe (" .. from .. ")") end
+  if fresh and fresh.state == "searching" and not levels then
+    line(Style.ACCENT .. "suche …|r", "")
+  elseif levels and #levels == 0 then
     line("keine Angebote", "")
   elseif levels then
     local MAX = 9
@@ -492,6 +527,21 @@ end
 -- Opens the detail of the item (docked at the auction house or as a window of its own).
 --   opts.anchor  dock right of this frame instead of the current AH panel
 --   opts.origin  "sniper" when opened from the sniper list
+-- Searches the item now when the auction house is open (ns.AHSearch); the answer re-renders.
+local function searchLive(id)
+  local AHSearch = ns.AHSearch
+  if not (AHSearch and AHSearch.IsOpen and AHSearch.IsOpen()) then live = nil; return end
+  if live and live.itemID == id and live.state == "searching" then return end
+  local my = { itemID = id, state = "searching" }
+  live = my
+  local accepted = AHSearch.Request(id, function(offers)
+    if live ~= my then return end
+    my.state, my.offers, my.t = offers and "done" or "failed", offers, time()
+    render()
+  end, true)
+  if not accepted and live == my then live = nil end
+end
+
 function Detail.Show(item, opts)
   local id = toID(item)
   if not id then return end
@@ -500,6 +550,7 @@ function Detail.Show(item, opts)
   itemID, origin = id, opts.origin
   place(opts.anchor)
   frame:Show()
+  searchLive(id)
   render()
 end
 
@@ -512,7 +563,7 @@ end
 
 function Detail.Hide()
   if frame then frame:Hide() end
-  itemID, origin = nil, nil
+  itemID, origin, live = nil, nil, nil
 end
 
 -- Closes the window only if it was opened from the sniper list (leaving the sniper mode).
