@@ -22,7 +22,7 @@ local AHTable = {}
 ns.AHTable = AHTable
 
 local ROW, HEADER, TOOLBAR = 30, 22, 28
-local FOOTER = 40          -- two status lines
+local FOOTER = 8
 local BUTTON_W = 64
 local MAX_ROWS = 40
 
@@ -103,7 +103,6 @@ local function refresh(t)
   if t.salesButton then
     t.salesButton.label:SetText(string.format("Verk./Tag ≥ %d", settings(t).minSales or 0))
   end
-  t.statusText:SetText(t.status and t.status(t.list) or "")
 end
 
 local function createFrame(t, parent)
@@ -249,15 +248,6 @@ local function createFrame(t, parent)
     t.offset = t.offset - delta * 3
     refresh(t)
   end)
-
-  t.statusText = Style.Text(f, 11)
-  t.statusText:SetPoint("BOTTOMLEFT", 10, 6)
-  t.statusText:SetPoint("BOTTOMRIGHT", -10, 6)
-  t.statusText:SetHeight(FOOTER - 10)
-  t.statusText:SetWordWrap(true)
-  t.statusText:SetJustifyV("MIDDLE")
-  t.statusText:SetJustifyH("LEFT")
-  t.statusText:SetTextColor(unpack(Style.C.muted))
 
   f:SetScript("OnShow", function() build(t); refresh(t) end)
   f:SetScript("OnSizeChanged", function() refresh(t) end)
