@@ -18,8 +18,8 @@ ns.AHTable.Add({
       fmt = function(e) return money(e.classic) end },
     { key = "upside", title = "Faktor", width = 60, filter = "num",
       fmt = function(e) return string.format("|cff5fd38dx%.1f|r", e.upside) end },
-    { key = "fpd", title = "Verk./Tag", width = 75, muted = true, filter = "num",
-      fmt = function(e) return string.format("%.1f", e.fpd) end },
+    { key = "demand", title = "Nachfrage", width = 80, muted = true, filter = "num",
+      fmt = function(e) return ns.Item.DemandText(e) or "–" end },
   },
   rows = function()
     local list, data = {}, ns.InvestData
@@ -29,7 +29,7 @@ ns.AHTable.Add({
       -- Factor to the general Forever price level (relative to Classic Era).
       local upside = avg and avg > 0 and data.level * v[1] / avg or v[3]
       table.insert(list, { itemID = itemID, classic = v[1], avg = avg, now = item.now, upside = upside,
-        fpd = item.perDay or 0 })
+        demand = item.demand or 0 })
     end
     return list
   end,

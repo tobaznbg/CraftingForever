@@ -23,8 +23,9 @@ local function addLines(tooltip, itemID)
     tooltip:AddDoubleLine(C .. "Trend", trend, 0.7, 0.7, 0.7, up and 0.37 or (down and 1 or 0.8),
       up and 0.83 or (down and 0.42 or 0.8), up and 0.55 or (down and 0.42 or 0.8))
   end
-  if item.perDay then
-    tooltip:AddDoubleLine(C .. "Verkäufe pro Tag", string.format("%.0f", item.perDay), 0.7, 0.7, 0.7, 1, 1, 1)
+  local demand = ns.Item.DemandText(item)
+  if demand then
+    tooltip:AddDoubleLine(C .. "Nachfrage", demand, 0.7, 0.7, 0.7, 1, 1, 1)
   end
   -- Gap between the auction house block and recommendation / merchant price.
   tooltip:AddLine(" ")

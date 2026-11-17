@@ -4,8 +4,7 @@
 -- (Deals.Reference) and lists the hits.
 -- No bulk request: SearchForItemKeys with 400 keys got the character disconnected
 -- (16 Nov 2026). Searches are paced to at most one per SEARCH_SPACING seconds.
--- Watch list = items of our own auction house (ns.Item) that sell at least
--- WATCH_MIN_PER_DAY a day, where a 40 % discount is worth Deals.MIN_PROFIT and that
+-- Watch list = items of our own auction house (ns.Item) with demand >= WATCH_MIN_DEMAND, where a 40 % discount is worth Deals.MIN_PROFIT and that
 -- we can afford; the WATCH_MAX best by expected profit. Without the collector data
 -- or the API it falls back to browsing the whole auction house (slow). A hit is an offer at or below Deals.MAX_SHARE of the reference, for an
 -- item that sells well, with at least Deals.MIN_PROFIT after the cut.
@@ -26,7 +25,7 @@ local MAX_PAGES = 80
 local PRICE_TOLERANCE = 1.02 -- commodity quote may be 2 % above the listed cost
 local LOG_MAX = 2000
 local WATCH_MAX = 150
-local WATCH_MIN_PER_DAY = 10
+local WATCH_MIN_DEMAND = 2   -- ns.Item demand (cloud scale)
 local SEARCH_SPACING = 1.0   -- seconds between two searches (TSM allows itself 100 a minute)
 local FULL_PAUSE = 30        -- pause between two whole-AH browses (as TSM)
 
@@ -99,11 +98,11 @@ local function buildWatchlist()
   local discount = 1 - ns.Deals.MAX_SHARE - ns.Deals.CUT
   for itemID in pairs(house.items) do
     local item = ns.Item(itemID)
-    local avg, perDay = item.avg, item.perDay
-    if avg and perDay and perDay >= WATCH_MIN_PER_DAY and avg * ns.Deals.MAX_SHARE <= money then
+    local avg, demand = item.avg, item.demand
+    if avg and demand and demand >= WATCH_MIN_DEMAND and avg * ns.Deals.MAX_SHARE <= money then
       local stack = math.max(1, math.min(20, (item.quantity or 1) / math.max(1, item.offers or 1)))
       if discount * avg * stack >= ns.Deals.MIN_PROFIT then
-        table.insert(list, { itemID = itemID, score = avg * math.min(perDay, 100) })
+        table.insert(list, { itemID = itemID, score = avg * math.min(demand, 20) })
       end
     end
   end

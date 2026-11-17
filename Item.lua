@@ -7,8 +7,8 @@
 --   offers, quantity   auctions / units listed at that time (internal, not shown)
 --   min, avg, max      lowest / average / highest hourly cheapest offer of the last
 --                      two weeks (collector; at the start blended with TSM start values)
---   perDay     units sold per day in our auction house (collector estimate: vanished
---              before expiry; a cancelled cheapest offer counts as a sale, so rather high)
+--   demand     relative demand from the cloud (scale: TSM's real EU sales per day; our own
+--              estimate calibrated to it). Shown as a level, not as units: Item.DemandText
 --   yesterday  daily price of the previous day (cloud); change = now / yesterday - 1
 --   trend      PPO of the daily prices, EMA 3 days / EMA 14 days - 1 (cloud)
 --   direction  1 rising, -1 falling, 0 sideways (EMA 3 / 7 / 14 in order or not)
@@ -89,7 +89,7 @@ function Item.Get(itemID)
   if o and o.t > bestT then e.now = o.now end
   if row then
     e.min, e.avg, e.max = row[11], row[12], row[13]
-    e.perDay = row[5]
+    e.demand = row[18]
     e.yesterday, e.trend, e.direction = row[15], row[16], row[17]
   end
   -- Same formula as the cloud (ahmetrics change24), with the newest price we have.
@@ -152,10 +152,16 @@ function Item.TrendText(e)
     DIRECTION[e.direction or 0] or "")
 end
 
--- "12 / Tag" for views; nil without data.
+-- Demand levels (the cloud's demand scale).
+Item.DEMAND_LEVELS = { { 20, "sehr hoch" }, { 5, "hoch" }, { 1, "mittel" }, { 0.05, "niedrig" } }
+
+-- "hoch" etc. for views; nil without data.
 function Item.DemandText(e)
-  if not e.perDay then return nil end
-  return string.format(e.perDay >= 10 and "%d / Tag" or "%.1f / Tag", e.perDay)
+  if e.demand == nil then return nil end
+  for _, level in ipairs(Item.DEMAND_LEVELS) do
+    if e.demand >= level[1] then return level[2] end
+  end
+  return "kaum"
 end
 
 Item.CUT = CUT

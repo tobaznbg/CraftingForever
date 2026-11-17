@@ -86,7 +86,7 @@ local function rows(filter, professionID)
           local group = learned and 0 or (tooHigh and 2 or 1)
           table.insert(list, { itemID = out, recipe = rec[1], profession = data.name,
             score = (2 - group) * 1e12 + profit, learned = learned, learn = learn, tooHigh = tooHigh,
-            cost = cost, value = value, profit = profit, onAH = onAH, fpd = ns.Item(out).perDay or 0,
+            cost = cost, value = value, profit = profit, onAH = onAH, demand = ns.Item(out).demand or 0,
             produced = quantity, reagents = reagents })
         end
       end
@@ -95,30 +95,27 @@ local function rows(filter, professionID)
   return list
 end
 
--- Crafting professions for the chooser: icon, the character's skill if known, and the
--- cloud's profession figures (Data_Professions.lua): profitable recipes, average profit
--- of the ten best, the best recipe, and the top-10 average of the last 14 days as chart.
+-- Crafting professions for the chooser, ranked by the cloud's rating (Data_Professions.lua):
+-- how many recipes bring gold sustainably (profit with demand) and the best one; the chart
+-- is that rating over the last days. The character's skill is shown for own professions.
 local function professions()
   local own, list = ownScans(), {}
   local stats = ns.ProfessionStats and ns.ProfessionStats.professions or {}
   for id, data in pairs(ns.RecipeData or {}) do
-    local mine = own[id]
-    local n = 0
-    for _, rec in pairs(data.recipes) do if rec[2] then n = n + 1 end end
-    local s = stats[id]
+    local mine, s = own[id], stats[id]
     local lines, series = {}, {}
     if s then
-      lines[1] = string.format("%d mit Gewinn  ·  Top 10 Ø |cff5fd38d%s|r", s[1] or 0, money(s[4]))
+      lines[1] = string.format("%d Rezepte lohnen", s[1] or 0)
       local best = s[2] and data.recipes[s[2]]
-      if best then lines[2] = "bestes: " .. best[1] .. "  |cff5fd38d" .. money(s[3]) .. "|r" end
+      if best then lines[2] = best[1] .. "  |cff5fd38d" .. money(s[3]) .. "|r" end
       for _, point in ipairs(s.series or {}) do table.insert(series, point[3] or 0) end
     end
     table.insert(list, { key = id, label = data.name, icon = data.icon,
-      info = mine and string.format("dein Skill %d / %d  ·  %d Rezepte", mine.scan.rank or 0, mine.scan.max or 0, n)
-        or string.format("%d Rezepte", n), lines = lines, series = series, mine = mine ~= nil })
+      info = mine and string.format("dein Skill %d", mine.scan.rank or 0) or "",
+      lines = lines, series = series, score = s and s[5] or 0 })
   end
   table.sort(list, function(a, b)
-    if a.mine ~= b.mine then return a.mine end
+    if a.score ~= b.score then return a.score > b.score end
     return a.label < b.label
   end)
   return list
@@ -166,7 +163,7 @@ ns.AHTable.Add({
   chooser = professions,
   sort = "score",          -- learned first, then learnable now, then later; each by profit
   views = { { "profit", "Mit Gewinn" }, { "learned", "Nur gelernte" }, { "all", "Alle Rezepte" } },
-  defaultFilters = { fpd = "1" },
+  defaultFilters = { demand = "1" },
   rowColor = function(e) return not e.learned and { 0.85, 0.25, 0.25 } or nil end,
   subtitle = function(e)
     if e.learned then return "gelernt" end
@@ -188,8 +185,8 @@ ns.AHTable.Add({
       return (e.profit >= 0 and "|cff5fd38d" or "|cffff6b6b") .. (e.profit < 0 and "-" or "")
         .. money(math.abs(e.profit)) .. "|r"
     end },
-    { key = "fpd", title = "Verk./Tag", width = 75, muted = true, filter = "num",
-      fmt = function(e) return string.format("%.0f", e.fpd) end },
+    { key = "demand", title = "Nachfrage", width = 80, muted = true, filter = "num",
+      fmt = function(e) return ns.Item.DemandText(e) or "–" end },
   },
   rows = rows,
 })

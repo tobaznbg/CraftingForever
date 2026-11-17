@@ -403,7 +403,7 @@ local function showFarming()
     addBlank()
     addText(GOLD .. group.label .. "|r")
     addCells(GOLD .. "Item|r", GOLD .. "Erlös/Stück|r", GOLD .. "AH jetzt|r", GOLD .. "Ø|r",
-      GOLD .. "Verkäufe/Tag|r", GOLD .. "Signal|r", GOLD .. "Zugang|r")
+      GOLD .. "Nachfrage|r", GOLD .. "Signal|r", GOLD .. "Zugang|r")
     for _, row in ipairs(group.rows) do
       local m = row.market
       local name = ns.ItemName(row.itemID)
@@ -413,14 +413,14 @@ local function showFarming()
         m and money(row.value) or GREY .. "–|r",
         m and m.now and money(m.now) or GREY .. "–|r",
         m and m.avg and money(m.avg) or "",
-        m and m.perDay and string.format("%.0f", m.perDay) or GREY .. "?|r",
+        m and ns.Item.DemandText(m) or GREY .. "?|r",
         color .. row.signal .. "|r",
         (row.reachable and GREEN or GREY) .. row.access .. "|r")
     end
   end
   addBlank()
   addText(GREY .. "Erlös = günstigstes Angebot - 1 Kupfer, minus 5 % Gebühr (du unterbietest und stehst vorne).|r")
-  addText(GREY .. "Signal: lohnt = Erlös >= 2s und >= 10 Käufe/Tag in deinem AH. Unterbiet-Druck und Trend folgen mit mehr Daten.|r")
+  addText(GREY .. "Signal: lohnt = Erlös >= 2s und Nachfrage mindestens mittel. Unterbiet-Druck und Trend folgen mit mehr Daten.|r")
   addText(GREY .. "Was pro Stunde rauskommt, misst die Farm-Sitzung (/cf neu).|r")
 end
 

@@ -2,15 +2,15 @@
 --   house price  = unit price at which a quarter of the listed quantity is reached
 --                  (a few cheap outliers don't move it; a flooded market does)
 --   reference    = the lower of the house price and the average (ns.Item)
--- An offer is a deal at or below 60 % of the reference, for items that sell at least
--- MIN_PER_DAY a day in our house, when at least 20 silver profit remain after the cut.
+-- An offer is a deal at or below 60 % of the reference, for items with demand
+-- >= MIN_DEMAND (ns.Item), when at least 20 silver profit remain after the cut.
 local ADDON, ns = ...
 
 local Deals = {}
 ns.Deals = Deals
 
 Deals.MAX_SHARE = 0.6     -- offer at most 60 % of the reference
-Deals.MIN_PER_DAY = 10    -- sold per day in our house (ns.Item)
+Deals.MIN_DEMAND = 2      -- ns.Item demand (cloud scale)
 Deals.MIN_PROFIT = 2000   -- 20 silver per item line after the 5 % cut
 local CUT = 0.05
 
@@ -36,8 +36,8 @@ function Deals.Reference(itemID, house)
 end
 
 local function liquid(itemID)
-  local perDay = ns.Item(itemID).perDay
-  return perDay ~= nil and perDay >= Deals.MIN_PER_DAY
+  local demand = ns.Item(itemID).demand
+  return demand ~= nil and demand >= Deals.MIN_DEMAND
 end
 
 Deals.HousePrice = housePrice

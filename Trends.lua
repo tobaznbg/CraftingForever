@@ -11,18 +11,18 @@ end
 
 ns.AHTable.Add({
   id = "Trends", label = "Trends", title = "Trends – steigende und fallende Preise",
-  -- Much sold first: in thin markets one odd listing makes a "trend" of +5000 %.
-  sort = "perDay",
+  -- Most demanded first: in thin markets one odd listing makes a "trend" of +5000 %.
+  sort = "demand",
   views = { { "up", "Steigend" }, { "down", "Fallend" } },
-  defaultFilters = { perDay = "2" },
+  defaultFilters = { demand = "1" },
   onOpen = function() if ns.AuctionScan then ns.AuctionScan.EnsureFresh() end end,
   columns = {
     { key = "name", title = "Item", width = 0, align = "LEFT" },
     { key = "now", title = "Preis jetzt", width = 95, filter = "money", fmt = function(e) return money(e.now) end },
     { key = "change", title = "seit gestern", width = 90, filter = "pct", fmt = function(e) return pct(e.change) end },
     { key = "trend", title = "Trend", width = 80, filter = "pct", fmt = function(e) return pct(e.trend) end },
-    { key = "perDay", title = "Verk./Tag", width = 80, muted = true, filter = "num",
-      fmt = function(e) return string.format("%.0f", e.perDay) end },
+    { key = "demand", title = "Nachfrage", width = 80, muted = true, filter = "num",
+      fmt = function(e) return ns.Item.DemandText(e) or "–" end },
   },
   rows = function(view)
     local list, house = {}, ns.AHData and ns.AHData[113]
@@ -31,7 +31,7 @@ ns.AHTable.Add({
       local item = ns.Item(itemID)
       if item.direction == want and item.trend then
         table.insert(list, { itemID = itemID, now = item.now, change = item.change, trend = item.trend,
-          perDay = item.perDay or 0 })
+          demand = item.demand or 0 })
       end
     end
     return list
