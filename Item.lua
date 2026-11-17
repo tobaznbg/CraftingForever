@@ -128,8 +128,8 @@ function Item.Listings(itemID)
   return list, last.t
 end
 
--- Hourly history of the last 48 hours from the collector (Data_History.lua, only items
--- the sniper may watch): { start = epoch of the first slot, step = 3600,
+-- Hourly history of the last 48 hours from the collector (Data_History.lua, every listed
+-- item, compact format; the older table format is read too): { start = epoch of the first slot, step = 3600,
 --   prices = { cheapest offer per hour, 0 = not listed, false = no snapshot }, qty = {...} }
 -- or nil. The live copy from the data addon (m4-companion_Data, kept current by the
 -- companion app, global M4CompanionData) wins over the one shipped with this addon.
@@ -140,9 +140,42 @@ local function historyTable()
   return ns.History
 end
 
+-- One compact list "350,,,-,0,725": empty = same as before, "-" = no snapshot (false).
+local function decodeSlots(text, n)
+  local out, prev, i = {}, false, 0
+  for tok in (text .. ","):gmatch("([^,]*),") do
+    i = i + 1
+    if tok == "-" then prev = false
+    elseif tok ~= "" then prev = tonumber(tok) or false end
+    out[i] = prev
+  end
+  for k = i + 1, n or i do out[k] = false end
+  return out
+end
+
+local decoded = setmetatable({}, { __mode = "k" }) -- history table -> itemID -> result
+
 function Item.History(itemID)
   local history = historyTable()
-  local h = history and history[itemID]
+  if not history then return nil end
+  if type(history.items) == "table" then
+    -- Compact format (all listed items): ns.History = { start, step, n, items = { [id] = "p;q" } }
+    local cache = decoded[history]
+    if not cache then cache = {}; decoded[history] = cache end
+    if cache[itemID] ~= nil then return cache[itemID] or nil end
+    local text = history.items[itemID]
+    local result = false
+    if type(text) == "string" then
+      local p, q = text:match("^([^;]*);(.*)$")
+      if p then
+        result = { start = history.start, step = history.step or 3600,
+          prices = decodeSlots(p, history.n), qty = decodeSlots(q, history.n) }
+      end
+    end
+    cache[itemID] = result
+    return result or nil
+  end
+  local h = history[itemID]
   if not h then return nil end
   return { start = h[1], step = h.step or 3600, prices = h.prices or {}, qty = h.qty or {} }
 end
