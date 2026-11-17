@@ -556,9 +556,11 @@ end
 
 -- Click on a sniper hit: opens the detail next to `parent` (the Selling panel); a second click
 -- on the same item closes it.
-function Detail.Toggle(id, parent)
+-- origin: the panel mode it was opened from ("sniper" default, "mine"); it closes when the
+-- panel switches to another mode (Detail.HideSniper).
+function Detail.Toggle(id, parent, from)
   if frame and frame:IsShown() and itemID == id then return Detail.Hide() end
-  Detail.Show(id, { anchor = parent, origin = "sniper" })
+  Detail.Show(id, { anchor = parent, origin = from or "sniper" })
 end
 
 function Detail.Hide()
@@ -567,8 +569,10 @@ function Detail.Hide()
 end
 
 -- Closes the window only if it was opened from the sniper list (leaving the sniper mode).
-function Detail.HideSniper()
-  if origin == "sniper" then Detail.Hide() end
+-- Closes a window opened from a panel mode, unless that mode is `keep` (the current one).
+-- Windows opened by Alt+click (no origin) stay.
+function Detail.HideSniper(keep)
+  if origin and origin ~= keep then Detail.Hide() end
 end
 
 function Detail.IsShown() return frame ~= nil and frame:IsShown() end

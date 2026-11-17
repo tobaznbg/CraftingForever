@@ -344,7 +344,7 @@ local function mineRow(body, i)
   r:SetScript("OnLeave", function() GameTooltip:Hide() end)
   -- A click opens the item's detail (a second click closes it), like a sniper hit.
   r:SetScript("OnMouseUp", function(self, button)
-    if button == "LeftButton" and self.entry then ns.Safe(ns.ItemDetail.Toggle, self.entry.itemID) end
+    if button == "LeftButton" and self.entry then ns.Safe(ns.ItemDetail.Toggle, self.entry.itemID, nil, "mine") end
   end)
   return r
 end
@@ -669,7 +669,7 @@ function Selling.Refresh()
   checkButton:SetShown(mode == "mine")
   status:SetShown(mode ~= "sniper")
   status:SetWidth(mode == "mine" and WIDTH - 100 or WIDTH - 20) -- room for "Prüfen"
-  if mode ~= "sniper" then ns.ItemDetail.HideSniper() end
+  ns.ItemDetail.HideSniper(mode)
   if mode == "sniper" or mode == "mine" then
     for _, r in ipairs(rowsFrames) do r.entry, r.button.entry = nil, nil; r:Hide() end
     if mode == "mine" then return refreshMine() end
