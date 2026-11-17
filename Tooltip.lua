@@ -16,8 +16,6 @@ local function addLines(tooltip, itemID)
   if m then
     local ask = math.max(1, (m.min or m.price) - 1)
     tooltip:AddDoubleLine(C .. "AH-Erlös (unterbieten, -5 %)", ns.FormatMoney(ask * 0.95), 1, 1, 1, 1, 1, 1)
-    tooltip:AddDoubleLine(C .. "AH günstigstes / Marktwert",
-      ns.FormatMoney(m.min or m.price) .. " / " .. ns.FormatMoney(m.price), 0.7, 0.7, 0.7, 0.7, 0.7, 0.7)
     local demand = m.soldPerDay and string.format("%.0f verkauft/Tag", m.soldPerDay) or "Absatz noch offen"
     tooltip:AddDoubleLine(C .. string.format("%d im AH", m.quantity or 0), demand, 0.7, 0.7, 0.7, 0.7, 0.7, 0.7)
   else
@@ -33,6 +31,8 @@ local function addLines(tooltip, itemID)
       ns.FormatMoney(row[11]) .. " / " .. ns.FormatMoney(row[12]) .. " / " .. ns.FormatMoney(row[13]),
       0.7, 0.7, 0.7, 1, 1, 1)
   end
+  -- Gap between the auction house block and recommendation / merchant price.
+  tooltip:AddLine(" ")
   -- Decision as in the Bestand tab; bag entry if the item is carried (bound state).
   if ns.Inventory then
     local inv = ns.db.inventory and ns.db.inventory[ns.CharKey()]
