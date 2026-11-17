@@ -138,13 +138,15 @@ function ns.ItemName(itemID)
     local name = GetItemInfo(itemID)
     if name then return name end
   end
-  local stored = ns.db and ns.db.prices and ns.db.prices[itemID]
-  if stored and stored.n then return stored.n end
-  -- Not in the client's item cache yet: ask the server; GET_ITEM_INFO_RECEIVED
-  -- follows and windows refresh themselves.
+  -- Not in the client's item cache yet: ask the server (GET_ITEM_INFO_RECEIVED follows
+  -- and windows refresh themselves), meanwhile use a name we know.
   if C_Item and C_Item.RequestLoadItemDataByID then
     C_Item.RequestLoadItemDataByID(itemID)
   end
+  local shipped = ns.ItemNames and ns.ItemNames[itemID]
+  if shipped then return shipped end
+  local stored = ns.db and ns.db.prices and ns.db.prices[itemID]
+  if stored and stored.n then return stored.n end
   return "Item " .. tostring(itemID)
 end
 

@@ -17,6 +17,8 @@ AuctionStats.lua
 Data_Market.lua
 Data_AH113.lua
 Data_Invest.lua
+Data_Trend.lua
+Data_ItemNames.lua
 Data_Gathering.lua
 Data_FarmSpots.lua
 Market.lua
@@ -27,6 +29,10 @@ Deals.lua
 Selling.lua
 Sniper.lua
 Ledger.lua
+AHTable.lua
+Invest.lua
+Trends.lua
+Crafting.lua
 BagMarks.lua
 Patterns.lua
 UI.lua
