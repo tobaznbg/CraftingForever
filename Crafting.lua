@@ -2,7 +2,7 @@
 -- professions make a profit when every reagent is bought (merchant if it sells it,
 -- else the auction house) and the product is sold on the auction house.
 --   live       opening the tab starts the own full scan (every 15 min at most); its
---              prices are used while it is at most LIVE_MAX old
+--              prices are used while it is at most an hour old (AuctionScan.LiveMin)
 --   reagent    merchant price, else cheapest offer now (live scan), else collector
 --              data, else TSM region value
 --   product    cheapest offer now (live scan), else the lower of market value and
@@ -15,14 +15,9 @@
 local ADDON, ns = ...
 
 local CUT = 0.05
-local LIVE_MAX = 60 * 60
-
--- Cheapest offer in the own full scan, if that scan is recent.
 local function live(itemID)
-  local age = ns.AuctionScan and ns.AuctionScan.Age()
-  if not age or age > LIVE_MAX then return nil, false end
-  local row = ns.db.ah and ns.db.ah.current and ns.db.ah.current[itemID]
-  return row and row[1] and row[1] > 0 and row[1] or nil, true
+  if not ns.AuctionScan then return nil, false end
+  return ns.AuctionScan.LiveMin(itemID)
 end
 
 local function money(c) return c and ns.FormatMoney(c, true) or "–" end
@@ -166,19 +161,8 @@ ns.AHTable.Add({
   end,
   detail = detail,
   detailCount = true,
-  onOpen = function()
-    local Scan = ns.AuctionScan
-    if Scan and not Scan.Running() and (Scan.Age() or math.huge) > 15 * 60 and Scan.Wait() == 0 then
-      Scan.Start()
-    end
-  end,
-  info = function()
-    local Scan = ns.AuctionScan
-    if Scan and Scan.Running() then return "|cffffb547Live-Preise werden geholt …|r" end
-    local age = Scan and Scan.Age()
-    if age and age <= LIVE_MAX then return string.format("Live-Preise, %d min alt", math.floor(age / 60)) end
-    return "|cffffb547Keine Live-Preise – Daten vom Server|r"
-  end,
+  onOpen = function() if ns.AuctionScan then ns.AuctionScan.EnsureFresh() end end,
+  info = function() return ns.AuctionScan and ns.AuctionScan.LiveInfo() or nil end,
   columns = {
     { key = "name", title = "Ergebnis", width = 0, align = "LEFT", fmt = function(e)
       return e.name .. (e.produced > 1 and string.format(" |cff99999ex%g|r", e.produced) or "")

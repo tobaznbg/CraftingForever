@@ -56,6 +56,33 @@ function Scan.Running()
   return state ~= nil
 end
 
+-- Live prices for the auction house tabs -------------------------------------------
+Scan.LIVE_MAX = 60 * 60   -- a scan counts as live for an hour
+local LIVE_EVERY = 15 * 60
+
+-- Cheapest offer in the own full scan and whether that scan is live (recent).
+-- (nil, true): live scan, item not on offer; (nil, false): no live scan.
+function Scan.LiveMin(itemID)
+  local age = Scan.Age()
+  if not age or age > Scan.LIVE_MAX then return nil, false end
+  local row = ns.db.ah and ns.db.ah.current and ns.db.ah.current[itemID]
+  return row and row[1] and row[1] > 0 and row[1] or nil, true
+end
+
+-- Starts a full scan when the last one is older than 15 minutes and the server
+-- allows one. Must run inside a click (hardware event).
+function Scan.EnsureFresh()
+  if not state and (Scan.Age() or math.huge) > LIVE_EVERY and Scan.Wait() == 0 then Scan.Start() end
+end
+
+-- Short status text for a tab toolbar.
+function Scan.LiveInfo()
+  if state then return "|cffffb547Live-Preise werden geholt …|r" end
+  local age = Scan.Age()
+  if age and age <= Scan.LIVE_MAX then return string.format("Live-Preise, %d min alt", math.floor(age / 60)) end
+  return "|cffffb547Keine Live-Preise – Daten vom Server|r"
+end
+
 -- Called after every finished scan.
 local doneListeners = {}
 function Scan.OnDone(fn) table.insert(doneListeners, fn) end
