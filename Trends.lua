@@ -23,9 +23,9 @@ ns.AHTable.Add({
   defaultFilters = { offers = "10" },
   columns = {
     { key = "name", title = "Item", width = 0, align = "LEFT" },
-    { key = "mv", title = "Wert jetzt", width = 95, filter = "money", fmt = function(e) return money(e.mv) end },
-    { key = "ref", title = "Langfristig", width = 95, muted = true, filter = "money", fmt = function(e) return money(e.ref) end },
-    { key = "change", title = "Trend", width = 75, filter = "pct", fmt = function(e) return pct(e.change) end },
+    { key = "mv", title = "Preis jetzt", width = 95, filter = "money", fmt = function(e) return money(e.mv) end },
+    { key = "ref", title = "Üblicher Preis", width = 95, muted = true, filter = "money", fmt = function(e) return money(e.ref) end },
+    { key = "change", title = "Jetzt vs. üblich", width = 110, filter = "pct", fmt = function(e) return pct(e.change) end },
     { key = "own", title = "Eigene Daten", width = 90, muted = true, filter = "pct",
       fmt = function(e) return string.format("%d %%", math.floor(e.own * 100 + 0.5)) end },
     { key = "offers", title = "Angebote", width = 75, muted = true, filter = "num",
