@@ -223,13 +223,13 @@ function Item.Value(e)
   return (Item.SellNet(e))
 end
 
-local DIRECTION = { [1] = "steigt", [-1] = "fällt", [0] = "seitwärts" }
-
--- "+49 % steigt" for views; nil without data.
+-- "+49 % steigt" for views; nil without data. The word follows the number (3-day vs 14-day
+-- average): from +3 % "steigt", from -3 % "fällt", in between "seitwärts" - so a -1 % item is
+-- not called falling.
 function Item.TrendText(e)
   if not e.trend then return nil end
-  return string.format("%+d %% %s", math.floor(e.trend * 100 + (e.trend >= 0 and 0.5 or -0.5)),
-    DIRECTION[e.direction or 0] or "")
+  local word = e.trend >= 0.03 and "steigt" or (e.trend <= -0.03 and "fällt" or "seitwärts")
+  return string.format("%+d %% %s", math.floor(e.trend * 100 + (e.trend >= 0 and 0.5 or -0.5)), word)
 end
 
 -- Demand levels (the cloud's demand scale).

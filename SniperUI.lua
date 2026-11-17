@@ -200,8 +200,19 @@ local function build(page, width, height)
   table.insert(updates, stepper(settings, -268, "Maximalpreis pro Item",
     function() return S().maxPrice == 0 and "Kein Limit" or money(S().maxPrice) end,
     function() stepMaxPrice(-1) end, function() stepMaxPrice(1) end))
-  table.insert(updates, toggle(settings, -294, "Fallende Items auslassen",
-    function() return S().skipFalling end, function() set("skipFalling", not S().skipFalling) end))
+  -- Falling items (Deals.Falling): left out from this fall on, "aus" keeps them.
+  local FALL_STEPS = { 0, 0.03, 0.05, 0.10, 0.15, 0.20, 0.30 }
+  local function stepFall(dir)
+    local cur, idx = S().fallLimit or 0, 1
+    for i, v in ipairs(FALL_STEPS) do if cur >= v - 1e-9 then idx = i end end
+    set("fallLimit", FALL_STEPS[math.max(1, math.min(#FALL_STEPS, idx + dir))])
+  end
+  table.insert(updates, stepper(settings, -294, "Fallende Items auslassen ab",
+    function()
+      local v = S().fallLimit or 0
+      return v <= 0 and "aus" or string.format("−%d %%", math.floor(v * 100 + 0.5))
+    end,
+    function() stepFall(-1) end, function() stepFall(1) end))
   local reset = Style.Button(settings, "Standard", 80, 18, function()
     ns.db.settings.sniper = nil
   end)
