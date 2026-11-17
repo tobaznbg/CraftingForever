@@ -42,6 +42,8 @@ local function markButton(button)
   m.tint:Hide()
   m.text:SetText("")
   if not info or not info.itemID then return end
+  -- Reduced-UI (settings, main window): no markers on the bag slots.
+  if ns.db.settings and ns.db.settings.reducedUI then return end
   if isQuestItem(bag, slot, info.itemID) then
     m.tint:Show()
     m.text:SetText("Q")
@@ -81,6 +83,9 @@ end
 local function markAll()
   for _, frame in ipairs(containerFrames()) do markFrame(frame) end
 end
+
+-- Redraws the markers of the open bags (after the Reduced-UI switch).
+ns.BagMarks = { Refresh = function() ns.Safe(markAll) end }
 
 local hooked = false
 local function hook()

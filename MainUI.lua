@@ -1574,6 +1574,13 @@ PAGES.settings = function(p)
   add("Auto-Vollscan beim Öffnen des Auktionshauses",
     function() return settings().autoScan end,
     function(on) settings().autoScan = on end)
+  -- Reduced-UI: no markers in the bags and no M4 lines in item tooltips (BagMarks, Tooltip).
+  add("Reduced-UI (keine Markierungen im Inventar, keine Tooltip-Zeilen)",
+    function() return settings().reducedUI == true end,
+    function(on)
+      settings().reducedUI = on
+      if ns.BagMarks then ns.BagMarks.Refresh() end
+    end)
 
   y = y - 10
   section("Tooltip")

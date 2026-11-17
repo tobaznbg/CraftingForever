@@ -85,6 +85,8 @@ ns.CraftInfo = crafting
 
 local function addLines(tooltip, itemID)
   if not itemID or tooltip.cfDone == itemID then return end
+  -- Reduced-UI (settings, main window): no M4 lines in item tooltips.
+  if ns.db.settings and ns.db.settings.reducedUI then return end
   tooltip.cfDone = itemID
   local C = "|cff4fc2a1M4|r "
   local item = ns.Item(itemID)
