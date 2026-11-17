@@ -18,13 +18,17 @@ Deals.DEFAULTS = {
   watchMinDemand = 2,   -- ns.Item demand for the watch list
   sellDays = 2,         -- price stair: what is bought must sell within this many days
   minGap = 0.15,        -- price stair: every bought level at least 15 % below the net resale price
+  recipeWatch = true,   -- watch the tradeable recipes of ns.RecipeWatch as well (own category)
+  recipeMax = 0.7,      -- recipe hit: offer at most this share of its usual price (most are listed near it)
 }
 local CUT = 0.05
 
 function Deals.Settings()
   local s = ns.db and ns.db.settings and ns.db.settings.sniper or {}
   local out = {}
-  for k, v in pairs(Deals.DEFAULTS) do out[k] = s[k] ~= nil and s[k] or v end
+  for k, v in pairs(Deals.DEFAULTS) do
+    if s[k] ~= nil then out[k] = s[k] else out[k] = v end -- keeps a stored false
+  end
   return out
 end
 

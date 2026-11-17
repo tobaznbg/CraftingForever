@@ -5,7 +5,7 @@
 --   professions  crafting table (AHTable embed) + button to the skill planner
 --   planner      skill planner for any crafting profession (ns.Planner via ns.Costs)
 --   market       sub tabs Trends / Anlage / Händler (AHTable embeds)
---   ledger       profit and loss per profession + recent trades
+--   ledger       profit and loss: key figures, areas with items, item trades, valued stock
 --   analysis     market analysis from the collector (ns.MarketAnalysis)
 --   settings     switches in ns.db.settings
 -- Position, scale and last page in ns.db.mainui. Parts built elsewhere (ns.Profit,
@@ -195,7 +195,9 @@ end
 -- data.itemID show the item icon there and the item tooltip on hover. A column with
 -- button = true holds a small button per row, shown for rows with data.button.
 -- g:SetRows(list, emptyText): list of { cell texts..., itemID = n, color = {r,g,b} (first cell),
--- onClick = fn, span = text (one line over the whole width), button = { label, fn } }.
+-- onClick = fn, span = text (one line over the whole width, or up to column spanTo; the
+-- cells after it keep their texts), button = { label, fn } }.
+-- g:SetRows(list, emptyText, keepScroll): keepScroll keeps the scroll position (toggles).
 local function grid(parent, w, h, columns, opts)
   opts = opts or {}
   local g = CreateFrame("Frame", nil, parent)
@@ -290,7 +292,7 @@ local function grid(parent, w, h, columns, opts)
     return r
   end
 
-  function g:SetRows(list, emptyText)
+  function g:SetRows(list, emptyText, keepScroll)
     for i, data in ipairs(list) do
       local r = rowAt(i)
       for c, cell in ipairs(r.cells) do
@@ -321,11 +323,14 @@ local function grid(parent, w, h, columns, opts)
         end
       end
       if data.span then
-        for _, cell in ipairs(r.cells) do cell:SetText("") end
+        local last = data.spanTo or #columns
+        for c, cell in ipairs(r.cells) do
+          if c <= last then cell:SetText("") end
+        end
         if r.icon then r.icon:Hide() end
         r.cells[1]:ClearAllPoints()
         r.cells[1]:SetPoint("LEFT", 6, 0)
-        r.cells[1]:SetWidth(inner - 12)
+        r.cells[1]:SetWidth((last >= #columns and inner or xs[last] + ws[last]) - 12)
         r.cells[1]:SetText(data.span)
         r.spanned = true
       end
@@ -341,7 +346,11 @@ local function grid(parent, w, h, columns, opts)
     empty:SetText(#list == 0 and (emptyText or "") or "")
     body:SetHeight(math.max(1, #list * ROW))
     if g.scroll then
-      g.scroll:SetVerticalScroll(0)
+      local top = 0
+      if keepScroll then
+        top = math.max(0, math.min(g.scroll:GetVerticalScroll() or 0, #list * ROW - (h - ROW)))
+      end
+      g.scroll:SetVerticalScroll(top)
       g.scroll.UpdateBar()
     end
   end
@@ -771,12 +780,80 @@ PAGES.market = function(p)
   end
 end
 
--- Ledger: profit and loss per profession, recent trades.
+-- Ledger: profit and loss of a period, all numbers from ns.Profit.Report.
+--   figures  period: revenue, purchases, cut, lost deposits, result; stock now: units,
+--            cost, market value today, difference
+--   areas    professions, trade, farmed; a click opens / closes the items of an area
+--            (ns.db.mainui.ledgerOpen); a click on an item shows its trades below
+--   below    recent trades, the trades of the clicked item, or the valued stock
 local PERIODS = {
   { key = "today", label = "Heute", since = function() return startOfToday() end },
   { key = "week", label = "7 Tage", since = function() return time() - 7 * 86400 end },
   { key = "all", label = "Alles", since = function() return 0 end },
 }
+local ITEM_KINDS = { buy = "gekauft", craft = "hergestellt", post = "eingestellt", cancelled = "abgebrochen",
+  expired = "abgelaufen", sale = "verkauft" }
+local AREA_COLOR = { 0.85, 0.79, 0.64, 1 }
+local FIG_H = 56
+
+local function units(n) return string.format("%d", math.floor((n or 0) + 0.5)) end
+local function count(n) return (type(n) == "number" and n > 0) and units(n) or "–" end
+local function moneyOr(copper) return type(copper) == "number" and money(copper) or "–" end
+local function lostMoney(copper) return (copper or 0) > 0 and money(copper) or "–" end
+local function backText(r)
+  if (r.expired or 0) == 0 and (r.cancelled or 0) == 0 then return "–" end
+  return string.format("%d / %d", r.expired or 0, r.cancelled or 0)
+end
+
+-- One trade of the clicked item (ns.Profit.ItemEvents).
+local function itemEventRow(e, itemID)
+  local amount, detail = "–", ""
+  if e.k == "buy" then
+    amount = RED .. "-" .. money(e.c) .. "|r"
+    if (e.u or 0) > 0 and e.c then detail = "je " .. money(e.c / e.u) end
+  elseif e.k == "sale" then
+    amount = GREEN .. "+" .. money((e.c or 0) - (e.cut or 0)) .. "|r"
+    detail = "brutto " .. money(e.c) .. ", AH-Gebühr " .. money(e.cut)
+  elseif e.k == "post" then
+    local parts = {}
+    if e.p then table.insert(parts, "je " .. money(e.p)) end
+    if e.dep then table.insert(parts, "Einstellgebühr " .. money(e.dep)) end
+    detail = table.concat(parts, ", ")
+  elseif (e.k == "expired" or e.k == "cancelled") and e.lost then
+    amount = RED .. "-" .. money(e.lost) .. "|r"
+    detail = "Einstellgebühr verloren"
+  end
+  return { date("%d.%m. %H:%M", e.t or 0), ITEM_KINDS[e.k] or tostring(e.k), units(e.u or 1), amount,
+    Style.MUTED .. detail .. "|r", itemID = itemID }
+end
+
+-- Card of key figures side by side: label, value, small line. cols = { { label, width }... }
+local function figureCard(parent, cols)
+  local w = 0
+  for _, c in ipairs(cols) do w = w + c[2] end
+  local f = card(parent, w, FIG_H)
+  f.cols = {}
+  local x = 0
+  for i, c in ipairs(cols) do
+    local col = {}
+    col.label = muted(Style.Text(f, 11))
+    col.value = Style.Text(f, 14)
+    col.sub = muted(Style.Text(f, 10))
+    for line, top in pairs({ label = -7, value = -21, sub = -39 }) do
+      col[line]:SetPoint("TOPLEFT", x + 10, top)
+      col[line]:SetWidth(c[2] - 14)
+      col[line]:SetJustifyH("LEFT")
+    end
+    col.label:SetText(c[1])
+    f.cols[i] = col
+    x = x + c[2]
+  end
+  function f:Set(i, value, sub)
+    self.cols[i].value:SetText(value or "–")
+    self.cols[i].sub:SetText(sub or "")
+  end
+  return f
+end
 
 PAGES.ledger = function(p)
   pageTitle(p, "Handelsbuch")
@@ -786,7 +863,7 @@ PAGES.ledger = function(p)
     local period = PERIODS[i]
     local b = Style.Button(p, period.label, 70, 22, function()
       state().period = period.key
-      p:Refresh()
+      p:Refresh(true)
     end)
     b:SetScript("OnLeave", function(self)
       self.bg:SetColorTexture(unpack(self.active and Style.C.buttonHi or Style.C.button))
@@ -797,57 +874,201 @@ PAGES.ledger = function(p)
   end
 
   local y = -(PAD + TOOLBAR + 6)
-  local plH = 236
+  local figPeriod = figureCard(p, { { "Umsatz (brutto)", 104 }, { "Einkauf", 100 }, { "AH-Gebühr", 90 },
+    { "Einstellgeb. verloren", 112 }, { "Ergebnis", 104 } })
+  figPeriod:SetPoint("TOPLEFT", PAD, y)
+  local figStock = figureCard(p, { { "Bestand (jetzt)", 80 }, { "Einstand", 96 }, { "Marktwert heute", 98 },
+    { "Unterschied", INNER_W - GAP - 510 - 274 } })
+  figStock:SetPoint("TOPLEFT", figPeriod, "TOPRIGHT", GAP, 0)
+
+  y = y - FIG_H - GAP
+  local plH = 250
   local pl = grid(p, INNER_W, plH, {
-    { "Beruf", 0 }, { "Erlöse (brutto)", 120, "RIGHT" }, { "Einkauf", 120, "RIGHT" },
-    { "Gebühren", 110, "RIGHT" }, { "Ergebnis", 120, "RIGHT" }, { "Bestand", 170, "RIGHT" } }, { scroll = true })
+    { "Bereich / Item", 0, nil, true }, { "herg./gek.", 66, "RIGHT" }, { "verkauft", 60, "RIGHT" },
+    { "Ø Verkauf", 88, "RIGHT" }, { "Einstand/Stk", 88, "RIGHT" }, { "Gewinn/Stk", 88, "RIGHT" },
+    { "Ergebnis", 100, "RIGHT" }, { "abgel./abgebr.", 84, "RIGHT" }, { "Gebühr verloren", 96, "RIGHT" } },
+    { scroll = true })
   pl:SetPoint("TOPLEFT", PAD, y)
 
+  -- Below: recent trades / trades of one item / stock.
+  local barY = y - plH - 8
   local label = Style.Text(p, 12)
-  label:SetPoint("TOPLEFT", PAD, y - plH - 14)
-  label:SetText(Style.HEAD .. "Letzte Vorgänge|r")
-  local listTop = y - plH - 34
-  local recent = grid(p, INNER_W, PAGE_H + listTop - PAD, {
-    { "Datum", 110 }, { "Art", 100 }, { "Item", 0 }, { "Menge", 70, "RIGHT" }, { "Betrag", 140, "RIGHT" } },
+  label:SetPoint("TOPLEFT", PAD, barY - 6)
+  local summary = muted(Style.Text(p, 11))
+  summary:SetPoint("TOPLEFT", PAD + 230, barY - 7)
+  summary:SetWidth(INNER_W - 230 - 350)
+  summary:SetJustifyH("LEFT")
+  local selected   -- itemID whose trades are shown
+  local listButtons = {}
+  local back = Style.Button(p, "← alle Vorgänge", 120, 22, function()
+    selected = nil
+    p:Refresh()
+  end)
+  for i, def in ipairs({ { "stock", "Bestand" }, { "recent", "Vorgänge" } }) do
+    local b = Style.Button(p, def[2], 90, 22, function()
+      selected = nil
+      state().ledgerList = def[1]
+      p:Refresh()
+    end)
+    b:SetScript("OnLeave", function(self)
+      self.bg:SetColorTexture(unpack(self.active and Style.C.buttonHi or Style.C.button))
+    end)
+    b:SetPoint("TOPRIGHT", -PAD - (i - 1) * 94, barY - 2)
+    listButtons[def[1]] = b
+  end
+  back:SetPoint("TOPRIGHT", -PAD - 2 * 94, barY - 2)
+
+  local listTop = barY - 30
+  local listH = PAGE_H + listTop - PAD
+  local recent = grid(p, INNER_W, listH, {
+    { "Datum", 110 }, { "Art", 100 }, { "Item", 0, nil, true }, { "Menge", 70, "RIGHT" }, { "Betrag", 140, "RIGHT" } },
     { scroll = true })
   recent:SetPoint("TOPLEFT", PAD, listTop)
+  local trades = grid(p, INNER_W, listH, {
+    { "Datum", 110 }, { "Art", 100 }, { "Menge", 70, "RIGHT" }, { "Betrag", 120, "RIGHT" }, { "", 0 } },
+    { scroll = true })
+  trades:SetPoint("TOPLEFT", PAD, listTop)
+  local stockList = grid(p, INNER_W, listH, {
+    { "Item", 0, nil, true }, { "Stück", 56, "RIGHT" }, { "Herkunft", 130 }, { "Einstand/Stk", 96, "RIGHT" },
+    { "Marktwert/Stk", 100, "RIGHT" }, { "Einstand", 96, "RIGHT" }, { "Marktwert", 96, "RIGHT" },
+    { "Unterschied", 106, "RIGHT" } }, { scroll = true })
+  stockList:SetPoint("TOPLEFT", PAD, listTop)
 
-  function p:Refresh()
+  local report, since, periodLabel
+
+  local function selectItem(itemID)
+    selected = itemID
+    p:Refresh()
+  end
+
+  local function itemRow(r, area)
+    local made = "–"
+    if area == ns.Profit.TRADE then made = count(r.bought)
+    elseif area ~= ns.Profit.FARMED then made = count(r.crafted) end
+    local cost = r.soldUnitCost or r.unitCost
+    local name = r.name or ns.ItemName(r.itemId) or ("Item " .. tostring(r.itemId))
+    return { name, made, count(r.sold), moneyOr(r.avgPrice), moneyOr(cost),
+      type(r.unitProfit) == "number" and signedMoney(r.unitProfit) or "–", signedMoney(r.profit or 0),
+      backText(r), lostMoney(r.depositsLost), itemID = r.itemId,
+      color = r.itemId == selected and Style.C.accent or nil,
+      onClick = function() selectItem(r.itemId) end }
+  end
+
+  local function areaRows()
+    local rows = {}
+    local open = state().ledgerOpen or {}
+    state().ledgerOpen = open
+    for _, g in ipairs(report.groups) do
+      local items = report.items[g.name] or {}
+      local isOpen = open[g.name] and true or false
+      table.insert(rows, {
+        span = string.format("%s%s (%d)   %sUmsatz %s · Einkauf %s · AH-Gebühr %s|r", isOpen and "– " or "+ ",
+          g.name, #items, Style.MUTED, money(g.revenue), money(g.materials), money(g.cut)),
+        spanTo = 6, [7] = signedMoney(g.profit or 0), [8] = backText(g), [9] = lostMoney(g.depositsLost),
+        color = AREA_COLOR,
+        onClick = function()
+          open[g.name] = not isOpen or nil
+          p:Refresh()
+        end })
+      if isOpen then
+        for _, r in ipairs(items) do table.insert(rows, itemRow(r, g.name)) end
+      end
+    end
+    return rows
+  end
+
+  -- Totals of the clicked item over its areas (crafted and bought rows of one item).
+  local function itemSummary(itemID)
+    local t = { bought = 0, crafted = 0, sold = 0, expired = 0, cancelled = 0, depositsLost = 0 }
+    for _, list in pairs(report and report.items or {}) do
+      for _, r in ipairs(list) do
+        if r.itemId == itemID then
+          for k in pairs(t) do t[k] = t[k] + (r[k] or 0) end
+        end
+      end
+    end
+    local parts = {}
+    if t.bought > 0 then table.insert(parts, units(t.bought) .. " gekauft") end
+    if t.crafted > 0 then table.insert(parts, units(t.crafted) .. " hergestellt") end
+    table.insert(parts, units(t.sold) .. " verkauft")
+    table.insert(parts, t.expired .. "× abgelaufen")
+    table.insert(parts, t.cancelled .. "× abgebrochen")
+    table.insert(parts, "Einstellgebühr verloren " .. money(t.depositsLost))
+    return table.concat(parts, " · ")
+  end
+
+  local function showList()
+    local mode = selected and "item" or (state().ledgerList == "stock" and "stock" or "recent")
+    recent:SetShown(mode == "recent")
+    trades:SetShown(mode == "item")
+    stockList:SetShown(mode == "stock")
+    back:SetShown(mode == "item")
+    for key, b in pairs(listButtons) do setButtonActive(b, mode == key) end
+    summary:SetText("")
+    if mode == "item" then
+      local name = ns.ItemName(selected) or ("Item " .. tostring(selected))
+      label:SetText(Style.HEAD .. name .. "|r " .. Style.MUTED .. "(" .. periodLabel .. ")|r")
+      local rows = { { span = Style.MUTED .. itemSummary(selected) .. "|r" } }
+      for _, e in ipairs(optional(ns.Profit, "ItemEvents", selected, since) or {}) do
+        table.insert(rows, itemEventRow(e, selected))
+      end
+      if #rows == 1 then table.insert(rows, { span = Style.MUTED .. "Keine Vorgänge im Zeitraum|r" }) end
+      trades:SetRows(rows)
+    elseif mode == "stock" then
+      label:SetText(Style.HEAD .. "Bestand|r " .. Style.MUTED .. "(noch nicht verkauft)|r")
+      summary:SetText("Einstand: Kaufpreis bzw. gekauftes Material; Marktwert: AH jetzt")
+      local rows = {}
+      for _, s in ipairs(report and report.stock or {}) do
+        table.insert(rows, { s.name or ns.ItemName(s.itemId) or ("Item " .. tostring(s.itemId)), units(s.units),
+          s.source or "", money(s.unitCost), moneyOr(s.marketUnit), money(s.cost), moneyOr(s.market),
+          type(s.diff) == "number" and signedMoney(s.diff) or "–", itemID = s.itemId,
+          onClick = function() selectItem(s.itemId) end })
+      end
+      stockList:SetRows(rows, report and "Kein Bestand" or "Gewinnrechnung noch nicht verfügbar")
+    else
+      label:SetText(Style.HEAD .. "Letzte Vorgänge|r")
+      local rows = {}
+      for _, e in ipairs(ledgerEvents(40)) do table.insert(rows, eventRow(e)) end
+      recent:SetRows(rows, "Noch keine Vorgänge")
+    end
+  end
+
+  -- reset: new period, the areas scroll back to the top (else they keep their position).
+  function p:Refresh(reset)
     local key = state().period or "week"
-    local since = 0
+    since, periodLabel = 0, ""
     for _, period in ipairs(PERIODS) do
       setButtonActive(buttons[period.key], period.key == key)
-      if period.key == key then since = period.since() end
+      if period.key == key then since, periodLabel = period.since(), period.label end
     end
-    local list = optional(ns.Profit, "Professions", since)
-    local rows = {}
-    if type(list) == "table" then
-      local sum = { revenue = 0, materials = 0, fees = 0, profit = 0, stockValue = 0, stockUnits = 0 }
-      local sorted = {}
-      for _, r in ipairs(list) do table.insert(sorted, r) end
-      table.sort(sorted, function(a, b) return (a.profit or 0) > (b.profit or 0) end)
-      for _, r in ipairs(sorted) do
-        local fees = r.fees or 0   -- contains the AH cut and lost deposits
-        for k in pairs(sum) do
-          if k ~= "fees" then sum[k] = sum[k] + (r[k] or 0) end
-        end
-        sum.fees = sum.fees + fees
-        table.insert(rows, { r.name or "?", money(r.revenue), money(r.materials), money(fees),
-          signedMoney(r.profit or 0),
-          (r.stockUnits or 0) > 0 and string.format("%s (%d)", money(r.stockValue), r.stockUnits) or "–" })
-      end
-      if #rows > 1 then
-        table.insert(rows, { "Summe", money(sum.revenue), money(sum.materials), money(sum.fees),
-          signedMoney(sum.profit), sum.stockUnits > 0 and money(sum.stockValue) or "–", color = Style.C.accent })
-      end
-      pl:SetRows(rows, "Keine Vorgänge im Zeitraum")
-    else
-      pl:SetRows(rows, "Gewinnrechnung noch nicht verfügbar")
+    report = optional(ns.Profit, "Report", since)
+    if type(report) ~= "table" then
+      report = nil
+      for i = 1, 5 do figPeriod:Set(i, "–") end
+      for i = 1, 4 do figStock:Set(i, "–") end
+      pl:SetRows({}, "Gewinnrechnung noch nicht verfügbar")
+      showList()
+      return
     end
-
-    rows = {}
-    for _, e in ipairs(ledgerEvents(40)) do table.insert(rows, eventRow(e)) end
-    recent:SetRows(rows, "Noch keine Vorgänge")
+    local t, st = report.totals, report.stockTotals
+    local sold, expired, cancelled = 0, 0, 0
+    for _, g in ipairs(report.groups) do
+      sold = sold + (g.sold or 0)
+      expired, cancelled = expired + (g.expired or 0), cancelled + (g.cancelled or 0)
+    end
+    figPeriod:Set(1, money(t.revenue), units(sold) .. " verkauft")
+    figPeriod:Set(2, money(t.materials), "Material + Handelsware")
+    figPeriod:Set(3, money(t.cut), "beim Verkauf")
+    figPeriod:Set(4, money(t.depositsLost), string.format("%d× abgel., %d× abgebr.", expired, cancelled))
+    figPeriod:Set(5, signedMoney(t.profit), "Umsatz − Einkauf − Gebühren")
+    figStock:Set(1, units(st.units) .. " Stk", #report.stock .. " Items")
+    figStock:Set(2, money(st.cost), "")
+    figStock:Set(3, st.unpriced < #report.stock and money(st.market) or "–",
+      st.unpriced > 0 and (st.unpriced .. " ohne Marktpreis") or "")
+    figStock:Set(4, st.unpriced < #report.stock and signedMoney(st.diff) or "–",
+      st.unpriced > 0 and "nur Items mit Preis" or "noch nicht verkauft")
+    pl:SetRows(areaRows(), "Keine Vorgänge im Zeitraum", not reset)
+    showList()
   end
 end
 

@@ -13,6 +13,10 @@
 -- commodities "Kaufen" (the game quotes the final price) and then "Bestätigen".
 -- If the game blocks automatic searches, every search round needs a click too.
 -- Every hit and purchase is logged in db.sniper, so the yield can be measured.
+-- Recipes (ns.RecipeWatch, Data_RecipeWatch.lua): the tradeable recipes worth having are
+-- watched in their own category on top of the watch list (not counted against watchMax).
+-- A recipe hit is an offer at or below its usual price * recipeMax (no usual price known:
+-- every offer); it is marked "Rezept" in the list and plays its own sound.
 local ADDON, ns = ...
 
 local Sniper = {}
@@ -46,6 +50,7 @@ local seen = {}             -- key -> { price = cheapest offer or false (none), 
 local roundNo = 0           -- watch list rounds of this run
 local levels = {}           -- itemID -> { list = price levels of the last search, t = time() }
 local priority = {}         -- items asked for elsewhere (ns.AHSearch), searched before the watch list
+local recipeSoundAt = -1000 -- GetTime() of the last recipe hit sound
 
 local function changed()
   if ns.Selling and ns.Selling.Refresh then ns.Safe(ns.Selling.Refresh) end
@@ -117,15 +122,57 @@ function Sniper.WatchCandidates()
   return list
 end
 
+-- Watched recipe of the item ({ profession, skill, product, usual }) while recipes are watched.
+function Sniper.RecipeInfo(itemID)
+  local r = ns.RecipeWatch and ns.RecipeWatch[itemID]
+  if not r or not ns.Deals.Settings().recipeWatch then return nil end
+  return r
+end
+
+-- Usual price of a watched recipe: the list's value, else our own house average (ns.Item).
+function Sniper.RecipeUsual(itemID)
+  local r = ns.RecipeWatch and ns.RecipeWatch[itemID]
+  return r and r.usual or ns.Item(itemID).avg
+end
+
+-- Highest price a recipe hit may cost (nil = every offer, no usual price known).
+function Sniper.RecipeLimit(itemID)
+  local usual = Sniper.RecipeUsual(itemID)
+  return usual and math.floor(usual * ns.Deals.Settings().recipeMax + 0.5) or nil
+end
+
+-- Watched recipes, sorted by item id: { itemID... } (empty while switched off).
+function Sniper.RecipeItems()
+  local list = {}
+  if not ns.RecipeWatch or not ns.Deals.Settings().recipeWatch then return list end
+  for itemID in pairs(ns.RecipeWatch) do table.insert(list, itemID) end
+  table.sort(list)
+  return list
+end
+
 local function buildWatchlist()
   if not api.SendSearchQuery or not api.MakeItemKey then return nil end
-  local w = { keys = {}, set = {} }
+  local w = { keys = {}, set = {}, recipeSet = {} }
   for _, c in ipairs(Sniper.WatchCandidates()) do
     local itemKey = api.MakeItemKey(c.itemID)
-    table.insert(w.keys, { itemKey = itemKey, itemID = c.itemID, key = keyOf(itemKey) })
+    table.insert(w.keys, { itemKey = itemKey, itemID = c.itemID, key = keyOf(itemKey), normal = true })
     w.set[c.itemID] = true
   end
-  return #w.keys > 0 and w or nil
+  -- Without the collector data the whole AH is browsed (recipes included, see quickCheck).
+  if #w.keys == 0 then return nil end
+  for _, itemID in ipairs(Sniper.RecipeItems()) do
+    w.recipeSet[itemID] = true
+    local found = false
+    for _, k in ipairs(w.keys) do
+      if k.itemID == itemID then k.recipe, found = true, true end
+    end
+    if not found then
+      local itemKey = api.MakeItemKey(itemID)
+      table.insert(w.keys, { itemKey = itemKey, itemID = itemID, key = keyOf(itemKey), recipe = true })
+      w.set[itemID] = true
+    end
+  end
+  return w
 end
 
 local lastSearch = 0
@@ -192,6 +239,10 @@ local function quickCheck(r)
   if r.containsOwnerItem or not r.minPrice or r.minPrice <= 0 then return false end
   if not plainKey(r.itemKey) then return false end
   local itemID = r.itemKey.itemID
+  if not watch and Sniper.RecipeInfo(itemID) then
+    local limit = Sniper.RecipeLimit(itemID)
+    if not limit or r.minPrice <= limit then return true, true end
+  end
   if watch then
     if not watch.set[itemID] then return false end -- sells in our house: checked by the list
   elseif not ns.Deals.Liquid(itemID) then
@@ -208,8 +259,10 @@ function Sniper.BrowseDone()
   for _, r in ipairs(results) do
     local key = keyOf(r.itemKey)
     seen[key] = r.minPrice
-    if quickCheck(r) and checked[key] ~= r.minPrice then
-      table.insert(candidates, { itemKey = r.itemKey, itemID = r.itemKey.itemID, key = key, minPrice = r.minPrice })
+    local ok, recipe = quickCheck(r)
+    if ok and checked[key] ~= r.minPrice then
+      table.insert(candidates, { itemKey = r.itemKey, itemID = r.itemKey.itemID, key = key, minPrice = r.minPrice,
+        recipe = recipe, normal = not recipe })
     end
   end
   -- Hits whose cheapest offer is gone were bought by someone else (or cancelled).
@@ -251,6 +304,28 @@ local function priceLevels(listings)
   return list
 end
 
+-- Recipe hit: the foreign offers at or below the recipe limit, cheapest first. profit =
+-- what stays below the usual price (0 without one); sellAt = the usual price.
+local function recipeHit(c, listings, commodity)
+  local limit = Sniper.RecipeLimit(c.itemID)
+  local usual = Sniper.RecipeUsual(c.itemID)
+  local buy = {}
+  for _, l in ipairs(listings) do
+    if not l.own and l.unit and l.unit > 0 and (not limit or l.unit <= limit) then table.insert(buy, l) end
+  end
+  if #buy == 0 then return nil end
+  table.sort(buy, function(a, b) return a.unit < b.unit end)
+  local units, cost = 0, 0
+  for _, l in ipairs(buy) do units, cost = units + (l.count or 1), cost + l.unit * (l.count or 1) end
+  local best = buy[1].unit
+  local info = ns.RecipeWatch and ns.RecipeWatch[c.itemID] or {}
+  return { key = c.key, itemKey = c.itemKey, itemID = c.itemID, commodity = commodity, recipe = true,
+    profession = info.profession, skill = info.skill, product = info.product, usual = usual,
+    ref = usual or best, cap = usual, level = best, sellAt = usual or best, sellSource = "üblicher Preis",
+    buyUpTo = limit or best, limit = limit or best, units = units, cost = cost,
+    profit = usual and math.max(0, usual - best) or 0, best = best, auctions = buy }
+end
+
 local function evaluate(c, listings, commodity)
   local plain, cheapest = {}, nil
   for _, l in ipairs(listings) do
@@ -264,6 +339,12 @@ local function evaluate(c, listings, commodity)
   local house = #plain > 0 and ns.Deals.HousePrice(plain, 0.25) or nil
   local ref, source = ns.Deals.Reference(c.itemID, house)
   seen[c.key] = { price = cheapest or false, limit = ref and ref * ns.Deals.MaxShare(), t = time() }
+  -- Watched recipe: its own rule; the price stair only when it is on the normal list too.
+  if Sniper.RecipeInfo(c.itemID) then
+    seen[c.key].limit = Sniper.RecipeLimit(c.itemID) or seen[c.key].limit
+    local hit = recipeHit(c, listings, commodity)
+    if hit or not c.normal then return hit end
+  end
   -- Price stair (Deals.Staircase): what to buy, where to sell it again.
   local item = ns.Item(c.itemID)
   local cap = item.avg or ref
@@ -305,8 +386,18 @@ local function finishDetail(c, listings, commodity)
     if not old then
       local s = session()
       s.hits, s.hitProfit = s.hits + 1, s.hitProfit + hit.profit
-      log("hit", hit, { b = hit.best, r = math.floor(hit.ref) })
-      if PlaySound then pcall(PlaySound, SOUNDKIT and SOUNDKIT.AUCTION_WINDOW_OPEN or 5274) end
+      log("hit", hit, { b = hit.best, r = math.floor(hit.ref), rc = hit.recipe or nil })
+      if PlaySound then
+        if hit.recipe then
+          -- own sound, at most once a minute (many recipes may hit in the same round)
+          if GetTime() - recipeSoundAt >= 60 then
+            recipeSoundAt = GetTime()
+            pcall(PlaySound, SOUNDKIT and SOUNDKIT.RAID_WARNING or 8959)
+          end
+        else
+          pcall(PlaySound, SOUNDKIT and SOUNDKIT.AUCTION_WINDOW_OPEN or 5274)
+        end
+      end
     end
   else
     if old then
@@ -515,7 +606,14 @@ handlers.AUCTION_HOUSE_PURCHASE_COMPLETED = function(auctionID)
   note = "Gekauft: " .. ns.ItemName(hit.itemID) .. " für " .. ns.FormatMoney(a.buyout, true)
   -- The group's auction id is used up; search the item again right away for fresh ids.
   hits[hit.key] = nil
-  table.insert(candidates, 1, { itemKey = hit.itemKey, itemID = hit.itemID, key = hit.key })
+  local again = { itemKey = hit.itemKey, itemID = hit.itemID, key = hit.key, recipe = hit.recipe }
+  again.normal = not hit.recipe
+  if watch then
+    for _, w in ipairs(watch.keys) do
+      if w.key == hit.key then again.recipe, again.normal = w.recipe, w.normal end
+    end
+  end
+  table.insert(candidates, 1, again)
   buying = nil
   changed()
   later(0.5, nextStep)
@@ -615,7 +713,11 @@ end
 function Sniper.Hits()
   local list = {}
   for _, hit in pairs(hits) do table.insert(list, hit) end
-  table.sort(list, function(a, b) return a.profit > b.profit end)
+  -- recipes first (rare, gone fast), then by profit
+  table.sort(list, function(a, b)
+    if (a.recipe or false) ~= (b.recipe or false) then return a.recipe == true end
+    return a.profit > b.profit
+  end)
   return list
 end
 
@@ -639,13 +741,15 @@ function Sniper.State()
   local function row(key, itemID, hit)
     local s = seen[key]
     local limit = hit and hit.limit or (s and s.limit)
+    local recipe = not hit and watch and watch.recipeSet and watch.recipeSet[itemID]
+    if not limit and recipe then limit = Sniper.RecipeLimit(itemID) end
     if not limit then
       local ref = ns.Deals.Reference(itemID, nil)
       limit = ref and ref * ns.Deals.MaxShare()
     end
     listed[key] = true
     table.insert(st.rows, { itemID = itemID, key = key, limit = limit, price = s and s.price,
-      checked = s and s.t, current = key == current, hit = hit })
+      checked = s and s.t, current = key == current, hit = hit, recipe = (hit and hit.recipe) or recipe or nil })
   end
   for _, hit in ipairs(Sniper.Hits()) do row(hit.key, hit.itemID, hit) end
   if watch then

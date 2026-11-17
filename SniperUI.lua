@@ -43,6 +43,16 @@ local function stepper(parent, y, label, show, minus, plus)
   return function() v:SetText(show()) end
 end
 
+-- One on/off value: label, a button showing "an"/"aus" that flips it.
+local function toggle(parent, y, label, get, flip)
+  local l = Style.Text(parent, 12)
+  l:SetPoint("TOPLEFT", 10, y)
+  l:SetText(label)
+  local b = Style.Button(parent, "", 52, 18, function() ns.Safe(flip) end)
+  b:SetPoint("TOPRIGHT", -8, y + 2)
+  return function() b.label:SetText(get() and (GREEN .. "an|r") or (MUTED .. "aus|r")) end
+end
+
 -- Scrollable list with item icon and item tooltip per row.
 local function itemList(parent, columns)
   local scroll, body = Style.Scroll(parent)
@@ -117,7 +127,7 @@ local function build(page, width, height)
   -- Settings ---------------------------------------------------------------------
   local settings = card(page, "Einstellungen")
   settings:SetPoint("TOPLEFT", PAD, -PAD)
-  settings:SetSize(leftW, 242)
+  settings:SetSize(leftW, 320)
   local function set(key, v) Deals.Set(key, v) end
   local updates = {}
   local function S() return Deals.Settings() end
@@ -154,6 +164,17 @@ local function build(page, width, height)
     function() return string.format("%d %%", math.floor(S().minGap * 100 + 0.5)) end,
     function() set("minGap", math.max(0.05, S().minGap - 0.05)) end,
     function() set("minGap", math.min(0.4, S().minGap + 0.05)) end))
+  -- Watched recipes (Data_RecipeWatch.lua): own category on top of the watch list.
+  table.insert(updates, toggle(settings, -216, "Rezepte beobachten",
+    function() return S().recipeWatch end, function() set("recipeWatch", not S().recipeWatch) end))
+  table.insert(updates, stepper(settings, -242, "Rezepte kaufen bis (vom üblichen Preis)",
+    function() return string.format("%d %%", math.floor(S().recipeMax * 100 + 0.5)) end,
+    function() set("recipeMax", math.max(0.5, S().recipeMax - 0.05)) end,
+    function() set("recipeMax", math.min(2, S().recipeMax + 0.05)) end))
+  -- Discord: the companion server posts listed watched recipes in #wow-broker (settings.discord).
+  table.insert(updates, toggle(settings, -268, "Rezepte im Discord melden",
+    function() return ns.MyAuctions.Discord().recipes end,
+    function() local d = ns.MyAuctions.Discord(); d.recipes = not d.recipes end))
   local reset = Style.Button(settings, "Standard", 80, 18, function()
     ns.db.settings.sniper = nil
   end)
@@ -226,8 +247,21 @@ local function build(page, width, height)
       table.insert(entries, { ns.ItemName(c.itemID) or ("#" .. c.itemID), money(c.avg),
         money(c.avg * set.maxShare), demandLabel(c.demand), itemID = c.itemID })
     end
+    local recipes = Sniper and Sniper.RecipeItems and Sniper.RecipeItems() or {}
+    local known = {}
+    for _, e in ipairs(entries) do known[e.itemID] = true end
+    for _, itemID in ipairs(recipes) do
+      if not known[itemID] then
+        local r = ns.RecipeWatch[itemID]
+        local limit = Sniper.RecipeLimit(itemID)
+        table.insert(entries, { ORANGE .. "Rezept|r  " .. (ns.ItemName(itemID) or ("#" .. itemID)),
+          r.usual and money(r.usual) or (MUTED .. "–|r"), limit and money(limit) or (MUTED .. "jedes|r"),
+          r.skill and ("Skill " .. r.skill) or "", itemID = itemID })
+      end
+    end
     watch:Set(entries, rightW - 12)
-    watchInfo:SetText(string.format("%d Items  ·  gesucht wird, was du dir leisten kannst", #entries))
+    watchInfo:SetText(string.format("%d Items + %d Rezepte  ·  gesucht wird, was du dir leisten kannst",
+      #candidates, #recipes))
 
     local events = {}
     local logList = ns.db.sniper and ns.db.sniper.log or {}

@@ -22,6 +22,7 @@ local api = C_AuctionHouse or {}
 local MAIL_SLACK = 900   -- seconds; receive time derived from daysLeft drifts a little
 local MAIL_DAYS = 30     -- auction house mails are kept 30 days
 local KEEP = 3000
+Ledger.KEEP = KEEP   -- also the limit when Sync.lua merges another PC's events
 
 local function book()
   ns.db.ledger = ns.db.ledger or {}

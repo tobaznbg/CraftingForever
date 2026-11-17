@@ -148,7 +148,13 @@ local function sniperTooltip(self)
   GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
   GameTooltip:SetItemByID(e.itemID)
   local h = e.hit
-  if h then
+  if h and h.recipe then
+    GameTooltip:AddLine(" ")
+    GameTooltip:AddLine(string.format("Rezept (%s %s)  ·  %dx ab %s", h.profession or "?", tostring(h.skill or "?"),
+      h.units, money(h.best)), 1, 0.71, 0.28)
+    GameTooltip:AddLine("Üblicher Preis " .. (h.usual and money(h.usual) or "unbekannt"), 1, 0.71, 0.28)
+    if h.best > GetMoney() then GameTooltip:AddLine("Gold reicht nicht.", 1, 0.71, 0.28) end
+  elseif h then
     GameTooltip:AddLine(" ")
     GameTooltip:AddLine(string.format("%dx kaufen bis %s  ·  einstellen zu %s", h.units, money(h.buyUpTo), money(h.sellAt)), 0.37, 0.83, 0.55)
     GameTooltip:AddLine(string.format("Gewinn ~%s%s", money(h.profit),
@@ -246,6 +252,7 @@ end
 local function sniperCells(e)
   local price, checked
   if e.price == false and not e.hit then price = MUTED .. "nicht im Angebot|r"
+  elseif e.hit and e.hit.recipe then price = e.hit.usual and (MUTED .. "üblich " .. money(e.hit.usual) .. "|r") or (MUTED .. "–|r")
   elseif e.hit then price = GREEN .. money(e.hit.sellAt) .. "|r"
   elseif e.price then price = money(e.price)
   else price = MUTED .. "–|r" end
@@ -639,12 +646,21 @@ local function refreshSniper()
     r.button.entry = h
     r.icon:SetTexture(getIcon and getIcon(e.itemID) or nil)
     local name = ns.ItemName(e.itemID) or ("#" .. e.itemID)
-    r.name:SetText(h and (GREEN .. name .. "  +" .. money(h.profit) .. "|r") or name)
+    if h and h.recipe then
+      r.name:SetText(ORANGE .. "Rezept|r  " .. name .. "  " .. money(h.best))
+    else
+      r.name:SetText(h and (GREEN .. name .. "  +" .. money(h.profit) .. "|r") or name)
+    end
     local limit, price, checked = sniperCells(e)
     r.cells[1]:SetText(limit)
     r.cells[2]:SetText(price)
     r.cells[3]:SetText(h and "" or checked)
-    if h then
+    if h and h.recipe then
+      r.stripe:SetColorTexture(1, 0.71, 0.28, 0.16)
+      local confirm = pending and pending.hit == h and pending.quoted
+      r.button.label:SetText(confirm and "Bestätigen" or (h.commodity and "Kaufen" or "Kaufen 1"))
+      r.button:Show()
+    elseif h then
       r.stripe:SetColorTexture(0.37, 0.83, 0.55, 0.14)
       local confirm = pending and pending.hit == h and pending.quoted
       r.button.label:SetText(confirm and "Bestätigen" or (h.commodity and "Kaufen" or "Kaufen 1"))

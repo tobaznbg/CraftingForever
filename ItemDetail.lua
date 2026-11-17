@@ -328,7 +328,16 @@ render = function()
   local item = ns.Item(itemID)
 
   -- 1. Why it is a hit (only while the item is one)
-  if h then
+  if h and h.recipe then
+    -- Watched recipe (Sniper.RecipeHit): bought to learn or to keep, not price-stair resale.
+    section("Warum Treffer: Rezept")
+    line("Rezept für", (h.profession or "?") .. (h.skill and h.skill > 0 and (" " .. h.skill) or ""))
+    if h.product and h.product > 0 then line("Ergibt", ns.ItemName(h.product) or ("#" .. h.product)) end
+    line("Kaufen", string.format("%dx ab %s  (bis %s)", h.units, money(h.best), money(h.buyUpTo)))
+    line("Üblicher Preis", h.usual and money(h.usual) or "unbekannt")
+    if h.usual and h.best < h.usual then line("Unter üblich", GREEN .. money(h.usual - h.best) .. "|r") end
+    line("Treffer seit", ago(h.firstSeen or time()))
+  elseif h then
     section("Warum Treffer")
     line("Kaufen", string.format("%dx bis %s  (zus. %s)", h.units, money(h.buyUpTo), money(h.cost)))
     line("Einstellen zu", money(h.sellAt) .. "  " .. Style.MUTED .. (h.sellSource or "") .. "|r")

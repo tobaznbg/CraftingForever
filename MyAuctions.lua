@@ -284,9 +284,9 @@ local function storeCancel(auctionID)
 end
 My.StoreOwned = storeOwned
 
--- Discord messages of the companion server (ns.db.settings.discord): sold auctions, snipes from
+-- Discord messages of the companion server (ns.db.settings.discord): sold auctions, watched recipes, snipes from
 -- snipeMin copper profit on. Defaults filled in place.
-My.DISCORD_DEFAULTS = { sales = true, snipes = true, snipeMin = 50000 }
+My.DISCORD_DEFAULTS = { sales = true, snipes = true, snipeMin = 50000, recipes = true }
 function My.Discord()
   ns.db.settings = ns.db.settings or {}
   local d = ns.db.settings.discord
