@@ -218,6 +218,7 @@ local function showPath()
     local name = c.name
     if seg.learned > 0 then name = name .. GREY .. "  (lernen " .. money(seg.learned) .. ")|r" end
     if c.needsPattern then name = name .. ORANGE .. "  (Muster vom Händler, Preis fehlt)|r" end
+    if c.artisan then name = name .. ORANGE .. "  (Fachmann-Lehrer, Horde: Hahrana Ironhide, Feralas)|r" end
     addItemCells(c.out, string.format("%d-%d", seg.from, seg.to), withIcon(c.out, name), tostring(math.ceil(seg.crafts)),
       money(outlay), cost(safe), cost(potential))
     if safe - potential >= BET_GAP then

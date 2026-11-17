@@ -1,40 +1,92 @@
--- AHTable: own tabs in the auction house frame, each a sortable item table over the
--- full width of the frame, with optional filter buttons and a "Suchen" button per row.
--- The tabs work like LibAHTab (TSM, Auctionator): DisplayMode tab buttons after
--- Blizzard's tabs; selecting one clears the display mode and shows its frame, any
--- Blizzard display mode hides it again.
+-- AHTable: reusable item table, used as own tabs in the auction house frame.
+-- Sortable columns, per-column filters, optional view buttons, two-line rows and a
+-- "Suchen" button per row.
 --
 -- ns.AHTable.Add{
 --   id, label, title,
---   columns = { { key, title, width (0 = name column), align, format(entry) -> text, muted }... },
---   rows = function(filter) -> list of entries (each with itemID),
---   status = function(list) -> text,
---   filters = { { key, label }... } (optional, first is the default),
+--   columns = { {
+--     key, title, width (0 = the name column, takes the rest), align ("LEFT"/"RIGHT"),
+--     fmt = function(entry) -> text (default: tostring(entry[key])),
+--     muted = true (grey text),
+--     filter = "money" | "pct" | "num" (column can be filtered; money in gold, pct in %),
+--   }... },
+--   rows = function(view) -> list of entries (each with itemID and the column keys),
+--   views = { { key, label, width }... } (optional buttons, the first is the default),
+--   defaultFilters = { [key] = ">= 1" ... } (until the user sets own filters),
 --   sort = key, desc = true,
---   rowColor = function(entry) -> { r, g, b } or nil (optional marker: bar + faint tint),
---   subtitle = function(entry) -> text (optional second line under the name),
---   salesFilter = true: button "Verk./Tag ≥ n" that hides entries with entry.fpd < n
---                 (cycles through SALES_STEPS, remembered per tab),
+--   rowColor = function(entry) -> { r, g, b } or nil (marker bar + faint tint),
+--   subtitle = function(entry) -> text (second line under the name),
+--   detail = function(entry, count) -> { title, subtitle, columns = { { title, width }... },
+--            rows = { { itemID, cells = { text... } }... }, footer = text }
+--            (click on a row opens it in a panel right of the auction house; with
+--            detailCount = true the panel has a -/+ count that is passed in),
 -- }
+--
+-- Filters: one input per filterable column in a row under the header, shown with the
+-- "Filter" button. "5" or ">=5" keeps entries with value >= 5, "<5" or "<=5" keeps
+-- values <= 5; empty = no filter. Saved per table in ns.db.ahTable[id].filters.
+--
+-- The tabs work like LibAHTab (TSM, Auctionator): DisplayMode tab buttons after
+-- Blizzard's tabs; selecting one clears the display mode and shows its frame, any
+-- Blizzard display mode hides it again.
 local ADDON, ns = ...
 
 local AHTable = {}
 ns.AHTable = AHTable
 
-local ROW, HEADER, TOOLBAR = 30, 22, 28
-local FOOTER = 8
+local ROW, HEADER, TOOLBAR, FILTER_ROW, FOOTER = 30, 22, 28, 24, 8
 local BUTTON_W = 64
 local MAX_ROWS = 40
+local SCALE = { money = 10000, pct = 0.01, num = 1 }
 
-local SALES_STEPS = { 0, 1, 2, 5, 10, 25 }
 local defs = {}       -- in tab order
+local created = false
 
 local function settings(t)
   ns.db.ahTable = ns.db.ahTable or {}
-  ns.db.ahTable[t.id] = ns.db.ahTable[t.id] or { minSales = 1 }
-  return ns.db.ahTable[t.id]
+  local s = ns.db.ahTable[t.id]
+  if not s or not s.filters then
+    s = { filters = {} }
+    for key, text in pairs(t.defaultFilters or {}) do s.filters[key] = text end
+    ns.db.ahTable[t.id] = s
+  end
+  return s
 end
-local created = false
+
+-- "5", ">=5", "> 5" -> ">=", 5;  "<5", "<=5" -> "<=", 5;  "" -> nil
+local function parseFilter(text)
+  if not text then return nil end
+  local op, num = text:match("^%s*([<>]?)=?%s*(-?[%d%.,]+)%s*$")
+  if not num then return nil end
+  num = tonumber((num:gsub(",", ".")))
+  if not num then return nil end
+  return op == "<" and "<=" or ">=", num
+end
+
+local function passes(t, e)
+  local filters = settings(t).filters
+  for _, c in ipairs(t.columns) do
+    if c.filter then
+      local op, num = parseFilter(filters[c.key])
+      if op then
+        local v = e[c.key]
+        if v == nil then return false end
+        local limit = num * SCALE[c.filter]
+        if op == ">=" and v < limit then return false end
+        if op == "<=" and v > limit then return false end
+      end
+    end
+  end
+  return true
+end
+
+local function activeFilters(t)
+  local n, filters = 0, settings(t).filters
+  for _, c in ipairs(t.columns) do
+    if c.filter and parseFilter(filters[c.key]) then n = n + 1 end
+  end
+  return n
+end
 
 -- Switches to Blizzard's buy tab and searches the item there.
 local function search(itemID)
@@ -48,7 +100,11 @@ local function sortList(t)
   local key, desc = t.sortKey, t.sortDesc
   table.sort(t.list, function(a, b)
     local x, y = a[key], b[key]
-    if key == "name" then x, y = (x or ""):lower(), (y or ""):lower() else x, y = x or 0, y or 0 end
+    if type(x) == "string" or type(y) == "string" then
+      x, y = tostring(x or ""):lower(), tostring(y or ""):lower()
+    else
+      x, y = x or 0, y or 0
+    end
     if x == y then return a.itemID < b.itemID end
     if desc then return x > y end
     return x < y
@@ -56,23 +112,36 @@ local function sortList(t)
 end
 
 local function build(t)
-  t.list = t.rows(t.filter) or {}
-  if t.salesFilter then
-    local min, kept = settings(t).minSales or 0, {}
-    for _, e in ipairs(t.list) do
-      if (e.fpd or 0) >= min then table.insert(kept, e) end
-    end
-    t.list = kept
+  local kept = {}
+  for _, e in ipairs(t.rows(t.view) or {}) do
+    e.name = ns.ItemName(e.itemID) or ("#" .. e.itemID)
+    if passes(t, e) then table.insert(kept, e) end
   end
-  for _, e in ipairs(t.list) do e.name = ns.ItemName(e.itemID) or ("#" .. e.itemID) end
+  t.list = kept
   sortList(t)
+end
+
+local function topOffset(t)
+  return 1 + TOOLBAR + (t.showFilters and FILTER_ROW or 0)
+end
+
+local function layoutRows(t)
+  local y0 = topOffset(t) + HEADER
+  for i, r in ipairs(t.rowFrames) do
+    r:ClearAllPoints()
+    r:SetPoint("TOPLEFT", 1, -y0 - (i - 1) * ROW)
+    r:SetPoint("TOPRIGHT", -1, -y0 - (i - 1) * ROW)
+  end
+  t.head:ClearAllPoints()
+  t.head:SetPoint("TOPLEFT", 1, -(1 + TOOLBAR))
+  t.head:SetPoint("TOPRIGHT", -1, -(1 + TOOLBAR))
+  t.filterRow:SetShown(t.showFilters and true or false)
 end
 
 local function refresh(t)
   local f = t.frame
   if not f or not f:IsShown() then return end
-  local top = HEADER + (t.filters and TOOLBAR or 0)
-  local n = math.max(1, math.min(MAX_ROWS, math.floor((f:GetHeight() - top - FOOTER) / ROW)))
+  local n = math.max(1, math.min(MAX_ROWS, math.floor((f:GetHeight() - topOffset(t) - HEADER - FOOTER) / ROW)))
   t.offset = math.max(0, math.min(t.offset, #t.list - n))
   for i, r in ipairs(t.rowFrames) do
     local e = i <= n and t.list[t.offset + i] or nil
@@ -85,12 +154,12 @@ local function refresh(t)
         r.tint:SetColorTexture(mark[1], mark[2], mark[3], 0.08)
         r.bar:SetColorTexture(mark[1], mark[2], mark[3], 1)
       end
-      if r.sub then r.sub:SetText(t.subtitle(e) or "") end
       r.icon:SetTexture(((C_Item and C_Item.GetItemIconByID) or GetItemIcon)(e.itemID))
       e.name = ns.ItemName(e.itemID) or e.name
       for _, c in ipairs(t.columns) do
-        r.cells[c[1]]:SetText(c[5] and c[5](e) or tostring(e[c[1]] or ""))
+        r.cells[c.key]:SetText(c.fmt and c.fmt(e) or tostring(e[c.key] or ""))
       end
+      if r.sub then r.sub:SetText(t.subtitle(e) or "") end
       r:Show()
     else
       r:Hide()
@@ -99,10 +168,10 @@ local function refresh(t)
   for _, h in ipairs(t.headers) do
     h.label:SetTextColor(unpack(h.key == t.sortKey and ns.Style.C.accent or ns.Style.C.muted))
   end
-  for key, b in pairs(t.filterButtons or {}) do b:SetActive(key == t.filter) end
-  if t.salesButton then
-    t.salesButton.label:SetText(string.format("Verk./Tag ≥ %d", settings(t).minSales or 0))
-  end
+  for key, b in pairs(t.viewButtons or {}) do b:SetActive(key == t.view) end
+  local active = activeFilters(t)
+  t.filterButton.label:SetText(active > 0 and string.format("Filter (%d)", active) or "Filter")
+  t.countText:SetText(string.format("%d Einträge", #t.list))
 end
 
 local function createFrame(t, parent)
@@ -115,58 +184,54 @@ local function createFrame(t, parent)
   Style.Solid(f, Style.C.bg):SetAllPoints()
   Style.Border(f)
 
-  local top = 1
-  if t.filters then
-    t.filterButtons = {}
+  -- Toolbar: view buttons left, entry count and filter toggle right.
+  if t.views then
+    t.viewButtons = {}
     local x = 8
-    for _, fd in ipairs(t.filters) do
-      local b = Style.Tab(f, fd[2], fd[3] or 90, function()
-        t.filter, t.offset = fd[1], 0
+    for _, v in ipairs(t.views) do
+      local b = Style.Tab(f, v[2], v[3] or 90, function()
+        t.view, t.offset = v[1], 0
         build(t)
         refresh(t)
       end)
       b:SetPoint("TOPLEFT", x, -2)
-      t.filterButtons[fd[1]] = b
-      x = x + (fd[3] or 90) + 4
+      t.viewButtons[v[1]] = b
+      x = x + (v[3] or 90) + 4
     end
-    top = top + TOOLBAR
   end
-  if t.salesFilter then
-    t.salesButton = Style.Button(f, "", 110, 20, function()
-      local s, nextValue = settings(t), SALES_STEPS[1]
-      for i, v in ipairs(SALES_STEPS) do
-        if v == (s.minSales or 0) then nextValue = SALES_STEPS[i % #SALES_STEPS + 1] end
-      end
-      s.minSales, t.offset = nextValue, 0
-      build(t)
-      refresh(t)
-    end)
-    t.salesButton:SetPoint("TOPRIGHT", -8, -5)
-  end
+  t.filterButton = Style.Button(f, "Filter", 80, 20, function()
+    t.showFilters = not t.showFilters
+    layoutRows(t)
+    refresh(t)
+  end)
+  t.filterButton:SetPoint("TOPRIGHT", -8, -5)
+  t.countText = Style.Text(f, 11)
+  t.countText:SetPoint("RIGHT", t.filterButton, "LEFT", -10, 0)
+  t.countText:SetTextColor(unpack(Style.C.muted))
 
   -- Column layout: the name column takes what the fixed columns leave.
   local fixed = BUTTON_W + 16
-  for i = 2, #t.columns do fixed = fixed + t.columns[i][3] end
-  local function place(row, makeCell)
+  for i = 2, #t.columns do fixed = fixed + t.columns[i].width end
+  local function place(row, makeCell, twoLines)
     local x = 8
     for i, c in ipairs(t.columns) do
       local cell = makeCell(c)
-      if i == 1 then
-        local y = (t.subtitle and row ~= t.head) and 7 or 0
-        cell:SetPoint("LEFT", row, "LEFT", 34, y)
-        cell:SetPoint("RIGHT", row, "RIGHT", -fixed, y)
-      else
-        x = x + c[3]
-        cell:SetPoint("RIGHT", row, "RIGHT", -(fixed - x + 8), 0)
-        cell:SetWidth(c[3] - 8)
+      if i > 1 then x = x + c.width end
+      if cell then
+        if i == 1 then
+          local y = twoLines and 7 or 0
+          cell:SetPoint("LEFT", row, "LEFT", 34, y)
+          cell:SetPoint("RIGHT", row, "RIGHT", -fixed, y)
+        else
+          cell:SetPoint("RIGHT", row, "RIGHT", -(fixed - x + 8), 0)
+          cell:SetWidth(c.width - 8)
+        end
       end
     end
   end
 
   local head = CreateFrame("Frame", nil, f)
   t.head = head
-  head:SetPoint("TOPLEFT", 1, -top)
-  head:SetPoint("TOPRIGHT", -1, -top)
   head:SetHeight(HEADER)
   Style.Solid(head, Style.C.header):SetAllPoints()
   t.headers = {}
@@ -175,9 +240,9 @@ local function createFrame(t, parent)
     b:SetHeight(HEADER)
     b.label = Style.Text(b, 12)
     b.label:SetAllPoints()
-    b.label:SetJustifyH(c[4])
-    b.label:SetText(c[2])
-    b.key = c[1]
+    b.label:SetJustifyH(c.align or "RIGHT")
+    b.label:SetText(c.title)
+    b.key = c.key
     b:SetScript("OnClick", function(self)
       if t.sortKey == self.key then t.sortDesc = not t.sortDesc
       else t.sortKey, t.sortDesc = self.key, self.key ~= "name" end
@@ -188,12 +253,48 @@ local function createFrame(t, parent)
     return b
   end)
 
+  -- Filter row: an input under every filterable column.
+  local fr = CreateFrame("Frame", nil, f)
+  t.filterRow = fr
+  fr:SetPoint("TOPLEFT", head, "BOTTOMLEFT", 0, 0)
+  fr:SetPoint("TOPRIGHT", head, "BOTTOMRIGHT", 0, 0)
+  fr:SetHeight(FILTER_ROW)
+  Style.Solid(fr, { 1, 1, 1, 0.04 }):SetAllPoints()
+  local hint = Style.Text(fr, 11)
+  hint:SetPoint("LEFT", 34, 0)
+  hint:SetTextColor(unpack(Style.C.muted))
+  hint:SetText("5 = mindestens 5,  <5 = höchstens 5  (Preise in Gold, Prozent in %)")
+  t.inputs = {}
+  place(fr, function(c)
+    if not c.filter then return nil end
+    local box = CreateFrame("EditBox", nil, fr)
+    box:SetHeight(18)
+    box:SetAutoFocus(false)
+    box:SetFontObject(Style.Font(12))
+    box:SetJustifyH("RIGHT")
+    box:SetTextInsets(4, 4, 0, 0)
+    Style.Solid(box, Style.C.button):SetAllPoints()
+    Style.Border(box)
+    box:SetText(settings(t).filters[c.key] or "")
+    local function apply(self)
+      local text = self:GetText()
+      settings(t).filters[c.key] = (text ~= "" and text) or nil
+      if text ~= "" and not parseFilter(text) then self:SetTextColor(1, 0.42, 0.42) else self:SetTextColor(1, 1, 1) end
+      t.offset = 0
+      build(t)
+      refresh(t)
+    end
+    box:SetScript("OnEnterPressed", function(self) apply(self); self:ClearFocus() end)
+    box:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    box:SetScript("OnEditFocusLost", apply)
+    t.inputs[c.key] = box
+    return box
+  end)
+  fr:Hide()
+
   t.rowFrames = {}
   for i = 1, MAX_ROWS do
     local r = CreateFrame("Frame", nil, f)
-    local y = -top - HEADER - (i - 1) * ROW
-    r:SetPoint("TOPLEFT", 1, y)
-    r:SetPoint("TOPRIGHT", -1, y)
     r:SetHeight(ROW)
     local stripe = Style.Solid(r, Style.C.row)
     stripe:SetAllPoints()
@@ -215,11 +316,11 @@ local function createFrame(t, parent)
     r.cells = {}
     place(r, function(c)
       local fs = Style.Text(r, 12)
-      fs:SetJustifyH(c[4])
-      if c[6] then fs:SetTextColor(unpack(Style.C.muted)) end
-      r.cells[c[1]] = fs
+      fs:SetJustifyH(c.align or "RIGHT")
+      if c.muted then fs:SetTextColor(unpack(Style.C.muted)) end
+      r.cells[c.key] = fs
       return fs
-    end)
+    end, t.subtitle ~= nil)
     if t.subtitle then
       r.sub = Style.Text(r, 11)
       r.sub:SetPoint("LEFT", r, "LEFT", 34, -7)
@@ -240,18 +341,188 @@ local function createFrame(t, parent)
       GameTooltip:Show()
     end)
     r:SetScript("OnLeave", function() hover:Hide(); GameTooltip:Hide() end)
+    if t.detail then
+      r:SetScript("OnMouseUp", function(self, button)
+        if button == "LeftButton" and self.entry then ns.Safe(showDetail, t, self.entry) end
+      end)
+    end
     t.rowFrames[i] = r
   end
+  layoutRows(t)
 
   f:EnableMouseWheel(true)
   f:SetScript("OnMouseWheel", function(_, delta)
     t.offset = t.offset - delta * 3
     refresh(t)
   end)
-
   f:SetScript("OnShow", function() build(t); refresh(t) end)
+  f:SetScript("OnHide", function() if detail.t == t then AHTable.HideDetail() end end)
   f:SetScript("OnSizeChanged", function() refresh(t) end)
   f:Hide()
+end
+
+-- Detail panel -------------------------------------------------------------------------
+
+local DETAIL_W, DETAIL_ROWS, DETAIL_ROW = 400, 14, 26
+local detail = { t = nil, entry = nil, count = 1 }
+
+local function renderDetail()
+  local d, t = detail, detail.t
+  if not d.frame or not d.frame:IsShown() or not t then return end
+  local info = t.detail(d.entry, d.count) or {}
+  d.title:SetText(info.title or "")
+  d.sub:SetText(info.subtitle or "")
+  d.countBox:SetShown(t.detailCount and true or false)
+  d.countLabel:SetText(t.detailCount and tostring(d.count) or "")
+  local cols = info.columns or {}
+  -- Columns right-aligned from the right edge, the name takes the rest.
+  local function placeCells(cells, row)
+    local x = 8
+    for i = #cols, 1, -1 do
+      local fs = cells[i]
+      fs:ClearAllPoints()
+      fs:SetPoint("RIGHT", row, "RIGHT", -x, 0)
+      fs:SetWidth(cols[i][2] - 6)
+      fs:Show()
+      x = x + cols[i][2]
+    end
+    for i = #cols + 1, #cells do cells[i]:Hide() end
+    return x
+  end
+  local used = placeCells(d.headCells, d.head)
+  for i, c in ipairs(cols) do d.headCells[i]:SetText(c[1]) end
+  for i, r in ipairs(d.rows) do
+    local row = (info.rows or {})[i]
+    r.itemID = row and row.itemID
+    if row then
+      r.icon:SetTexture(row.itemID and ((C_Item and C_Item.GetItemIconByID) or GetItemIcon)(row.itemID) or nil)
+      r.name:SetText(row.name or (row.itemID and ns.ItemName(row.itemID)) or "")
+      r.name:SetPoint("RIGHT", r, "RIGHT", -used, 0)
+      placeCells(r.cells, r)
+      for j = 1, #cols do r.cells[j]:SetText(row.cells[j] or "") end
+      r:Show()
+    else
+      r:Hide()
+    end
+  end
+  d.footer:SetText(info.footer or "")
+end
+
+local function createDetail(parent)
+  local Style = ns.Style
+  local f = CreateFrame("Frame", "CraftingForeverAHDetail", parent)
+  detail.frame = f
+  f:SetWidth(DETAIL_W)
+  f:SetPoint("TOPLEFT", parent, "TOPRIGHT", 4, 0)
+  f:SetPoint("BOTTOMLEFT", parent, "BOTTOMRIGHT", 4, 0)
+  f:SetFrameStrata("HIGH")
+  Style.Panel(f, 30)
+  local close = Style.Close(f, function() f:Hide() end)
+  close:SetPoint("TOPRIGHT", -6, -6)
+  detail.title = Style.Text(f, 14)
+  detail.title:SetPoint("TOPLEFT", 12, -9)
+  detail.title:SetPoint("RIGHT", -40, 0)
+  detail.title:SetJustifyH("LEFT")
+  detail.sub = Style.Text(f, 11)
+  detail.sub:SetPoint("TOPLEFT", 12, -38)
+  detail.sub:SetPoint("RIGHT", -110, 0)
+  detail.sub:SetJustifyH("LEFT")
+  detail.sub:SetTextColor(unpack(Style.C.muted))
+
+  -- Count: - n +
+  local box = CreateFrame("Frame", nil, f)
+  detail.countBox = box
+  box:SetSize(96, 22)
+  box:SetPoint("TOPRIGHT", -10, -34)
+  local function step(delta)
+    local n = detail.count
+    local inc = IsShiftKeyDown() and 10 or 1
+    detail.count = math.max(1, math.min(999, n + delta * inc))
+    renderDetail()
+  end
+  local minus = Style.Button(box, "-", 26, 22, function() step(-1) end)
+  minus:SetPoint("LEFT")
+  local plus = Style.Button(box, "+", 26, 22, function() step(1) end)
+  plus:SetPoint("RIGHT")
+  detail.countLabel = Style.Text(box, 13)
+  detail.countLabel:SetPoint("CENTER")
+
+  local head = CreateFrame("Frame", nil, f)
+  detail.head = head
+  head:SetPoint("TOPLEFT", 1, -62)
+  head:SetPoint("TOPRIGHT", -1, -62)
+  head:SetHeight(20)
+  Style.Solid(head, Style.C.header):SetAllPoints()
+  local hname = Style.Text(head, 12)
+  hname:SetPoint("LEFT", 12, 0)
+  hname:SetText("Material")
+  hname:SetTextColor(unpack(Style.C.muted))
+  detail.headCells = {}
+  for i = 1, 6 do
+    local fs = Style.Text(head, 12)
+    fs:SetJustifyH("RIGHT")
+    fs:SetTextColor(unpack(Style.C.muted))
+    detail.headCells[i] = fs
+  end
+
+  detail.rows = {}
+  for i = 1, DETAIL_ROWS do
+    local r = CreateFrame("Button", nil, f)
+    r:SetHeight(DETAIL_ROW)
+    r:SetPoint("TOPLEFT", 1, -82 - (i - 1) * DETAIL_ROW)
+    r:SetPoint("TOPRIGHT", -1, -82 - (i - 1) * DETAIL_ROW)
+    local stripe = Style.Solid(r, Style.C.row)
+    stripe:SetAllPoints()
+    stripe:SetShown(i % 2 == 0)
+    local hover = Style.Solid(r, Style.C.hover, "ARTWORK")
+    hover:SetAllPoints()
+    hover:Hide()
+    r.icon = r:CreateTexture(nil, "ARTWORK")
+    r.icon:SetSize(20, 20)
+    r.icon:SetPoint("LEFT", 8, 0)
+    r.name = Style.Text(r, 12)
+    r.name:SetPoint("LEFT", r.icon, "RIGHT", 6, 0)
+    r.name:SetJustifyH("LEFT")
+    r.cells = {}
+    for j = 1, 6 do
+      local fs = Style.Text(r, 12)
+      fs:SetJustifyH("RIGHT")
+      r.cells[j] = fs
+    end
+    -- Click: search the reagent in Blizzard's buy tab.
+    r:SetScript("OnClick", function(self) if self.itemID then search(self.itemID) end end)
+    r:SetScript("OnEnter", function(self)
+      hover:Show()
+      if not self.itemID then return end
+      GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+      GameTooltip:SetItemByID(self.itemID)
+      GameTooltip:AddLine("Klick: im AH suchen", 0.31, 0.76, 0.63)
+      GameTooltip:Show()
+    end)
+    r:SetScript("OnLeave", function() hover:Hide(); GameTooltip:Hide() end)
+    detail.rows[i] = r
+  end
+
+  detail.footer = Style.Text(f, 12)
+  detail.footer:SetPoint("BOTTOMLEFT", 12, 12)
+  detail.footer:SetPoint("BOTTOMRIGHT", -12, 12)
+  detail.footer:SetJustifyH("LEFT")
+  detail.footer:SetJustifyV("BOTTOM")
+  detail.footer:SetWordWrap(true)
+  detail.footer:SetHeight(80)
+  f:Hide()
+end
+
+local function showDetail(t, entry)
+  if not detail.frame then createDetail(AuctionHouseFrame) end
+  if detail.entry ~= entry then detail.count = 1 end
+  detail.t, detail.entry = t, entry
+  detail.frame:Show()
+  renderDetail()
+end
+
+function AHTable.HideDetail()
+  if detail.frame then detail.frame:Hide() end
 end
 
 local function selectTab(t)
@@ -282,7 +553,6 @@ local function createAll(parent)
     tab:SetText(t.label)
     PanelTemplates_TabResize(tab, 20, nil, 70)
     tab:SetPoint("TOPLEFT", anchor, "TOPRIGHT", offsetX, 0)
-    tab:SetHitRectInsets((math.abs(offsetX) - 3) / 2, (math.abs(offsetX) - 3) / 2, 0, 0)
     PanelTemplates_DeselectTab(tab)
     tab:SetScript("OnClick", function() ns.Safe(selectTab, t) end)
     anchor = tab
@@ -297,13 +567,17 @@ end
 function AHTable.Add(def)
   def.offset, def.list = 0, {}
   def.sortKey, def.sortDesc = def.sort or "name", def.desc ~= false
-  def.filter = def.filters and def.filters[1][1] or nil
+  def.view = def.views and def.views[1][1] or nil
   table.insert(defs, def)
 end
 
 function AHTable.Refresh()
   for _, t in ipairs(defs) do refresh(t) end
 end
+
+-- For offline tests.
+AHTable._parseFilter = parseFilter
+AHTable._build = build
 
 ns.On("AUCTION_HOUSE_SHOW", function()
   C_Timer.After(0.3, function()
@@ -327,6 +601,9 @@ ns.On("GET_ITEM_INFO_RECEIVED", function()
     ns.Safe(AHTable.Refresh)
   end)
 end)
+
+-- Bags change while buying: the "have" column follows.
+ns.On("BAG_UPDATE_DELAYED", function() ns.Safe(renderDetail) end)
 
 ns.On("AUCTION_HOUSE_CLOSED", function()
   for _, t in ipairs(defs) do

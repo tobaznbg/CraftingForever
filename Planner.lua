@@ -22,6 +22,14 @@ function Planner.Chance(colors, skill)
   return (grey - skill) / (grey - yellow)
 end
 
+-- Recipes that need a leatherworking specialization (Dragonscale, Elemental, Tribal);
+-- left out of plans, the character has none chosen before 300.
+Planner.SPECIALIZATION = {
+  [10650] = true, [10619] = true, [10630] = true, [10632] = true, [10621] = true,
+}
+-- Trainer recipes learned at 200 or later are taught by the Artisan (Fachmann) trainer.
+Planner.ARTISAN_FROM = 200
+
 local function hasSource(source, code)
   return type(source) == "string" and source:find(code, 1, true) ~= nil
 end
@@ -40,7 +48,9 @@ function Planner.Candidates(scanRecipes, data, buyCost, vendorSell, ahSell, all)
     local d = data[recipeID]
     local trainer = hasSource(d and d[7], "6")
     local vendorPattern = not trainer and hasSource(d and d[7], "5")
-    if d and recipe.out and (all == true or recipe.learned or trainer or (all == "vendor" and vendorPattern)) then
+    local special = Planner.SPECIALIZATION[recipeID] and not recipe.learned and all ~= true
+    if d and recipe.out and not special
+        and (all == true or recipe.learned or trainer or (all == "vendor" and vendorPattern)) then
       local cost, missing = 0, nil
       for _, reagent in ipairs(recipe.r or {}) do
         local unit = reagent.i and buyCost(reagent.i)
@@ -61,7 +71,9 @@ function Planner.Candidates(scanRecipes, data, buyCost, vendorSell, ahSell, all)
           id = recipeID,
           name = recipe.name,
           learned = recipe.learned and true or false,
-          learnAt = d[5] or d[1],
+          -- A learned recipe can be used at any skill (its learn level is irrelevant).
+          learnAt = recipe.learned and 0 or (d[5] or d[1]),
+          artisan = not recipe.learned and trainer and (d[5] or d[1] or 0) >= Planner.ARTISAN_FROM or nil,
           learnCost = recipe.learned and 0 or (d[6] or 0),
           colors = { d[1], d[2], d[3], d[4] },
           cost = cost,

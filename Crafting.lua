@@ -84,7 +84,7 @@ local function rows(filter)
                 learned = r.learned and true or false, learn = learn, tooHigh = need and need > (scan.rank or 0),
                 cost = cost, value = value, profit = profit, onAH = onAH,
                 margin = cost > 0 and profit / cost or 0, fpd = m and m.soldPerDay or 0,
-                produced = produced })
+                produced = produced, reagents = r.r })
             end
           end
         end
@@ -94,44 +94,73 @@ local function rows(filter)
   return list
 end
 
+-- Reagents for `count` crafts: need, have (bags + bank), to buy, unit price, cost.
+local function detail(e, count)
+  local rows, total, buyTotal = {}, 0, 0
+  for _, reagent in ipairs(e.reagents or {}) do
+    local need = (reagent.n or 1) * count
+    local have = ns.Costs.Owned(reagent.i)
+    local toBuy = math.max(0, need - have)
+    local unit, vendor = buy(reagent.i)
+    unit = unit or 0
+    total = total + need * unit
+    buyTotal = buyTotal + toBuy * unit
+    table.insert(rows, { itemID = reagent.i, cells = {
+      tostring(need),
+      (have >= need and "|cff5fd38d" or "|cffffb547") .. have .. "|r",
+      toBuy > 0 and tostring(toBuy) or "|cff5fd38d–|r",
+      money(unit) .. (vendor and " |cff99999eH|r" or ""),
+      toBuy > 0 and money(toBuy * unit) or "–",
+    } })
+  end
+  local produced = e.produced * count
+  local value = e.value * count
+  local footer = string.format(
+    "%d× herstellen  ·  ergibt %g Stück\n"
+    .. "Material gesamt %s  ·  davon noch kaufen |cffffb547%s|r\n"
+    .. "Verkauf netto %s  ·  Gewinn %s%s|r  ·  dein Gold %s\n"
+    .. "|cff99999eKlick auf ein Material: im AH suchen  ·  Shift +/−: in 10er-Schritten  ·  H = Händler|r",
+    count, produced, money(total), money(buyTotal), money(value),
+    (value - total) >= 0 and "|cff5fd38d" or "|cffff6b6b", money(value - total), money(GetMoney()))
+  return {
+    title = e.name,
+    subtitle = e.learned and (e.profession .. " · gelernt") or ("nicht gelernt: " .. (e.learn or "?")),
+    columns = { { "Braucht", 52 }, { "Habe", 44 }, { "Kaufen", 50 }, { "Preis", 66 }, { "Kosten", 70 } },
+    rows = rows,
+    footer = footer,
+  }
+end
+
 ns.AHTable.Add({
   id = "Crafting", label = "Herstellen", title = "Herstellen – was sich mit gekauften Materialien lohnt",
   sort = "score",          -- learned first, then learnable now, then later; each by profit
-  salesFilter = true,
-  filters = { { "profit", "Mit Gewinn" }, { "learned", "Nur gelernte" }, { "all", "Alle Rezepte" } },
+  views = { { "profit", "Mit Gewinn" }, { "learned", "Nur gelernte" }, { "all", "Alle Rezepte" } },
+  defaultFilters = { fpd = "1" },
   rowColor = function(e) return not e.learned and { 0.85, 0.25, 0.25 } or nil end,
   subtitle = function(e)
     if e.learned then return e.profession .. "  ·  gelernt" end
     return (e.tooHigh and "|cffff6b6b" or "|cffffb547") .. "nicht gelernt: " .. e.learn .. "|r"
   end,
+  detail = detail,
+  detailCount = true,
   columns = {
-    { "name", "Ergebnis", 0, "LEFT", function(e)
+    { key = "name", title = "Ergebnis", width = 0, align = "LEFT", fmt = function(e)
       return e.name .. (e.produced > 1 and string.format(" |cff99999ex%g|r", e.produced) or "")
     end },
-    { "cost", "Material", 95, "RIGHT", function(e) return money(e.cost) end, true },
-    { "value", "Verkauf", 95, "RIGHT", function(e)
-      return (e.onAH and "" or "|cff99999eH |r") .. money(e.value)
-    end },
-    { "profit", "Gewinn", 95, "RIGHT", function(e)
+    { key = "cost", title = "Material", width = 95, muted = true, filter = "money",
+      fmt = function(e) return money(e.cost) end },
+    { key = "value", title = "Verkauf", width = 95, filter = "money",
+      fmt = function(e) return (e.onAH and "" or "|cff99999eH |r") .. money(e.value) end },
+    { key = "profit", title = "Gewinn", width = 95, filter = "money", fmt = function(e)
       return (e.profit >= 0 and "|cff5fd38d" or "|cffff6b6b") .. (e.profit < 0 and "-" or "")
         .. money(math.abs(e.profit)) .. "|r"
     end },
-    { "potential", "Gewinn×Verk.", 95, "RIGHT", function(e)
-      return e.potential > 0 and money(e.potential) or "–"
-    end, true },
-    { "margin", "Marge", 60, "RIGHT", function(e) return string.format("%d %%", math.floor(e.margin * 100 + 0.5)) end },
-    { "fpd", "Verk./Tag", 70, "RIGHT", function(e) return string.format("%.0f", e.fpd) end, true },
+    { key = "potential", title = "Gewinn×Verk.", width = 95, muted = true, filter = "money",
+      fmt = function(e) return e.potential > 0 and money(e.potential) or "–" end },
+    { key = "margin", title = "Marge", width = 60, filter = "pct",
+      fmt = function(e) return string.format("%d %%", math.floor(e.margin * 100 + 0.5)) end },
+    { key = "fpd", title = "Verk./Tag", width = 70, muted = true, filter = "num",
+      fmt = function(e) return string.format("%.0f", e.fpd) end },
   },
   rows = rows,
-  status = function(list)
-    local profs = {}
-    local prefix = ns.CharKey() .. ":"
-    for key, scan in pairs(ns.db.recipes or {}) do
-      if key:sub(1, #prefix) == prefix then table.insert(profs, scan.profession) end
-    end
-    if #profs == 0 then return "Noch kein Beruf bekannt: einmal das Berufsfenster öffnen, dann erscheinen die Rezepte hier." end
-    return string.format("%d Rezepte (%s)  ·  roter Rand = noch nicht gelernt, Musterpreis nicht eingerechnet\n"
-      .. "Material: Händler, sonst billigstes AH-Angebot  ·  Verkauf: Marktwert hier − 5 %% Gebühr (H = Händler)"
-      .. "  ·  Verk./Tag = EU  ·  Gewinn×Verk. = Gewinn × EU-Verkäufe pro Tag", #list, table.concat(profs, ", "))
-  end,
 })

@@ -18,15 +18,16 @@ end
 ns.AHTable.Add({
   id = "Trends", label = "Trends", title = "Trends – steigende und fallende Preise",
   sort = "strength",
-  filters = { { "up", "Steigend" }, { "down", "Fallend" } },
+  views = { { "up", "Steigend" }, { "down", "Fallend" } },
   columns = {
-    { "name", "Item", 0, "LEFT" },
-    { "mvHere", "Wert hier", 90, "RIGHT", function(e) return money(e.mvHere) end },
-    { "houseChange", "Trend hier", 75, "RIGHT", function(e) return pct(e.houseChange) end },
-    { "euMv", "EU jetzt", 90, "RIGHT", function(e) return money(e.euMv) end, true },
-    { "euHist", "EU 60 T", 90, "RIGHT", function(e) return money(e.euHist) end, true },
-    { "change", "Trend EU", 75, "RIGHT", function(e) return pct(e.change) end },
-    { "fpd", "Verk./Tag", 65, "RIGHT", function(e) return string.format("%.0f", e.fpd) end, true },
+    { key = "name", title = "Item", width = 0, align = "LEFT" },
+    { key = "mvHere", title = "Wert hier", width = 90, filter = "money", fmt = function(e) return money(e.mvHere) end },
+    { key = "houseChange", title = "Trend hier", width = 75, filter = "pct", fmt = function(e) return pct(e.houseChange) end },
+    { key = "euMv", title = "EU jetzt", width = 90, muted = true, filter = "money", fmt = function(e) return money(e.euMv) end },
+    { key = "euHist", title = "EU 60 T", width = 90, muted = true, fmt = function(e) return money(e.euHist) end },
+    { key = "change", title = "Trend EU", width = 75, filter = "pct", fmt = function(e) return pct(e.change) end },
+    { key = "fpd", title = "Verk./Tag", width = 65, muted = true, filter = "num",
+      fmt = function(e) return string.format("%.0f", e.fpd) end },
   },
   rows = function(filter)
     local list, house = {}, ns.AHData and ns.AHData[113]
@@ -41,15 +42,5 @@ ns.AHTable.Add({
       end
     end
     return list
-  end,
-  status = function(list)
-    local data, house = ns.TrendData, ns.AHData and ns.AHData[113]
-    if not data then return "Keine Trenddaten (Data_Trend.lua fehlt)." end
-    local hours = house and house.hours or 0
-    return string.format("%d Items  ·  Trend EU = TSM-Marktwert gegen 60-Tage-Schnitt, bereinigt um die allgemeine"
-      .. " Preisbewegung (%+d %%)\nTSM-Daten %s  ·  Trend hier: %s  ·  Verk./Tag = EU",
-      #list, math.floor((data.level - 1) * 100 + 0.5), data.updated or "–",
-      hours >= HOUSE_MIN_HOURS and "Wert gegen 7-Tage-Median" or
-        string.format("erst ab %d h Sammlerdaten (jetzt %d h)", HOUSE_MIN_HOURS, hours))
   end,
 })

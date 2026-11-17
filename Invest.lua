@@ -8,14 +8,18 @@ ns.AHTable.Add({
   id = "Invest", label = "Anlage", title = "Anlage – Klassiker unter Wert",
   sort = "upside",
   columns = {
-    { "name", "Item", 0, "LEFT" },
-    { "min", "Billigstes hier", 105, "RIGHT", function(e)
+    { key = "name", title = "Item", width = 0, align = "LEFT" },
+    { key = "min", title = "Billigstes hier", width = 105, filter = "money", fmt = function(e)
       return (e.min and e.min > GetMoney()) and ("|cffffb547" .. money(e.min) .. "|r") or money(e.min)
     end },
-    { "here", "Median 7 T", 90, "RIGHT", function(e) return money(e.here) end, true },
-    { "classic", "Classic Era", 90, "RIGHT", function(e) return money(e.classic) end, true },
-    { "upside", "Faktor", 60, "RIGHT", function(e) return string.format("|cff5fd38dx%.1f|r", e.upside) end },
-    { "fpd", "Verk./Tag", 70, "RIGHT", function(e) return string.format("%.1f", e.fpd) end, true },
+    { key = "here", title = "Median 7 T", width = 90, muted = true, filter = "money",
+      fmt = function(e) return money(e.here) end },
+    { key = "classic", title = "Classic Era", width = 90, muted = true, filter = "money",
+      fmt = function(e) return money(e.classic) end },
+    { key = "upside", title = "Faktor", width = 60, filter = "num",
+      fmt = function(e) return string.format("|cff5fd38dx%.1f|r", e.upside) end },
+    { key = "fpd", title = "Verk./Tag", width = 70, muted = true, filter = "num",
+      fmt = function(e) return string.format("%.1f", e.fpd) end },
   },
   rows = function()
     local list, house = {}, ns.AHData and ns.AHData[113]
@@ -25,12 +29,5 @@ ns.AHTable.Add({
         min = row and row[1] })
     end
     return list
-  end,
-  status = function(list)
-    local data, house = ns.InvestData, ns.AHData and ns.AHData[113]
-    if not data then return "Keine Vergleichsdaten (Data_Invest.lua fehlt)." end
-    return string.format("%d Items  ·  Preise hier ≈ %d %% von Classic Era  ·  Faktor = wie weit das Item bis zu"
-      .. " diesem Niveau steigen müsste\nAH-Daten %s  ·  Verk./Tag = EU  ·  Kein Versprechen: Forever ändert manche Items.",
-      #list, math.floor(data.level * 100 + 0.5), house and house.updated and house.updated:sub(1, 16):gsub("T", " ") or "–")
   end,
 })
