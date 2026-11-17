@@ -155,8 +155,7 @@ end
 
 local decoded = setmetatable({}, { __mode = "k" }) -- history table -> itemID -> result
 
-function Item.History(itemID)
-  local history = historyTable()
+local function historyFrom(history, itemID)
   if not history then return nil end
   if type(history.items) == "table" then
     -- Compact format (all listed items): ns.History = { start, step, n, items = { [id] = "p;q" } }
@@ -176,8 +175,15 @@ function Item.History(itemID)
     return result or nil
   end
   local h = history[itemID]
-  if not h then return nil end
+  if type(h) ~= "table" then return nil end
   return { start = h[1], step = h.step or 3600, prices = h.prices or {}, qty = h.qty or {} }
+end
+
+-- The app's live copy first; an item it does not know (older or smaller file) from the copy
+-- shipped with the addon.
+function Item.History(itemID)
+  local live = historyTable()
+  return historyFrom(live, itemID) or (live ~= ns.History and historyFrom(ns.History, itemID)) or nil
 end
 
 -- Items in the own full scan (itemID -> true).
