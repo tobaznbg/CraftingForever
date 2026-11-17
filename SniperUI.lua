@@ -111,11 +111,11 @@ local function build(page, width, height)
   -- Settings ---------------------------------------------------------------------
   local settings = card(page, "Einstellungen")
   settings:SetPoint("TOPLEFT", PAD, -PAD)
-  settings:SetSize(leftW, 190)
+  settings:SetSize(leftW, 242)
   local function set(key, v) Deals.Set(key, v) end
   local updates = {}
   local function S() return Deals.Settings() end
-  table.insert(updates, stepper(settings, -34, "Kaufen bis (Anteil vom Wert)",
+  table.insert(updates, stepper(settings, -34, "Vorauswahl bis (Anteil vom Wert)",
     function() return string.format("%d %%", math.floor(S().maxShare * 100 + 0.5)) end,
     function() set("maxShare", math.max(0.2, S().maxShare - 0.05)) end,
     function() set("maxShare", math.min(0.9, S().maxShare + 0.05)) end))
@@ -139,6 +139,15 @@ local function build(page, width, height)
     function() return string.format("%d Items", S().watchMax) end,
     function() set("watchMax", math.max(25, S().watchMax - 25)) end,
     function() set("watchMax", math.min(400, S().watchMax + 25)) end))
+  -- Price stair (Deals.Staircase): how fast the bought units must sell, and the gap.
+  table.insert(updates, stepper(settings, -164, "Verkauft in höchstens",
+    function() return string.format("%d %s", S().sellDays, S().sellDays == 1 and "Tag" or "Tagen") end,
+    function() set("sellDays", math.max(1, S().sellDays - 1)) end,
+    function() set("sellDays", math.min(7, S().sellDays + 1)) end))
+  table.insert(updates, stepper(settings, -190, "Mindestabstand zum Einstellpreis",
+    function() return string.format("%d %%", math.floor(S().minGap * 100 + 0.5)) end,
+    function() set("minGap", math.max(0.05, S().minGap - 0.05)) end,
+    function() set("minGap", math.min(0.4, S().minGap + 0.05)) end))
   local reset = Style.Button(settings, "Standard", 80, 18, function()
     ns.db.settings.sniper = nil
   end)
@@ -183,7 +192,7 @@ local function build(page, width, height)
   head:SetPoint("RIGHT", -16, 0)
   head:SetJustifyH("RIGHT")
   head:SetTextColor(unpack(Style.C.muted))
-  head:SetText("Ø Preis            Kauf bis       Nachfrage")
+  head:SetText("Ø Preis          Vorauswahl     Nachfrage")
   local watch = itemList(watchCard, { 0, 100, 100, 90 })
   watch.scroll:SetPoint("TOPLEFT", 1, -46)
   watch.scroll:SetPoint("BOTTOMRIGHT", -10, 4)

@@ -118,6 +118,16 @@ function Item.Listings(itemID)
   return list, last.t
 end
 
+-- Hourly history of the last 48 hours from the collector (Data_History.lua, only items
+-- the sniper may watch): { start = epoch of the first slot, step = 3600,
+--   prices = { cheapest offer per hour, 0 = not listed, false = no snapshot }, qty = {...} }
+-- or nil.
+function Item.History(itemID)
+  local h = ns.History and ns.History[itemID]
+  if not h then return nil end
+  return { start = h[1], step = h.step or 3600, prices = h.prices or {}, qty = h.qty or {} }
+end
+
 -- Items in the own full scan (itemID -> true).
 function Item.ScannedItems()
   local last = ns.db and ns.db.ah and ns.db.ah.last

@@ -16,6 +16,8 @@ Deals.DEFAULTS = {
   minDemand = 2,        -- ns.Item demand (cloud scale) for a hit
   watchMax = 150,       -- items on the watch list
   watchMinDemand = 2,   -- ns.Item demand for the watch list
+  sellDays = 2,         -- price stair: what is bought must sell within this many days
+  minGap = 0.15,        -- price stair: every bought level at least 15 % below the net resale price
 }
 local CUT = 0.05
 
@@ -49,16 +51,17 @@ local function housePrice(listings, share)
   end
 end
 
--- Reference value and a short source text, or nil.
+-- Reference value and a short source text, or nil. Sources: "AH-Preis" (house price of the
+-- current offers), "gestern" (yesterday's daily price), "Ø 14 Tage" (ns.Item average).
 function Deals.Reference(itemID, house)
   local e = ns.Item(itemID)
-  local avg = e.avg
+  local avg, label = e.avg, "Ø 14 Tage"
   -- While our own history is short, the average leans on the TSM start value, which can be
   -- far above this realm (Untoter Motor: 16g average, 4g real). Buying never trusts more
   -- than yesterday's real daily price here.
-  if e.yesterday and (not avg or e.yesterday < avg) then avg = e.yesterday end
+  if e.yesterday and (not avg or e.yesterday < avg) then avg, label = e.yesterday, "gestern" end
   if house and (not avg or house < avg) then return house, "AH-Preis" end
-  if avg then return avg, "Ø" end
+  if avg then return avg, label end
   return nil
 end
 
@@ -70,6 +73,64 @@ end
 Deals.HousePrice = housePrice
 Deals.Liquid = liquid
 Deals.CUT = CUT
+
+-- Price stair (detail check of the sniper; the "next listing" rule is its first step).
+-- For one searched item: every price level P of the foreign offers is a candidate selling
+-- price. Buying means clearing the stair below P: all foreign units cheaper than P are bought
+-- (N units, cost C) and sold again at resale = min(P - 1, cap). P is valid only when
+--   1. N <= perDay * sellDays (sells within sellDays; perDay = certain sales, else demand)
+--   2. the foreign units in [P, P * 1.10] are >= MIDFIELD (a real middle field, no outlier)
+--   3. resale never above cap (ns.Item average, else the reference)
+--   4. every bought level pays off on its own: unit <= resale * (1 - CUT) * (1 - minGap)
+-- The P with the highest profit N * resale * (1 - CUT) - C wins.
+-- listings = { { unit, count, own }... }. Returns nil or
+--   { level = P, sellAt = resale, sellSource = "Mittelfeld" | "Ø-Obergrenze", buyUpTo, units,
+--     cost, profit, best, auctions = bought listings (cheapest first) }.
+Deals.MIDFIELD, Deals.MIDFIELD_SPAN = 3, 1.10
+function Deals.Staircase(listings, cap, perDay, set)
+  if not cap or cap <= 0 then return nil end
+  set = set or Deals.Settings()
+  local foreign = {}
+  for _, l in ipairs(listings) do
+    if not l.own and l.unit and l.unit > 0 then table.insert(foreign, l) end
+  end
+  table.sort(foreign, function(a, b) return a.unit < b.unit end)
+  local maxUnits = (perDay or 0) * set.sellDays
+  local best
+  for i, candidate in ipairs(foreign) do
+    local P = candidate.unit
+    if i > 1 and foreign[i - 1].unit < P then -- each price level once, something below it
+      local resale = math.min(P - 1, cap)
+      local ceiling = resale * (1 - CUT) * (1 - set.minGap)
+      local units, cost, ok = 0, 0, true
+      for j = 1, i - 1 do
+        local l = foreign[j]
+        if l.unit > ceiling then ok = false break end
+        units, cost = units + l.count, cost + l.unit * l.count
+      end
+      if ok and units > maxUnits then ok = false end
+      if ok then
+        local mid = 0
+        for j = i, #foreign do
+          if foreign[j].unit > P * Deals.MIDFIELD_SPAN then break end
+          mid = mid + foreign[j].count
+        end
+        ok = mid >= Deals.MIDFIELD
+      end
+      if ok then
+        local profit = units * resale * (1 - CUT) - cost
+        if not best or profit > best.profit then
+          local bought = {}
+          for j = 1, i - 1 do table.insert(bought, foreign[j]) end
+          best = { level = P, sellAt = resale, sellSource = resale < cap and "Mittelfeld" or "Ø-Obergrenze",
+            buyUpTo = foreign[i - 1].unit, units = units, cost = cost, profit = profit, best = foreign[1].unit,
+            auctions = bought }
+        end
+      end
+    end
+  end
+  return best
+end
 
 -- Puts the item into the auction house search, so it can be bought as usual.
 function Deals.Search(itemID)

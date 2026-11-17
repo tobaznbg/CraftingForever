@@ -7,7 +7,8 @@
 -- Watch list = items of our own auction house (ns.Item) with demand >= watchMinDemand, where the discount is worth minProfit and that
 -- we can afford; the watchMax best by expected profit (all values: Deals.Settings, editable in the main window). Without the collector data
 -- or the API it falls back to browsing the whole auction house (slow). A hit is an offer at or below Deals.MAX_SHARE of the reference, for an
--- item that sells well, with at least Deals.MIN_PROFIT after the cut.
+-- item that sells well, with at least Deals.MIN_PROFIT after the cut. In the watch list's detail check
+-- the price stair (Deals.Staircase) decides what to buy and at which price to sell it again.
 -- Buying is always a click of the player: items one auction per click,
 -- commodities "Kaufen" (the game quotes the final price) and then "Bestätigen".
 -- If the game blocks automatic searches, every search round needs a click too.
@@ -43,6 +44,7 @@ local timeouts = 0          -- detail searches without an answer (this run)
 local watch = nil           -- { keys = {itemKey...}, set = {itemID = true} } or nil (whole AH)
 local seen = {}             -- key -> { price = cheapest offer or false (none), limit = buy-up-to, t = time() }
 local roundNo = 0           -- watch list rounds of this run
+local levels = {}           -- itemID -> { list = price levels of the last search, t = time() }
 
 local function changed()
   if ns.Selling and ns.Selling.Refresh then ns.Safe(ns.Selling.Refresh) end
@@ -225,6 +227,25 @@ end
 
 -- Detail ---------------------------------------------------------------------------
 
+-- Offers of the last search grouped by unit price, cheapest first: { { unit, count, own }... }.
+local LEVELS_MAX = 25
+local function priceLevels(listings)
+  local by, list = {}, {}
+  for _, l in ipairs(listings) do
+    local e = by[l.unit]
+    if not e then
+      e = { unit = l.unit, count = 0 }
+      by[l.unit] = e
+      table.insert(list, e)
+    end
+    e.count = e.count + (l.count or 1)
+    if l.own then e.own = true end
+  end
+  table.sort(list, function(a, b) return a.unit < b.unit end)
+  for i = #list, LEVELS_MAX + 1, -1 do list[i] = nil end
+  return list
+end
+
 local function evaluate(c, listings, commodity)
   local plain, cheapest = {}, nil
   for _, l in ipairs(listings) do
@@ -232,24 +253,22 @@ local function evaluate(c, listings, commodity)
     if not cheapest or l.unit < cheapest then cheapest = l.unit end
   end
   ns.Item.Observe(c.itemID, cheapest)
+  levels[c.itemID] = { list = priceLevels(listings), t = time() }
   local house = #plain > 0 and ns.Deals.HousePrice(plain, 0.25) or nil
   local ref, source = ns.Deals.Reference(c.itemID, house)
   seen[c.key] = { price = cheapest or false, limit = ref and ref * ns.Deals.MaxShare(), t = time() }
-  if not ref then return nil end
-  local limit = ref * ns.Deals.MaxShare()
+  -- Price stair (Deals.Staircase): what to buy, where to sell it again.
+  local item = ns.Item(c.itemID)
+  local cap = item.avg or ref
+  local perDay, perDaySource = item.demand, "geschätzt"
+  if item.certain and item.certain > 0 then perDay, perDaySource = item.certain, "sicher verkauft" end
+  local stair = ns.Deals.Staircase(listings, cap, perDay)
+  if not stair or stair.profit < ns.Deals.MinProfit() then return nil end
   local hit = { key = c.key, itemKey = c.itemKey, itemID = c.itemID, commodity = commodity, ref = ref,
-    source = source, limit = limit, units = 0, cost = 0, profit = 0, auctions = {} }
-  table.sort(listings, function(a, b) return a.unit < b.unit end)
-  for _, l in ipairs(listings) do
-    if l.unit <= limit and not l.own then
-      hit.units = hit.units + l.count
-      hit.cost = hit.cost + l.unit * l.count
-      hit.profit = hit.profit + (ref * (1 - ns.Deals.CUT) - l.unit) * l.count
-      hit.best = hit.best or l.unit
-      table.insert(hit.auctions, l)
-    end
-  end
-  if hit.units == 0 or hit.profit < ns.Deals.MinProfit() then return nil end
+    source = source, cap = cap, level = stair.level, sellAt = stair.sellAt, sellSource = stair.sellSource,
+    buyUpTo = stair.buyUpTo, limit = stair.buyUpTo, units = stair.units, cost = stair.cost,
+    profit = stair.profit, best = stair.best, auctions = stair.auctions,
+    perDay = perDay, perDaySource = perDaySource, days = perDay and perDay > 0 and stair.units / perDay or nil }
   return hit
 end
 
@@ -430,7 +449,7 @@ end
 
 local function bought(hit, units, cost)
   local s = session()
-  local profit = (hit.ref * (1 - ns.Deals.CUT)) * units - cost
+  local profit = ((hit.sellAt or hit.ref) * (1 - ns.Deals.CUT)) * units - cost
   s.bought, s.spent, s.expected = s.bought + units, s.spent + cost, s.expected + profit
   log("buy", hit, { u = units, c = cost, p = math.floor(profit) })
 end
@@ -547,6 +566,14 @@ function Sniper.Click()
     stopAll("Gestoppt.")
   end
   changed()
+end
+
+-- Offers of the item in the sniper's last search, grouped by unit price, cheapest first:
+-- { { unit, count, own }... } (at most 25 levels) and the search time; nil if not searched.
+function Sniper.Listings(itemID)
+  local l = levels[itemID]
+  if not l then return nil end
+  return l.list, l.t
 end
 
 function Sniper.Hits()

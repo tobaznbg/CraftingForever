@@ -80,6 +80,9 @@ local function crafting(itemID)
   return best
 end
 
+-- Best recipe for an item for other views (sniper detail): { cost (per unit), prof, source, learned } or nil.
+ns.CraftInfo = crafting
+
 local function addLines(tooltip, itemID)
   if not itemID or tooltip.cfDone == itemID then return end
   tooltip.cfDone = itemID
