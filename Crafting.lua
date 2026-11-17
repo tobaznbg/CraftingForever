@@ -1,13 +1,10 @@
--- Crafting: auction house tab "Herstellen" - which learned recipes of the character's
--- professions make a profit when every reagent is bought (merchant if it sells it,
--- else the auction house) and the product is sold on the auction house.
---   prices     ns.Item (Item.lua): buy = merchant, else cheapest offer now;
---              sell = cheapest offer now - 1 copper - 5 % cut, or a merchant if higher.
---              Opening the tab starts a live scan (every 15 min at most).
--- Only professions whose window was opened once are known (Recipes.Scan); the scan
--- also holds the recipes not learned yet. Those are shown with a red background and
--- how to learn them (planner data: trainer, merchant, drop, quest; the pattern price
--- is not part of the profit).
+-- Crafting: auction house tab. First a choice of all crafting professions (with icon),
+-- then every recipe of that profession that makes an item (Data_Recipes.lua, Blizzard
+-- API), priced via ns.Item: buy = merchant, else cheapest offer; sell = cheapest offer
+-- - 1 copper - 5 % cut, or a merchant if higher. Learned state and skill come from the
+-- character's own profession scan (open the profession window once); unlearned recipes
+-- get a red marker and, where the planner data knows it, how to learn them.
+-- Opening the tab starts a live scan (every 15 min at most).
 local ADDON, ns = ...
 
 local function money(c) return c and ns.FormatMoney(c, true) or "–" end
@@ -38,43 +35,81 @@ local function learnInfo(professionID, recipeID)
   return text, d[5] or d[1]
 end
 
-local function rows(filter)
-  local list = {}
-  local prefix = ns.CharKey() .. ":"
+-- The character's own profession scans: professionID -> { scan, byItem = { [craftedItemID] =
+-- { recipeID (spell), recipe } } } (learned state and skill come from the game).
+local function ownScans()
+  local own, prefix = {}, ns.CharKey() .. ":"
   for key, scan in pairs(ns.db.recipes or {}) do
-    if key:sub(1, #prefix) == prefix then
+    if key:sub(1, #prefix) == prefix and scan.professionID then
+      local byItem = {}
       for recipeID, r in pairs(scan.recipes or {}) do
-        if r.out and (r.learned or filter ~= "learned") then
-          local cost, missing = 0, false
-          for _, reagent in ipairs(r.r or {}) do
-            local unit = reagent.i and buy(reagent.i)
-            if not unit then missing = true break end
-            cost = cost + unit * (reagent.n or 1)
+        -- Several recipes can make the same item: a learned one wins.
+        if r.out and (not byItem[r.out] or r.learned) then byItem[r.out] = { id = recipeID, r = r } end
+      end
+      own[scan.professionID] = { scan = scan, byItem = byItem }
+    end
+  end
+  return own
+end
+
+-- All recipes of one profession (Data_Recipes.lua) that make an item, priced via ns.Item.
+local function rows(filter, professionID)
+  local list = {}
+  local data = ns.RecipeData and ns.RecipeData[professionID]
+  if not data then return list end
+  local mine = ownScans()[professionID]
+  for _, rec in pairs(data.recipes) do
+    local out, quantity, reagentList = rec[2], rec[3] or 1, rec[4] or {}
+    local known = mine and out and mine.byItem[out]
+    local learned = known and known.r.learned and true or false
+    if out and (learned or filter ~= "learned") then
+      local reagents, cost, missing = {}, 0, false
+      for i = 1, #reagentList, 2 do
+        local id, n = reagentList[i], reagentList[i + 1]
+        table.insert(reagents, { i = id, n = n })
+        local unit = buy(id)
+        if not unit then missing = true break end
+        cost = cost + unit * n
+      end
+      if not missing then
+        local unitValue, onAH = sell(out)
+        local value = unitValue * quantity
+        local profit = value - cost
+        if filter ~= "profit" or (profit > 0 and onAH) then
+          local learn, need = nil, nil
+          if not learned then
+            if known then learn, need = learnInfo(professionID, known.id) else learn = "Quelle ?" end
           end
-          if not missing then
-            local produced = ((r.qmin or 1) + (r.qmax or r.qmin or 1)) / 2
-            local unitValue, onAH = sell(r.out)
-            local value = unitValue * produced
-            local profit = value - cost
-            local item = ns.Item(r.out)
-            if filter ~= "profit" or (profit > 0 and onAH) then
-              local learn, need = nil, nil
-              if not r.learned then learn, need = learnInfo(scan.professionID, recipeID) end
-              -- 0 learned, 1 learnable now, 2 later: what can be made now comes first.
-              local group = r.learned and 0 or ((need and need > (scan.rank or 0)) and 2 or 1)
-              local fpd = item.perDay or 0
-              table.insert(list, { itemID = r.out, recipe = r.name, profession = scan.profession,
-                score = (2 - group) * 1e12 + profit,
-                learned = r.learned and true or false, learn = learn, tooHigh = need and need > (scan.rank or 0),
-                cost = cost, value = value, profit = profit, onAH = onAH,
-                fpd = fpd,
-                produced = produced, reagents = r.r })
-            end
-          end
+          local rank = mine and mine.scan.rank or 0
+          local tooHigh = not learned and (not mine or (need and need > rank)) or false
+          -- 0 learned, 1 learnable now, 2 later: what can be made now comes first.
+          local group = learned and 0 or (tooHigh and 2 or 1)
+          table.insert(list, { itemID = out, recipe = rec[1], profession = data.name,
+            score = (2 - group) * 1e12 + profit, learned = learned, learn = learn, tooHigh = tooHigh,
+            cost = cost, value = value, profit = profit, onAH = onAH, fpd = ns.Item(out).perDay or 0,
+            produced = quantity, reagents = reagents })
         end
       end
     end
   end
+  return list
+end
+
+-- Crafting professions for the chooser, with icon and the character's skill if known.
+local function professions()
+  local own, list = ownScans(), {}
+  for id, data in pairs(ns.RecipeData or {}) do
+    local mine = own[id]
+    local n = 0
+    for _, rec in pairs(data.recipes) do if rec[2] then n = n + 1 end end
+    table.insert(list, { key = id, label = data.name, icon = data.icon,
+      info = mine and string.format("dein Skill %d / %d  ·  %d Rezepte", mine.scan.rank or 0, mine.scan.max or 0, n)
+        or string.format("%d Rezepte", n), mine = mine ~= nil })
+  end
+  table.sort(list, function(a, b)
+    if a.mine ~= b.mine then return a.mine end
+    return a.label < b.label
+  end)
   return list
 end
 
@@ -108,7 +143,7 @@ local function detail(e, count)
     (value - total) >= 0 and "|cff5fd38d" or "|cffff6b6b", money(value - total), money(GetMoney()))
   return {
     title = e.name,
-    subtitle = e.learned and (e.profession .. " · gelernt") or ("nicht gelernt: " .. (e.learn or "?")),
+    subtitle = e.profession .. " · " .. (e.learned and "gelernt" or ("nicht gelernt: " .. (e.learn or "?"))),
     columns = { { "Braucht", 52 }, { "Habe", 44 }, { "Kaufen", 50 }, { "Preis", 66 }, { "Kosten", 70 } },
     rows = rows,
     footer = footer,
@@ -116,14 +151,15 @@ local function detail(e, count)
 end
 
 ns.AHTable.Add({
-  id = "Crafting", label = "Herstellen", title = "Herstellen – was sich mit gekauften Materialien lohnt",
+  id = "Crafting", label = "Crafting", title = "Crafting",
+  chooser = professions,
   sort = "score",          -- learned first, then learnable now, then later; each by profit
   views = { { "profit", "Mit Gewinn" }, { "learned", "Nur gelernte" }, { "all", "Alle Rezepte" } },
   defaultFilters = { fpd = "1" },
   rowColor = function(e) return not e.learned and { 0.85, 0.25, 0.25 } or nil end,
   subtitle = function(e)
-    if e.learned then return e.profession .. "  ·  gelernt" end
-    return (e.tooHigh and "|cffff6b6b" or "|cffffb547") .. "nicht gelernt: " .. e.learn .. "|r"
+    if e.learned then return "gelernt" end
+    return (e.tooHigh and "|cffff6b6b" or "|cffffb547") .. "nicht gelernt: " .. (e.learn or "?") .. "|r"
   end,
   detail = detail,
   detailCount = true,

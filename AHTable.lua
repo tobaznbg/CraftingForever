@@ -10,7 +10,9 @@
 --     muted = true (grey text),
 --     filter = "money" | "pct" | "num" (column can be filtered; money in gold, pct in %),
 --   }... },
---   rows = function(view) -> list of entries (each with itemID and the column keys),
+--   rows = function(view, choice) -> list of entries (each with itemID and the column keys),
+--   chooser = function() -> { { key, label, icon, info }... } (optional: a first screen of
+--             big buttons, e.g. professions; the list shows after a choice, "‹ Zurück" returns),
 --   views = { { key, label, width }... } (optional buttons, the first is the default),
 --   defaultFilters = { [key] = ">= 1" ... } (until the user sets own filters),
 --   sort = key, desc = true,
@@ -119,7 +121,8 @@ end
 
 local function build(t)
   local kept = {}
-  for _, e in ipairs(t.rows(t.view) or {}) do
+  local source = (t.chooser and not t.choice) and {} or (t.rows(t.view, t.choice) or {})
+  for _, e in ipairs(source) do
     e.name = ns.ItemName(e.itemID) or ("#" .. e.itemID)
     if passes(t, e) then table.insert(kept, e) end
   end
@@ -144,9 +147,40 @@ local function layoutRows(t)
   t.filterRow:SetShown(t.showFilters and true or false)
 end
 
+-- Chooser screen or list, depending on whether a choice is made.
+local function showMode(t)
+  if not t.chooser then return false end
+  local choosing = t.choice == nil
+  t.choosePanel:SetShown(choosing)
+  t.head:SetShown(not choosing)
+  t.filterRow:SetShown(not choosing and t.showFilters and true or false)
+  t.filterButton:SetShown(not choosing)
+  t.countText:SetShown(not choosing)
+  if t.backButton then t.backButton:SetShown(not choosing) end
+  for _, b in pairs(t.viewButtons or {}) do b:SetShown(not choosing) end
+  if choosing then
+    for _, r in ipairs(t.rowFrames) do r:Hide() end
+    local items = t.chooser() or {}
+    for i, b in ipairs(t.chooseButtons) do
+      local c = items[i]
+      b.choice = c
+      if c then
+        b.icon:SetTexture(c.icon)
+        b.label:SetText(c.label)
+        b.info:SetText(c.info or "")
+        b:Show()
+      else
+        b:Hide()
+      end
+    end
+  end
+  return choosing
+end
+
 local function refresh(t)
   local f = t.frame
   if not f or not f:IsShown() then return end
+  if showMode(t) then return end
   local n = math.max(1, math.min(MAX_ROWS, math.floor((f:GetHeight() - topOffset(t) - HEADER - FOOTER) / ROW)))
   t.offset = math.max(0, math.min(t.offset, #t.list - n))
   for i, r in ipairs(t.rowFrames) do
@@ -191,10 +225,20 @@ local function createFrame(t, parent)
   Style.Solid(f, Style.C.bg):SetAllPoints()
   Style.Border(f)
 
-  -- Toolbar: view buttons left, entry count and filter toggle right.
+  -- Toolbar: back button (with a chooser) and view buttons left, count and filter right.
+  local x0 = 8
+  if t.chooser then
+    t.backButton = Style.Button(f, "‹ Zurück", 80, 20, function()
+      t.choice, t.offset = nil, 0
+      if AuctionHouseFrame.SetTitle then AuctionHouseFrame:SetTitle(t.title) end
+      refresh(t)
+    end)
+    t.backButton:SetPoint("TOPLEFT", 8, -5)
+    x0 = 96
+  end
   if t.views then
     t.viewButtons = {}
-    local x = 8
+    local x = x0
     for _, v in ipairs(t.views) do
       local b = Style.Tab(f, v[2], v[3] or 90, function()
         t.view, t.offset = v[1], 0
@@ -362,6 +406,50 @@ local function createFrame(t, parent)
     t.offset = t.offset - delta * 3
     refresh(t)
   end)
+  -- Chooser screen: a grid of big buttons with icon, label and info line.
+  if t.chooser then
+    local panel = CreateFrame("Frame", nil, f)
+    t.choosePanel = panel
+    panel:SetPoint("TOPLEFT", 1, -(1 + TOOLBAR))
+    panel:SetPoint("BOTTOMRIGHT", -1, 1)
+    t.chooseButtons = {}
+    local W, H, COLS = 230, 64, 3
+    for i = 1, 12 do
+      local b = CreateFrame("Button", nil, panel)
+      b:SetSize(W, H)
+      b:SetPoint("TOPLEFT", 16 + ((i - 1) % COLS) * (W + 12), -12 - math.floor((i - 1) / COLS) * (H + 12))
+      Style.Solid(b, Style.C.button):SetAllPoints()
+      Style.Border(b)
+      local hover = Style.Solid(b, Style.C.hover, "ARTWORK")
+      hover:SetAllPoints()
+      hover:Hide()
+      b.icon = b:CreateTexture(nil, "OVERLAY")
+      b.icon:SetSize(44, 44)
+      b.icon:SetPoint("LEFT", 10, 0)
+      b.label = Style.Text(b, 14)
+      b.label:SetPoint("TOPLEFT", b.icon, "TOPRIGHT", 10, -4)
+      b.label:SetPoint("RIGHT", -8, 0)
+      b.label:SetJustifyH("LEFT")
+      b.info = Style.Text(b, 11)
+      b.info:SetPoint("BOTTOMLEFT", b.icon, "BOTTOMRIGHT", 10, 4)
+      b.info:SetPoint("RIGHT", -8, 0)
+      b.info:SetJustifyH("LEFT")
+      b.info:SetTextColor(unpack(Style.C.muted))
+      b:SetScript("OnEnter", function() hover:Show() end)
+      b:SetScript("OnLeave", function() hover:Hide() end)
+      b:SetScript("OnClick", function(self)
+        if not self.choice then return end
+        t.choice, t.offset = self.choice.key, 0
+        if AuctionHouseFrame.SetTitle then AuctionHouseFrame:SetTitle(t.title .. " – " .. self.choice.label) end
+        build(t)
+        refresh(t)
+      end)
+      b:Hide()
+      t.chooseButtons[i] = b
+    end
+    panel:Hide()
+  end
+
   f:SetScript("OnShow", function() build(t); refresh(t) end)
   f:SetScript("OnSizeChanged", function() refresh(t) end)
   f:Hide()
@@ -538,6 +626,7 @@ local function selectTab(t)
     if o ~= t then o.frame:Hide(); PanelTemplates_DeselectTab(o.tab) end
   end
   PanelTemplates_SelectTab(t.tab)
+  if t.chooser then t.choice = nil end   -- a tab with a chooser always starts there
   if AuctionHouseFrame.SetTitle then AuctionHouseFrame:SetTitle(t.title) end
   t.frame:Show()
   if t.onOpen then ns.Safe(t.onOpen, t) end

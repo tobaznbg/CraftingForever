@@ -14,7 +14,7 @@ local DURATIONS = { { 1, "2 h" }, { 2, "8 h" }, { 3, "24 h" } }
 
 local panel, rowsFrames, durationButtons, status
 local duration = 3
-local mode = "sell" -- "sell", "deals" or "sniper"
+local mode = "sell" -- "sell" or "sniper"
 local control, sniperLines, ledgerButton
 local SNIPER_ROWS = 14 -- leaves room for the status block
 local modeTabs
@@ -142,7 +142,7 @@ local function createPanel(parent)
   Style.Panel(panel, 30)
   modeTabs = {}
   local mx = 6
-  for _, def in ipairs({ { "sell", "Verkaufen", 70 }, { "deals", "Schnäppchen", 70 }, { "sniper", "Sniper", 70 } }) do
+  for _, def in ipairs({ { "sell", "Verkaufen", 70 }, { "sniper", "Sniper", 70 } }) do
     local tab = Style.Tab(panel, def[2], def[3], function()
       mode = def[1]
       ns.Safe(Selling.Refresh)
@@ -195,8 +195,7 @@ local function createPanel(parent)
     r.price:SetJustifyH("RIGHT")
     r.button = Style.Button(r, "Einstellen", 74, 20, function(self)
       if not self.entry then return end
-      if mode == "deals" then ns.Safe(ns.Deals.Search, self.entry.itemID)
-      elseif mode == "sniper" then ns.Safe(ns.Sniper.Buy, self.entry)
+      if mode == "sniper" then ns.Safe(ns.Sniper.Buy, self.entry)
       else ns.Safe(post, self.entry) end
     end, Style.C.accent)
     r.button:SetPoint("RIGHT", 0, 0)
@@ -234,35 +233,6 @@ local function createPanel(parent)
   status:SetWidth(WIDTH - 20)
   status:SetJustifyH("LEFT")
   status:SetTextColor(unpack(Style.C.muted))
-end
-
-local function refreshDeals()
-  local deals, scanT = ns.Deals.Find()
-  local gold = GetMoney()
-  for i, r in ipairs(rowsFrames) do
-    local d = deals[i]
-    r.entry = d
-    r.button.entry = d
-    if d then
-      r.icon:SetTexture(((C_Item and C_Item.GetItemIconByID) or GetItemIcon)(d.itemID))
-      r.name:SetText(ns.ItemName(d.itemID))
-      r.info:SetText(string.format("%dx ab %s  ·  Wert %s (%s)%s", d.units, money(d.best), money(d.ref), d.source,
-        d.cost > gold and "  ·  |cffffb547Gold reicht nicht für alle|r" or ""))
-      r.price:SetText("|cff5fd38d+" .. money(d.profit) .. "|r")
-      r.button.label:SetText("Suchen")
-      r.button:Show()
-      r:Show()
-    else
-      r:Hide()
-    end
-  end
-  if not scanT then
-    status:SetText("Erst \"CF Scan\" klicken – dann zeigt die Liste, was gerade weit unter Wert angeboten wird.")
-  else
-    local age = math.floor((time() - scanT) / 60)
-    status:SetText(string.format("%d Schnäppchen aus dem Scan vor %d min  ·  ≤ %d %% vom Wert, gut verkäuflich, ≥ 20s Gewinn",
-      #deals, age, ns.Deals.MAX_SHARE * 100) .. (age > 15 and "  ·  |cffffb547neu scannen|r" or ""))
-  end
 end
 
 local function refreshSniper()
@@ -305,7 +275,6 @@ function Selling.Refresh()
   sniperLines.rule:SetShown(mode == "sniper")
   status:SetShown(mode ~= "sniper")
   if mode == "sniper" then return refreshSniper() end
-  if mode == "deals" then return refreshDeals() end
   for d, b in pairs(durationButtons) do b:SetActive(d == duration) end
   -- Everything the Bestand logic sends to the auction house.
   entries = {}
