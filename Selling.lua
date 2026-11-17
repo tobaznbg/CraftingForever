@@ -412,7 +412,9 @@ end
 -- "  ·  Einstand 12s (gekauft) · Luft 3s": what one unit cost and how far the price can still
 -- go down: undercutting the cheapest other offer by 1 copper, after the 5 % cut, minus the cost.
 function Selling.MineRoom(e)
-  local cost, source = ns.Profit and ns.Profit.UnitCost and ns.Profit.UnitCost(e.itemID)
+  -- (not "a and b and f()": that keeps only the first return value)
+  local cost, source
+  if ns.Profit and ns.Profit.UnitCost then cost, source = ns.Profit.UnitCost(e.itemID) end
   if not cost then return "" end
   local text = "\n" .. MUTED .. "Einstand " .. money(math.floor(cost + 0.5)) .. " (" .. source .. ")|r"
   local target = e.foreign and (e.foreign - 1) or e.unit
