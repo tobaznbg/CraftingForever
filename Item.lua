@@ -229,7 +229,8 @@ end
 function Item.TrendText(e)
   if not e.trend then return nil end
   local word = e.trend >= 0.03 and "steigt" or (e.trend <= -0.03 and "fällt" or "seitwärts")
-  return string.format("%+d %% %s", math.floor(e.trend * 100 + (e.trend >= 0 and 0.5 or -0.5)), word)
+  local pct = math.floor(math.abs(e.trend) * 100 + 0.5) * (e.trend < 0 and -1 or 1)
+  return string.format("%+d %% %s", pct, word)
 end
 
 -- Demand levels (the cloud's demand scale).
