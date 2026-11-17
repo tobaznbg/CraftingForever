@@ -26,8 +26,6 @@ ns.AHTable.Add({
     { key = "mv", title = "Preis jetzt", width = 95, filter = "money", fmt = function(e) return money(e.mv) end },
     { key = "ref", title = "Ø 30 Tage", width = 95, muted = true, filter = "money", fmt = function(e) return money(e.ref) end },
     { key = "change", title = "Jetzt vs. Ø", width = 90, filter = "pct", fmt = function(e) return pct(e.change) end },
-    { key = "own", title = "Eigene Daten", width = 90, muted = true, filter = "pct",
-      fmt = function(e) return string.format("%d %%", math.floor(e.own * 100 + 0.5)) end },
     { key = "offers", title = "Angebote", width = 75, muted = true, filter = "num",
       fmt = function(e) return tostring(e.offers) end },
   },
