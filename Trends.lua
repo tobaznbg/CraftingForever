@@ -1,12 +1,12 @@
--- Trends: auction house tab with items whose price is clearly rising or falling.
---   EU trend   = TSM region market value (recent) against its 60-day average, relative
---                to the median of all items (so a general price shift does not count)
---   here       = market value in our house against its 7-day median, once the
---                collector has two days of data
--- Data_Trend.lua is built by tools/trend.py.
+-- Trends: auction house tab with items whose price in our auction house moves away
+-- from its long-term level.
+--   trend      current market value against the long-term reference
+--   reference  collector: our own 30-day median, blended with a one-time TSM start
+--              value while our history is short (ownShare = weight of our own data,
+--              observed days / 14; at 100 % TSM plays no part any more)
 local ADDON, ns = ...
 
-local HOUSE_MIN_HOURS = 48
+local MIN_MOVE = 0.10   -- at least 10 % away from the reference
 
 local function money(c) return c and ns.FormatMoney(c, true) or "–" end
 local function pct(v)
@@ -16,29 +16,31 @@ local function pct(v)
 end
 
 ns.AHTable.Add({
-  id = "Trends", label = "Trends", title = "Trends – steigende und fallende Preise",
-  sort = "strength",
+  id = "Trends", label = "Trends", title = "Trends – Preise in deinem Auktionshaus",
+  -- Much traded first: in thin markets one odd listing makes a "trend" of +5000 %.
+  sort = "offers",
   views = { { "up", "Steigend" }, { "down", "Fallend" } },
+  defaultFilters = { offers = "10" },
   columns = {
     { key = "name", title = "Item", width = 0, align = "LEFT" },
-    { key = "mvHere", title = "Wert hier", width = 90, filter = "money", fmt = function(e) return money(e.mvHere) end },
-    { key = "houseChange", title = "Trend hier", width = 75, filter = "pct", fmt = function(e) return pct(e.houseChange) end },
-    { key = "euMv", title = "EU jetzt", width = 90, muted = true, filter = "money", fmt = function(e) return money(e.euMv) end },
-    { key = "euHist", title = "EU 60 T", width = 90, muted = true, fmt = function(e) return money(e.euHist) end },
-    { key = "change", title = "Trend EU", width = 75, filter = "pct", fmt = function(e) return pct(e.change) end },
-    { key = "fpd", title = "Verk./Tag EU", width = 85, muted = true, filter = "num",
-      fmt = function(e) return string.format("%.0f", e.fpd) end },
+    { key = "mv", title = "Wert jetzt", width = 95, filter = "money", fmt = function(e) return money(e.mv) end },
+    { key = "ref", title = "Langfristig", width = 95, muted = true, filter = "money", fmt = function(e) return money(e.ref) end },
+    { key = "change", title = "Trend", width = 75, filter = "pct", fmt = function(e) return pct(e.change) end },
+    { key = "own", title = "Eigene Daten", width = 90, muted = true, filter = "pct",
+      fmt = function(e) return string.format("%d %%", math.floor(e.own * 100 + 0.5)) end },
+    { key = "offers", title = "Angebote", width = 75, muted = true, filter = "num",
+      fmt = function(e) return tostring(e.offers) end },
   },
-  rows = function(filter)
+  rows = function(view)
     local list, house = {}, ns.AHData and ns.AHData[113]
-    local houseOk = house and (house.hours or 0) >= HOUSE_MIN_HOURS
-    for itemID, v in pairs(ns.TrendData and ns.TrendData.items or {}) do
-      local change = v[3]
-      if (filter == "up") == (change > 0) then
-        local row = house and house.items[itemID]
-        local hc = houseOk and row and row[2] and row[3] and row[3] > 0 and (row[2] / row[3] - 1) or nil
-        table.insert(list, { itemID = itemID, euMv = v[1], euHist = v[2], change = change, fpd = v[4],
-          strength = math.abs(change), mvHere = row and row[2], houseChange = hc })
+    for itemID, row in pairs(house and house.items or {}) do
+      local mv, ref = row[2], row[9]
+      if mv and ref and ref > 0 then
+        local change = mv / ref - 1
+        if (view == "up" and change >= MIN_MOVE) or (view == "down" and change <= -MIN_MOVE) then
+          table.insert(list, { itemID = itemID, mv = mv, ref = ref, change = change, own = row[10] or 0,
+            offers = row[7] or 0, strength = math.abs(change) })
+        end
       end
     end
     return list
