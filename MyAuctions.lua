@@ -286,7 +286,9 @@ My.StoreOwned = storeOwned
 
 -- Discord messages of the companion server (ns.db.settings.discord): sold auctions, watched recipes, snipes from
 -- snipeMin copper profit on. Defaults filled in place.
-My.DISCORD_DEFAULTS = { sales = true, snipes = true, snipeMin = 50000, recipes = true }
+-- sales: a mention in #wow-broker for each own sold auction, off unless switched on. Snipes
+-- and recipes in the shared channel are the server's (not a user setting any more).
+My.DISCORD_DEFAULTS = { sales = false, snipes = true, snipeMin = 50000, recipes = true }
 function My.Discord()
   ns.db.settings = ns.db.settings or {}
   local d = ns.db.settings.discord
@@ -295,6 +297,11 @@ function My.Discord()
   if not d.v then
     if d.snipeMin == 100000 then d.snipeMin = nil end
     d.v = 2
+  end
+  -- Sales messages are off by default now; earlier versions filled in "on".
+  if d.v < 3 then
+    d.sales = false
+    d.v = 3
   end
   for k, v in pairs(My.DISCORD_DEFAULTS) do
     if d[k] == nil then d[k] = v end

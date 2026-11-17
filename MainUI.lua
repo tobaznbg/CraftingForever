@@ -1585,30 +1585,11 @@ PAGES.settings = function(p)
   y = y - 10
   section("Discord")
   local function discord() return ns.MyAuctions and ns.MyAuctions.Discord() or {} end
-  add("Discord-Nachrichten: Verkäufe", function() return discord().sales end,
+  add("Meine Verkäufe in #wow-broker melden (mit Erwähnung)", function() return discord().sales end,
     function(on) discord().sales = on end)
-  add("Discord-Nachrichten: Snipes", function() return discord().snipes end,
-    function(on) discord().snipes = on end)
-  -- profit steps for snipe messages (copper)
-  local SNIPE_STEPS = { 10000, 20000, 50000, 100000, 200000, 500000, 1000000 }
-  local snipeLabel = Style.Text(p, 12)
-  local function changeSnipe(dir)
-    local d = discord()
-    local at = 1
-    for i, v in ipairs(SNIPE_STEPS) do if (d.snipeMin or 0) >= v then at = i end end
-    d.snipeMin = SNIPE_STEPS[math.max(1, math.min(#SNIPE_STEPS, at + dir))]
-    p:Refresh()
-  end
-  local snipeMinus = Style.Button(p, "–", 24, 20, function() changeSnipe(-1) end)
-  snipeMinus:SetPoint("TOPLEFT", PAD + 4, y)
-  snipeLabel:SetPoint("LEFT", snipeMinus, "RIGHT", 10, 0)
-  snipeLabel:SetWidth(200)
-  local snipePlus = Style.Button(p, "+", 24, 20, function() changeSnipe(1) end)
-  snipePlus:SetPoint("LEFT", snipeLabel, "RIGHT", 10, 0)
-  y = y - 26
   local discordHint = Style.Text(p, 11)
   discordHint:SetPoint("TOPLEFT", PAD + 4, y)
-  discordHint:SetText(Style.MUTED .. "Gilt nach /reload oder Logout (die App lädt es dann hoch).|r")
+  discordHint:SetText(Style.MUTED .. "Snipes und Rezepte postet der Server für die ganze Gilde. Gilt nach /reload oder Logout.|r")
   y = y - 24
 
   y = y - 10
@@ -1630,7 +1611,6 @@ PAGES.settings = function(p)
   function p:Refresh()
     for _, t in ipairs(toggles) do t:Update() end
     scaleLabel:SetText(string.format("Größe %d %%", math.floor((state().scale or 1) * 100 + 0.5)))
-    snipeLabel:SetText("Snipes ab " .. money(discord().snipeMin or 0) .. " Gewinn")
   end
 end
 
