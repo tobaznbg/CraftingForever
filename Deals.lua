@@ -2,17 +2,39 @@
 --   house price  = unit price at which a quarter of the listed quantity is reached
 --                  (a few cheap outliers don't move it; a flooded market does)
 --   reference    = the lower of the house price and the average (ns.Item)
--- An offer is a deal at or below 60 % of the reference, for items with demand
--- >= MIN_DEMAND (ns.Item), when at least 20 silver profit remain after the cut.
+-- An offer is a deal at or below maxShare of the reference, for items with demand
+-- >= minDemand (ns.Item), when at least minProfit remains after the cut (Deals.Settings).
 local ADDON, ns = ...
 
 local Deals = {}
 ns.Deals = Deals
 
-Deals.MAX_SHARE = 0.6     -- offer at most 60 % of the reference
-Deals.MIN_DEMAND = 2      -- ns.Item demand (cloud scale)
-Deals.MIN_PROFIT = 2000   -- 20 silver per item line after the 5 % cut
+-- Settings of the sniper, adjustable in the main window (ns.db.settings.sniper).
+Deals.DEFAULTS = {
+  maxShare = 0.6,       -- offer at most 60 % of the reference
+  minProfit = 2000,     -- 20 silver per item line after the 5 % cut
+  minDemand = 2,        -- ns.Item demand (cloud scale) for a hit
+  watchMax = 150,       -- items on the watch list
+  watchMinDemand = 2,   -- ns.Item demand for the watch list
+}
 local CUT = 0.05
+
+function Deals.Settings()
+  local s = ns.db and ns.db.settings and ns.db.settings.sniper or {}
+  local out = {}
+  for k, v in pairs(Deals.DEFAULTS) do out[k] = s[k] ~= nil and s[k] or v end
+  return out
+end
+
+function Deals.Set(key, value)
+  ns.db.settings = ns.db.settings or {}
+  ns.db.settings.sniper = ns.db.settings.sniper or {}
+  ns.db.settings.sniper[key] = value
+end
+
+-- Current values (the old constants).
+function Deals.MaxShare() return Deals.Settings().maxShare end
+function Deals.MinProfit() return Deals.Settings().minProfit end
 
 -- Unit price at which `share` of the listed quantity is reached.
 -- listings = { { unit = copper, count = n }, ... } (sorted in place).
@@ -37,7 +59,7 @@ end
 
 local function liquid(itemID)
   local demand = ns.Item(itemID).demand
-  return demand ~= nil and demand >= Deals.MIN_DEMAND
+  return demand ~= nil and demand >= Deals.Settings().minDemand
 end
 
 Deals.HousePrice = housePrice

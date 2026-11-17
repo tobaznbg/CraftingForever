@@ -4,8 +4,8 @@
 -- (Deals.Reference) and lists the hits.
 -- No bulk request: SearchForItemKeys with 400 keys got the character disconnected
 -- (16 Nov 2026). Searches are paced to at most one per SEARCH_SPACING seconds.
--- Watch list = items of our own auction house (ns.Item) with demand >= WATCH_MIN_DEMAND, where a 40 % discount is worth Deals.MIN_PROFIT and that
--- we can afford; the WATCH_MAX best by expected profit. Without the collector data
+-- Watch list = items of our own auction house (ns.Item) with demand >= watchMinDemand, where the discount is worth minProfit and that
+-- we can afford; the watchMax best by expected profit (all values: Deals.Settings, editable in the main window). Without the collector data
 -- or the API it falls back to browsing the whole auction house (slow). A hit is an offer at or below Deals.MAX_SHARE of the reference, for an
 -- item that sells well, with at least Deals.MIN_PROFIT after the cut.
 -- Buying is always a click of the player: items one auction per click,
@@ -24,8 +24,6 @@ local BROWSE_TIMEOUT = 25
 local MAX_PAGES = 80
 local PRICE_TOLERANCE = 1.02 -- commodity quote may be 2 % above the listed cost
 local LOG_MAX = 2000
-local WATCH_MAX = 150
-local WATCH_MIN_DEMAND = 2   -- ns.Item demand (cloud scale)
 local SEARCH_SPACING = 1.0   -- seconds between two searches (TSM allows itself 100 a minute)
 local FULL_PAUSE = 30        -- pause between two whole-AH browses (as TSM)
 
@@ -43,6 +41,8 @@ local note = nil            -- last message for the status line
 local round = { items = 0, candidates = 0, seconds = 0 }
 local timeouts = 0          -- detail searches without an answer (this run)
 local watch = nil           -- { keys = {itemKey...}, set = {itemID = true} } or nil (whole AH)
+local seen = {}             -- key -> { price = cheapest offer or false (none), limit = buy-up-to, t = time() }
+local roundNo = 0           -- watch list rounds of this run
 
 local function changed()
   if ns.Selling and ns.Selling.Refresh then ns.Safe(ns.Selling.Refresh) end
@@ -90,28 +90,37 @@ local function ready()
   return not api.IsThrottledMessageSystemReady or api.IsThrottledMessageSystemReady()
 end
 
--- Watch list from the items of our own auction house (ns.Item).
-local function buildWatchlist()
+-- Watch list candidates from the items of our own auction house (ns.Item), best first:
+-- { { itemID, score, avg, demand }... } limited to watchMax (Deals.Settings). Also used
+-- by the main window to show what the sniper watches.
+function Sniper.WatchCandidates()
   local house = ns.AHData and ns.AHData[113]
-  if not house or not api.SendSearchQuery or not api.MakeItemKey then return nil end
+  if not house then return {} end
+  local set = ns.Deals.Settings()
   local money, list = GetMoney(), {}
-  local discount = 1 - ns.Deals.MAX_SHARE - ns.Deals.CUT
+  local discount = 1 - set.maxShare - ns.Deals.CUT
   for itemID in pairs(house.items) do
     local item = ns.Item(itemID)
     local avg, demand = item.avg, item.demand
-    if avg and demand and demand >= WATCH_MIN_DEMAND and avg * ns.Deals.MAX_SHARE <= money then
+    if avg and demand and demand >= set.watchMinDemand and avg * set.maxShare <= money then
       local stack = math.max(1, math.min(20, (item.quantity or 1) / math.max(1, item.offers or 1)))
-      if discount * avg * stack >= ns.Deals.MIN_PROFIT then
-        table.insert(list, { itemID = itemID, score = avg * math.min(demand, 20) })
+      if discount * avg * stack >= set.minProfit then
+        table.insert(list, { itemID = itemID, score = avg * math.min(demand, 20), avg = avg, demand = demand })
       end
     end
   end
   table.sort(list, function(a, b) return a.score > b.score end)
+  for i = #list, set.watchMax + 1, -1 do list[i] = nil end
+  return list
+end
+
+local function buildWatchlist()
+  if not api.SendSearchQuery or not api.MakeItemKey then return nil end
   local w = { keys = {}, set = {} }
-  for i = 1, math.min(WATCH_MAX, #list) do
-    local itemKey = api.MakeItemKey(list[i].itemID)
-    table.insert(w.keys, { itemKey = itemKey, itemID = list[i].itemID, key = keyOf(itemKey) })
-    w.set[list[i].itemID] = true
+  for _, c in ipairs(Sniper.WatchCandidates()) do
+    local itemKey = api.MakeItemKey(c.itemID)
+    table.insert(w.keys, { itemKey = itemKey, itemID = c.itemID, key = keyOf(itemKey) })
+    w.set[c.itemID] = true
   end
   return #w.keys > 0 and w or nil
 end
@@ -159,6 +168,7 @@ local function sendBrowse()
     for _, w in ipairs(watch.keys) do table.insert(candidates, w) end
     phase = "detail"
     session().rounds = session().rounds + 1
+    roundNo = roundNo + 1
     round.items = #candidates
     changed()
     return nextStep()
@@ -182,7 +192,7 @@ local function quickCheck(r)
     return false
   end
   local ref = ns.Deals.Reference(itemID, houseValue(itemID))
-  return ref and r.minPrice <= ref * ns.Deals.MAX_SHARE
+  return ref and r.minPrice <= ref * ns.Deals.MaxShare()
 end
 
 function Sniper.BrowseDone()
@@ -224,8 +234,9 @@ local function evaluate(c, listings, commodity)
   ns.Item.Observe(c.itemID, cheapest)
   local house = #plain > 0 and ns.Deals.HousePrice(plain, 0.25) or nil
   local ref, source = ns.Deals.Reference(c.itemID, house)
+  seen[c.key] = { price = cheapest or false, limit = ref and ref * ns.Deals.MaxShare(), t = time() }
   if not ref then return nil end
-  local limit = ref * ns.Deals.MAX_SHARE
+  local limit = ref * ns.Deals.MaxShare()
   local hit = { key = c.key, itemKey = c.itemKey, itemID = c.itemID, commodity = commodity, ref = ref,
     source = source, limit = limit, units = 0, cost = 0, profit = 0, auctions = {} }
   table.sort(listings, function(a, b) return a.unit < b.unit end)
@@ -238,7 +249,7 @@ local function evaluate(c, listings, commodity)
       table.insert(hit.auctions, l)
     end
   end
-  if hit.units == 0 or hit.profit < ns.Deals.MIN_PROFIT then return nil end
+  if hit.units == 0 or hit.profit < ns.Deals.MinProfit() then return nil end
   return hit
 end
 
@@ -523,6 +534,7 @@ function Sniper.Click()
       return changed()
     end
     running, note, hits, checked, timeouts = true, nil, {}, {}, 0
+    seen, roundNo = {}, 0
     diag, sentAt = { answered = 0, seconds = 0, waits = 0, late = 0, sent = 0 }, {}
     watch = buildWatchlist()
     token = token + 1
@@ -542,6 +554,49 @@ function Sniper.Hits()
   for _, hit in pairs(hits) do table.insert(list, hit) end
   table.sort(list, function(a, b) return a.profit > b.profit end)
   return list
+end
+
+-- Seconds one watch list search takes right now: the search spacing, or the measured
+-- answer time plus the step delay when the server is slower.
+local function pace()
+  local answer = diag.answered > 0 and diag.seconds / diag.answered + 0.1 or 0
+  return math.max(SEARCH_SPACING, answer)
+end
+
+-- Live state for the panel at the auction house:
+--   { running, phase, round, index, total, left, eta (seconds), current (key or nil),
+--     rows = { { itemID, key, limit, price (copper, false = no offer, nil = not yet),
+--                checked (time() or nil), current (bool), hit (or nil) }... } }
+-- Rows: hits first (best profit first), then the watch list in its own order.
+function Sniper.State()
+  local st = { running = running, phase = phase, round = roundNo, rows = {}, total = 0, index = 0, left = 0, eta = 0 }
+  local current = detailing and detailing.key
+  st.current = current
+  local listed = {}
+  local function row(key, itemID, hit)
+    local s = seen[key]
+    local limit = hit and hit.limit or (s and s.limit)
+    if not limit then
+      local ref = ns.Deals.Reference(itemID, nil)
+      limit = ref and ref * ns.Deals.MaxShare()
+    end
+    listed[key] = true
+    table.insert(st.rows, { itemID = itemID, key = key, limit = limit, price = s and s.price,
+      checked = s and s.t, current = key == current, hit = hit })
+  end
+  for _, hit in ipairs(Sniper.Hits()) do row(hit.key, hit.itemID, hit) end
+  if watch then
+    for _, w in ipairs(watch.keys) do
+      if not listed[w.key] then row(w.key, w.itemID, nil) end
+    end
+    st.total = #watch.keys
+    if running and phase == "detail" then
+      st.left = math.min(st.total, #candidates + (detailing and 1 or 0))
+    end
+    st.index = st.total - st.left
+    st.eta = st.left * pace()
+  end
+  return st
 end
 
 -- Status block for the panel: up to four short lines.

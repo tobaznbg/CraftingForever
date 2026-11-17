@@ -22,13 +22,30 @@ function Planner.Chance(colors, skill)
   return (grey - skill) / (grey - yellow)
 end
 
--- Recipes that need a leatherworking specialization (Dragonscale, Elemental, Tribal);
--- left out of plans, the character has none chosen before 300.
+-- Recipes that need a profession specialization (Data_Skill.lua marks them with `spec`;
+-- this list covers the older leatherworking data); left out of plans unless learned.
 Planner.SPECIALIZATION = {
   [10650] = true, [10619] = true, [10630] = true, [10632] = true, [10621] = true,
 }
 -- Trainer recipes learned at 200 or later are taught by the Artisan (Fachmann) trainer.
 Planner.ARTISAN_FROM = 200
+Planner.MAX_SKILL = 300
+
+-- Classic ranks: the cap each one lifts the skill to and the character level it needs.
+-- Reaching a cap, the next rank has to be learned at the trainer before skill goes on.
+Planner.RANKS = {
+  { cap = 75, name = "Lehrling", level = 5 },
+  { cap = 150, name = "Geselle", level = 10 },
+  { cap = 225, name = "Experte", level = 20 },
+  { cap = 300, name = "Fachmann", level = 35 },
+}
+
+-- The rank that has to be learned at `cap` (to go beyond it), or nil at the end.
+function Planner.NextRank(cap)
+  for _, rank in ipairs(Planner.RANKS) do
+    if rank.cap > cap then return rank end
+  end
+end
 
 local function hasSource(source, code)
   return type(source) == "string" and source:find(code, 1, true) ~= nil
@@ -48,8 +65,9 @@ function Planner.Candidates(scanRecipes, data, buyCost, vendorSell, ahSell, all)
     local d = data[recipeID]
     local trainer = hasSource(d and d[7], "6")
     local vendorPattern = not trainer and hasSource(d and d[7], "5")
-    local special = Planner.SPECIALIZATION[recipeID] and not recipe.learned and all ~= true
-    if d and recipe.out and not special
+    local special = (Planner.SPECIALIZATION[recipeID] or (d and d.spec)) and not recipe.learned
+      and all ~= true
+    if d and (recipe.out or recipe.noOutput) and not special
         and (all == true or recipe.learned or trainer or (all == "vendor" and vendorPattern)) then
       local cost, missing = 0, nil
       for _, reagent in ipairs(recipe.r or {}) do
@@ -64,8 +82,8 @@ function Planner.Candidates(scanRecipes, data, buyCost, vendorSell, ahSell, all)
         table.insert(skipped, { id = recipeID, name = recipe.name, missing = missing })
       else
         local produced = ((recipe.qmin or 1) + (recipe.qmax or recipe.qmin or 1)) / 2
-        local vendorValue = (vendorSell(recipe.out) or 0) * produced
-        local auction = ahSell(recipe.out)
+        local vendorValue = recipe.out and (vendorSell(recipe.out) or 0) * produced or 0
+        local auction = recipe.out and ahSell(recipe.out) or nil
         local ahValue = math.max(vendorValue, (auction or 0) * produced)
         table.insert(list, {
           id = recipeID,
@@ -89,6 +107,35 @@ function Planner.Candidates(scanRecipes, data, buyCost, vendorSell, ahSell, all)
     end
   end
   return list, skipped
+end
+
+-- Recipes of a SkillData entry (ns.SkillData[professionID]) in the shape of a recipe
+-- scan, so Planner.Candidates takes them with the entry's recipes as color/learn data:
+--   Planner.Candidates(Planner.SkillRecipes(skill, scan), skill.recipes, ...)
+-- Reagents, product and names come from SkillData; whether a recipe is learned from the
+-- character's own scan (scan.recipes keyed by the same spell IDs), if there is one.
+-- Recipes without a product (enchantments) are kept: they only cost material.
+function Planner.SkillRecipes(skill, scan)
+  local own = scan and scan.recipes or {}
+  local list = {}
+  for spellID, d in pairs(skill and skill.recipes or {}) do
+    local reagents = {}
+    local r = d.r or {}
+    for i = 1, #r - 1, 2 do
+      table.insert(reagents, { i = r[i], n = r[i + 1] })
+    end
+    local mine = own[spellID]
+    list[spellID] = {
+      name = d.name or (mine and mine.name) or ("Rezept " .. spellID),
+      learned = mine and mine.learned or false,
+      out = d.out,
+      noOutput = d.out == nil and #reagents > 0 or nil,
+      qmin = d.qty or 1,
+      qmax = d.qty or 1,
+      r = reagents,
+    }
+  end
+  return list
 end
 
 -- Cheapest path from skill `from` to `to`.
@@ -210,4 +257,33 @@ function Planner.Shopping(segments)
     end
   end
   return need
+end
+
+-- Path segments with the trainer visits in between, for display:
+--   { rank = { at, name, cap, level } }  learn the next rank at skill `at`
+--   { seg = segment }                    a segment of Planner.Path
+-- `max` is the character's current skill cap (nil: not known, e.g. the profession is not
+-- learned yet; then every cap from `from` on needs a visit).
+function Planner.Steps(segments, from, max)
+  local steps = {}
+  local caps = {}
+  for _, rank in ipairs(Planner.RANKS) do
+    if rank.cap < Planner.MAX_SKILL and rank.cap >= from and (not max or rank.cap >= max) then
+      table.insert(caps, rank.cap)
+    end
+  end
+  local nextCap = 1
+  local function notice(at)
+    local rank = Planner.NextRank(at)
+    table.insert(steps, { rank = { at = at, name = rank.name, cap = rank.cap, level = rank.level } })
+  end
+  for _, seg in ipairs(segments or {}) do
+    -- A segment that goes beyond a cap (or starts right at it) needs the next rank first.
+    while caps[nextCap] and seg.to > caps[nextCap] do
+      notice(caps[nextCap])
+      nextCap = nextCap + 1
+    end
+    table.insert(steps, { seg = seg })
+  end
+  return steps
 end

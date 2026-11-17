@@ -3,12 +3,14 @@
 -- right, each created on first use:
 --   overview     gold, profit, own professions, best recipes, market, open auctions, trades
 --   professions  crafting table (AHTable embed) + button to the skill planner
+--   planner      skill planner for any crafting profession (ns.Planner via ns.Costs)
 --   market       sub tabs Trends / Anlage / Händler (AHTable embeds)
 --   ledger       profit and loss per profession + recent trades
 --   analysis     market analysis from the collector (ns.MarketAnalysis)
 --   settings     switches in ns.db.settings
 -- Position, scale and last page in ns.db.mainui. Parts built elsewhere (ns.Profit,
 -- ns.MarketAnalysis, ns.AHTable.Embed) are optional: every page shows without them.
+-- Other files add pages with MainUI.RegisterPage(key, label, build, opts).
 local ADDON, ns = ...
 
 local MainUI = {}
@@ -36,10 +38,11 @@ local NO_ANALYSIS = "Analyse kommt mit den nächsten Daten"
 local NAV = {
   { key = "overview", label = "Übersicht" },
   { key = "professions", label = "Berufe" },
+  { key = "planner", label = "Skill-Planer", sub = true, parent = "professions" },
   { key = "market", label = "Markt" },
-  { key = "trends", label = "Trends", sub = true },
-  { key = "invest", label = "Anlage", sub = true },
-  { key = "vendor", label = "Händler", sub = true },
+  { key = "trends", label = "Trends", sub = true, parent = "market" },
+  { key = "invest", label = "Anlage", sub = true, parent = "market" },
+  { key = "vendor", label = "Händler", sub = true, parent = "market" },
   { key = "ledger", label = "Handelsbuch" },
   { key = "analysis", label = "Analyse" },
   { key = "settings", label = "Einstellungen" },
@@ -49,7 +52,8 @@ local MARKET_SUBS = {
   { key = "invest", label = "Anlage", table = "Invest" },
   { key = "vendor", label = "Händler", table = "Vendor" },
 }
-local ALIASES = { handel = "ledger", berufe = "professions", markt = "market", analyse = "analysis" }
+local ALIASES = { handel = "ledger", berufe = "professions", markt = "market", analyse = "analysis",
+  skill = "planner", planer = "planner" }
 
 local KINDS = { buy = "Kauf", post = "Eingestellt", sale = "Verkauf", expired = "Abgelaufen", cancelled = "Abgebrochen", craft = "Hergestellt" }
 -- Auction durations of the post hooks (1/2/3) in seconds.
@@ -61,10 +65,12 @@ local TOOLTIP_LINES = {
 }
 
 local frame, statusText
-local nav = {}
+local nav = {}          -- sidebar buttons in NAV order
+local navByKey = {}
 local pages = {}
 local current
 local marketSub = "trends"
+local ahShown = false   -- auction house open (search buttons in the planner)
 
 -- Saved state --------------------------------------------------------------------
 
@@ -185,9 +191,10 @@ end
 --   columns  { { title, width (0 = takes the rest), align }... }
 --   opts     { scroll = true }
 -- A column given as { title, width, align, true } is the item column: rows with
--- data.itemID show the item icon there and the item tooltip on hover.
+-- data.itemID show the item icon there and the item tooltip on hover. A column with
+-- button = true holds a small button per row, shown for rows with data.button.
 -- g:SetRows(list, emptyText): list of { cell texts..., itemID = n, color = {r,g,b} (first cell),
--- onClick = fn }.
+-- onClick = fn, span = text (one line over the whole width), button = { label, fn } }.
 local function grid(parent, w, h, columns, opts)
   opts = opts or {}
   local g = CreateFrame("Frame", nil, parent)
@@ -252,6 +259,13 @@ local function grid(parent, w, h, columns, opts)
       t:SetJustifyH(columns[c][3] or "LEFT")
       r.cells[c] = t
     end
+    for c, def in ipairs(columns) do
+      if def.button then
+        r.button = Style.Button(r, "", ws[c] - 8, ROW - 4, function(self) if self.fn then ns.Safe(self.fn) end end)
+        r.button:SetPoint("LEFT", xs[c] + 4, 0)
+        r.button:Hide()
+      end
+    end
     if itemCol then
       r.icon = r:CreateTexture(nil, "ARTWORK")
       r.icon:SetSize(ROW - 6, ROW - 6)
@@ -280,6 +294,12 @@ local function grid(parent, w, h, columns, opts)
       end
       if data.color then r.cells[1]:SetTextColor(unpack(data.color)) end
       r.itemID = data.itemID
+      if r.spanned then
+        r.cells[1]:ClearAllPoints()
+        r.cells[1]:SetPoint("LEFT", xs[1] + 6, 0)
+        r.cells[1]:SetWidth(ws[1] - 12)
+        r.spanned = false
+      end
       if r.icon then
         local cell = r.cells[itemCol]
         cell:ClearAllPoints()
@@ -294,6 +314,20 @@ local function grid(parent, w, h, columns, opts)
           cell:SetPoint("LEFT", xs[itemCol] + 6, 0)
           cell:SetWidth(ws[itemCol] - 12)
         end
+      end
+      if data.span then
+        for _, cell in ipairs(r.cells) do cell:SetText("") end
+        if r.icon then r.icon:Hide() end
+        r.cells[1]:ClearAllPoints()
+        r.cells[1]:SetPoint("LEFT", 6, 0)
+        r.cells[1]:SetWidth(inner - 12)
+        r.cells[1]:SetText(data.span)
+        r.spanned = true
+      end
+      if r.button then
+        r.button.fn = data.button and data.button.fn
+        if data.button then r.button.label:SetText(data.button.label) end
+        r.button:SetShown(data.button ~= nil)
       end
       r.onClick = data.onClick
       r:Show()
@@ -704,9 +738,7 @@ end
 -- Professions.
 PAGES.professions = function(p)
   pageTitle(p, "Berufe")
-  local planner = Style.Button(p, "Skill-Planer", 100, 22, function()
-    if ns.PlannerUI and ns.PlannerUI.Toggle then ns.Safe(ns.PlannerUI.Toggle) end
-  end)
+  local planner = Style.Button(p, "Skill-Planer", 100, 22, function() MainUI.Show("planner") end)
   planner:SetPoint("TOPRIGHT", -PAD, -PAD - 2)
   local holder = holderFrame(p)
   function p:Refresh() embed(holder, "Crafting") end
@@ -930,6 +962,359 @@ PAGES.analysis = function(p)
   end
 end
 
+-- Skill planner: choice of a crafting profession, then the cheapest path between two
+-- skill levels (ns.Planner over ns.Costs; prices only via ns.Item) with trainer visits,
+-- sums and a shopping list.
+local AH_CAP = 3              -- units per product assumed to sell at auction (AH mode)
+local ORANGE, YELLOW, LGREEN, GREY = "|cffff8040", "|cffffff00", "|cff40bf40", "|cff808080"
+local SOURCE = { ["6"] = "Lehrer", ["2"] = "Drop", ["5"] = "Händler", ["4"] = "Quest" }
+local QUESTION_ICON = 134400
+local plannerDirty = false    -- prices or recipes changed: compute the path again
+
+local function plannerState()
+  local s = state()
+  s.planner = s.planner or {}
+  return s.planner
+end
+
+-- Recipe color at a skill: orange, yellow, green, grey (thresholds { o, y, g, grey }).
+local function difficultyColor(colors, skill)
+  if skill >= (colors[4] or 0) then return GREY end
+  if skill >= (colors[3] or 0) then return LGREEN end
+  if skill >= (colors[2] or 0) then return YELLOW end
+  return ORANGE
+end
+
+local function sourceText(code)
+  local parts = {}
+  for c in tostring(code or ""):gmatch("[^+]+") do table.insert(parts, SOURCE[c] or c) end
+  return table.concat(parts, "/")
+end
+
+local function learnText(c)
+  if c.learned then return GREEN .. "gelernt|r" end
+  local fee = (c.learnCost or 0) > 0 and (" " .. money(c.learnCost)) or ""
+  if c.artisan then return ORANGE .. "Fachmann-Lehrer|r" .. fee end
+  if not c.needsPattern then return "Lehrer" .. fee end
+  local text = sourceText(c.source)
+  return (text ~= "" and text or "Muster") .. Style.MUTED .. " (Muster)|r"
+end
+
+-- A cost: positive is money spent, negative a gain (green).
+local function netCost(copper)
+  if copper <= 0 then return GREEN .. "+" .. money(-copper) .. "|r" end
+  return "-" .. money(copper)
+end
+
+local function searchAH(itemID)
+  if not ahShown then return end
+  if AuctionHouseFrame and AuctionHouseFrameDisplayMode then
+    AuctionHouseFrame:SetDisplayMode(AuctionHouseFrameDisplayMode.Buy)
+  end
+  C_Timer.After(0.1, function() optional(ns.Deals, "Search", itemID) end)
+end
+
+local function shiftDown() return IsShiftKeyDown and IsShiftKeyDown() or false end
+
+-- Number field with -/+ buttons (shift: steps of 10). onChange(value or nil).
+local function stepper(parent, label, onChange)
+  local f = CreateFrame("Frame", nil, parent)
+  f:SetSize(150, 22)
+  local text = muted(Style.Text(f, 12))
+  text:SetPoint("LEFT", 0, 0)
+  text:SetText(label)
+  local minus = Style.Button(f, "–", 22, 22, function()
+    onChange((f.value or 0) - (shiftDown() and 10 or 1))
+  end)
+  minus:SetPoint("LEFT", 52, 0)
+  local box = CreateFrame("EditBox", nil, f)
+  box:SetSize(44, 22)
+  box:SetPoint("LEFT", minus, "RIGHT", 4, 0)
+  box:SetAutoFocus(false)
+  box:SetNumeric(true)
+  box:SetMaxLetters(3)
+  box:SetFontObject(Style.Font(12))
+  box:SetJustifyH("CENTER")
+  local bg = Style.Solid(box, Style.C.button)
+  bg:SetAllPoints()
+  Style.Border(box)
+  box:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
+  box:SetScript("OnEscapePressed", function(self) self.cancel = true; self:ClearFocus() end)
+  box:SetScript("OnEditFocusLost", function(self)
+    local v = not self.cancel and tonumber(self:GetText()) or nil
+    self.cancel = nil
+    onChange(v)
+  end)
+  local plus = Style.Button(f, "+", 22, 22, function()
+    onChange((f.value or 0) + (shiftDown() and 10 or 1))
+  end)
+  plus:SetPoint("LEFT", box, "RIGHT", 4, 0)
+  function f:Set(v)
+    self.value = v
+    box:SetText(tostring(v))
+  end
+  return f
+end
+
+PAGES.planner = function(p)
+  local title = pageTitle(p, "Skill-Planer")
+  local ranges = {}   -- professionID -> { from, to } while the window lives
+  local cache         -- last computed path { key, ... }
+
+  local back = Style.Button(p, "Andere Berufe", 110, 22, function()
+    plannerState().pid = nil
+    p:Refresh()
+  end)
+  back:SetPoint("TOPRIGHT", -PAD, -PAD - 2)
+  local hint = muted(Style.Text(p, 13))
+  hint:SetPoint("TOP", 0, -200)
+
+  -- Profession choice: tiles with icon, own professions first.
+  local chooser = CreateFrame("Frame", nil, p)
+  chooser:SetAllPoints()
+  local tiles = {}
+  local tileW, tileH = (INNER_W - 3 * GAP) / 4, 70
+  local function tileAt(i)
+    if tiles[i] then return tiles[i] end
+    local b = CreateFrame("Button", nil, chooser)
+    b:SetSize(tileW, tileH)
+    b:SetPoint("TOPLEFT", PAD + ((i - 1) % 4) * (tileW + GAP), -(PAD + TOOLBAR + 6) - math.floor((i - 1) / 4) * (tileH + GAP))
+    local bg = Style.Solid(b, CARD_BG)
+    bg:SetAllPoints()
+    Style.Border(b)
+    b.hover = Style.Solid(b, Style.C.hover, "ARTWORK")
+    b.hover:SetAllPoints()
+    b.hover:Hide()
+    b.icon = b:CreateTexture(nil, "ARTWORK")
+    b.icon:SetSize(36, 36)
+    b.icon:SetPoint("LEFT", 10, 0)
+    b.label = Style.Text(b, 13)
+    b.label:SetPoint("TOPLEFT", 56, -12)
+    b.info = Style.Text(b, 11)
+    b.info:SetPoint("TOPLEFT", 56, -30)
+    b.status = muted(Style.Text(b, 11))
+    b.status:SetPoint("TOPLEFT", 56, -46)
+    b:SetScript("OnEnter", function(self) self.hover:Show() end)
+    b:SetScript("OnLeave", function(self) self.hover:Hide() end)
+    b:SetScript("OnClick", function(self)
+      if not self.pid then return end
+      plannerState().pid = self.pid
+      p:Refresh()
+    end)
+    tiles[i] = b
+    return b
+  end
+
+  -- Path view.
+  local view = CreateFrame("Frame", nil, p)
+  view:SetAllPoints()
+  local y = -(PAD + TOOLBAR + 6)
+  local fromStep, toStep
+  local function setRange(from, to)
+    local pid = plannerState().pid
+    local r = ranges[pid]
+    if not r then return end
+    from = math.floor(from or r.from)
+    to = math.floor(to or r.to)
+    from = math.max(1, math.min(from, ns.Planner and ns.Planner.MAX_SKILL - 1 or 299))
+    to = math.max(from + 1, math.min(to, ns.Planner and ns.Planner.MAX_SKILL or 300))
+    r.from, r.to = from, to
+    p:Refresh()
+  end
+  fromStep = stepper(view, "von Skill", function(v) setRange(v, nil) end)
+  fromStep:SetPoint("TOPLEFT", PAD, y)
+  toStep = stepper(view, "bis Skill", function(v) setRange(nil, v) end)
+  toStep:SetPoint("TOPLEFT", PAD + 170, y)
+  local modeSafe = Style.Button(view, "nur Händlerverkauf (sicher)", 190, 22, function()
+    plannerState().ah = false
+    p:Refresh()
+  end)
+  local modeAH = Style.Button(view, "AH-Verkauf (bis " .. AH_CAP .. " Stück pro Rezept)", 230, 22, function()
+    plannerState().ah = true
+    p:Refresh()
+  end)
+  modeAH:SetPoint("TOPRIGHT", -PAD, y)
+  modeSafe:SetPoint("RIGHT", modeAH, "LEFT", -6, 0)
+  for _, b in ipairs({ modeSafe, modeAH }) do
+    b:SetScript("OnLeave", function(self)
+      self.bg:SetColorTexture(unpack(self.active and Style.C.buttonHi or Style.C.button))
+    end)
+  end
+
+  y = y - 34
+  local pathH = 262
+  local path = grid(view, INNER_W, pathH, {
+    { "Skill", 72 }, { "Rezept", 0, nil, true }, { "Stück", 54, "RIGHT" }, { "Material", 96, "RIGHT" },
+    { "Lernen", 170 }, { "Kosten netto", 104, "RIGHT" } }, { scroll = true })
+  path:SetPoint("TOPLEFT", PAD, y)
+  y = y - pathH - 8
+  local sums = Style.Text(view, 12)
+  sums:SetPoint("TOPLEFT", PAD + 6, y)
+  local reach = muted(Style.Text(view, 12))
+  reach:SetPoint("TOPLEFT", PAD + 6, y - 18)
+  y = y - 44
+  local shopLabel = Style.Text(view, 12)
+  shopLabel:SetPoint("TOPLEFT", PAD, y)
+  shopLabel:SetText(Style.HEAD .. "Einkaufsliste|r")
+  y = y - 20
+  local shop = grid(view, INNER_W, PAGE_H + y - PAD, {
+    { "Material", 0, nil, true }, { "brauchst", 70, "RIGHT" }, { "hast", 60, "RIGHT" }, { "kaufen", 64, "RIGHT" },
+    { "je Stück", 86, "RIGHT" }, { "Summe", 96, "RIGHT" }, { "wo", 70 }, { "", 76, nil, nil, button = true } },
+    { scroll = true })
+  shop:SetPoint("TOPLEFT", PAD, y)
+
+  local function showChooser()
+    chooser:Show()
+    view:Hide()
+    back:Hide()
+    title:SetText("Skill-Planer")
+    local list = ns.Costs and ns.Costs.AllProfessions and ns.Costs.AllProfessions() or {}
+    for i, prof in ipairs(list) do
+      local b = tileAt(i)
+      b.pid = prof.pid
+      b.icon:SetTexture(prof.icon or QUESTION_ICON)
+      b.label:SetText(prof.name)
+      b.info:SetText(prof.own and (Style.ACCENT .. string.format("dein Skill %d / %d", prof.rank or 0, prof.max or 0) .. "|r")
+        or Style.MUTED .. "nicht erlernt|r")
+      b.status:SetText(prof.hasData and "" or "noch keine Skilldaten")
+      b:Show()
+    end
+    for i = #list + 1, #tiles do tiles[i]:Hide() end
+    hint:SetText(#list == 0 and "Keine Berufsdaten geladen" or "")
+    hint:SetShown(#list == 0)
+  end
+
+  local function compute(pid, from, to, ah)
+    local prof, why = ns.Costs.Profession(pid)
+    if not prof then return { why = why } end
+    local candidates, skipped = ns.Costs.Candidates(prof, "vendor")
+    local segments, total, reached = ns.Planner.Path(candidates, from, to, ah and AH_CAP or 0)
+    -- The own cap counts only when planning from the own skill range.
+    local max = prof.max
+    if not (max and from <= max and from >= max - 75) then max = nil end
+    return { prof = prof, segments = segments, total = total, reached = reached, skipped = #skipped,
+      steps = segments and ns.Planner.Steps(segments, from, max) }
+  end
+
+  local function showPlan(pid)
+    chooser:Hide()
+    back:Show()
+    local entry
+    for _, prof in ipairs(ns.Costs.AllProfessions()) do if prof.pid == pid then entry = prof end end
+    title:SetText("Skill-Planer  ·  " .. (entry and entry.name or ("Beruf " .. pid)))
+    if not ranges[pid] then
+      ranges[pid] = { from = math.max(1, math.min(entry and entry.rank or 1, ns.Planner.MAX_SKILL - 1)),
+        to = ns.Planner.MAX_SKILL }
+    end
+    local r, ah = ranges[pid], plannerState().ah and true or false
+    fromStep:Set(r.from)
+    toStep:Set(r.to)
+    setButtonActive(modeSafe, not ah)
+    setButtonActive(modeAH, ah)
+
+    local key = table.concat({ pid, r.from, r.to, tostring(ah) }, ":")
+    if not cache or cache.key ~= key or plannerDirty then
+      cache = compute(pid, r.from, r.to, ah)
+      cache.key = key
+      plannerDirty = false
+    end
+    local result = cache
+    local message
+    if result.why == "nodata" then
+      message = "Für diesen Beruf fehlen noch Skilldaten."
+    elseif result.why == "noscan" then
+      message = "Berufsfenster einmal öffnen, dann plant m4-companion den Weg."
+    elseif not result.segments then
+      message = "Kein Weg gefunden – für manche Zutaten fehlen Preise. Im AH einmal scannen."
+    end
+    view:SetShown(true)
+    for _, w in ipairs({ path, sums, reach, shopLabel, shop }) do w:SetShown(message == nil) end
+    hint:SetText(message or "")
+    hint:SetShown(message ~= nil)
+    if message then return end
+
+    local rows = {}
+    if not (entry and entry.own) and r.from <= 1 then
+      table.insert(rows, { span = ORANGE .. "Zuerst den Beruf beim Lehrer lernen (Lehrling, bis 75).|r" })
+    end
+    local spend, learn, income = 0, 0, 0
+    local gold, outlay, reachable = GetMoney(), 0, r.from
+    for _, step in ipairs(result.steps) do
+      if step.rank then
+        local rank = step.rank
+        table.insert(rows, { span = string.format("%sBei %d: %s beim Lehrer lernen (bis %d), ab Charakterstufe %d.|r",
+          ORANGE, rank.at, rank.name, rank.cap, rank.level) })
+      else
+        local seg, c = step.seg, step.seg.recipe
+        table.insert(rows, { string.format("%d–%d", seg.from, seg.to), difficultyColor(c.colors, seg.from) .. c.name .. "|r",
+          tostring(math.ceil(seg.crafts)), money(seg.spend), learnText(c), netCost(seg.cost), itemID = c.out })
+        spend, learn, income = spend + seg.spend, learn + seg.learned, income + seg.income
+        -- How far the gold reaches, paying everything up front.
+        if reachable == seg.from and outlay + seg.spend + seg.learned <= gold then
+          outlay = outlay + seg.spend + seg.learned
+          reachable = seg.to
+        end
+      end
+    end
+    if result.reached < r.to then
+      table.insert(rows, { span = string.format("%sAb Skill %d geben Lehrer- und Händler-Rezepte keine Punkte mehr – weiter nur mit Mustern (Drop, Quest, Ruf).|r",
+        ORANGE, result.reached) })
+    end
+    path:SetRows(rows, "")
+    sums:SetText(string.format("Material %s   ·   Lehrer %s   ·   Rückverkauf %s   ·   unterm Strich %s",
+      money(spend), money(learn), GREEN .. money(income) .. "|r", netCost(result.total or 0)))
+    local reachText
+    if reachable >= result.reached then
+      reachText = string.format("Dein Gold (%s) reicht für den ganzen Weg.", money(gold))
+    else
+      reachText = string.format("Mit deinem Gold (%s) erreichbar bis Skill %d – dann verkaufen und weiter.", money(gold), reachable)
+    end
+    if result.skipped > 0 then
+      reachText = reachText .. string.format("   %d Rezepte ohne Preis für eine Zutat nicht eingeplant.", result.skipped)
+    end
+    reach:SetText(reachText)
+
+    local list = {}
+    for itemID, count in pairs(ns.Planner.Shopping(result.segments)) do
+      local unit, where = ns.Costs.Buy(itemID)
+      local owned = ns.Costs.Owned(itemID) or 0
+      table.insert(list, { id = itemID, count = count, owned = owned, buy = math.max(0, count - owned),
+        unit = unit or 0, where = where })
+    end
+    table.sort(list, function(a, b)
+      if a.buy * a.unit ~= b.buy * b.unit then return a.buy * a.unit > b.buy * b.unit end
+      return a.id < b.id
+    end)
+    local shopRows, total = {}, 0
+    for _, it in ipairs(list) do
+      total = total + it.buy * it.unit
+      local id = it.id
+      table.insert(shopRows, { ns.ItemName(id) or ("Item " .. id), tostring(it.count), tostring(it.owned),
+        it.buy > 0 and tostring(it.buy) or (GREEN .. "0|r"), it.where and money(it.unit) or "–",
+        it.where and money(it.buy * it.unit) or "–", it.where or (Style.MUTED .. "kein Preis|r"), itemID = id,
+        button = ahShown and it.buy > 0 and { label = "Suchen", fn = function() searchAH(id) end } or nil })
+    end
+    if #shopRows > 0 then
+      table.insert(shopRows, { "Noch zu kaufen", "", "", "", "", money(total), "", color = Style.C.accent })
+    end
+    shop:SetRows(shopRows, "Nichts zu kaufen")
+  end
+
+  function p:Refresh()
+    hint:SetShown(false)
+    if not (ns.Costs and ns.Costs.Profession and ns.Planner and ns.Planner.Steps) then
+      chooser:Hide()
+      view:Hide()
+      back:Hide()
+      hint:SetText("Skill-Planer nicht verfügbar")
+      hint:Show()
+      return
+    end
+    local pid = plannerState().pid
+    if pid then showPlan(pid) else showChooser() end
+  end
+end
+
 -- Settings (saved in ns.db.settings, the minimap switch in ns.db.minimap.hide).
 PAGES.settings = function(p)
   pageTitle(p, "Einstellungen")
@@ -1006,7 +1391,7 @@ local function updateNav()
   for _, b in ipairs(nav) do
     local entry = b.entry
     local active
-    if entry.sub then
+    if entry.parent == "market" then
       active = current == "market" and marketSub == entry.key
     else
       active = current == entry.key
@@ -1014,8 +1399,44 @@ local function updateNav()
     b.active = active
     b.bar:SetShown(active)
     b.bg:SetShown(active)
-    local open = entry.key == "market" and current == "market"
+    -- The parent of the shown page stays bright (Markt for its tabs, Berufe for the planner).
+    local open = (entry.key == "market" and current == "market")
+    for _, e in ipairs(NAV) do
+      if e.parent == entry.key and e.key == current then open = true end
+    end
     b.label:SetTextColor(unpack((active or open) and Style.C.text or Style.C.muted))
+  end
+end
+
+-- Sidebar buttons in NAV order; creates the ones still missing (pages registered later).
+local function layoutNav()
+  local y = -(HEADER + 10)
+  nav = {}
+  for _, entry in ipairs(NAV) do
+    local h = entry.sub and 24 or 30
+    local b = navByKey[entry.key]
+    if not b then
+      b = CreateFrame("Button", nil, frame)
+      b:SetSize(SIDEBAR, h)
+      b.entry = entry
+      b.bg = Style.Solid(b, Style.C.hover, "ARTWORK")
+      b.bg:SetAllPoints()
+      b.bar = Style.Solid(b, Style.C.accent, "OVERLAY")
+      b.bar:SetPoint("TOPLEFT")
+      b.bar:SetPoint("BOTTOMLEFT")
+      b.bar:SetWidth(3)
+      b.label = Style.Text(b, entry.sub and 12 or 13)
+      b.label:SetPoint("LEFT", entry.sub and 30 or 16, 0)
+      b.label:SetText(entry.label)
+      b:SetScript("OnEnter", function(self) self.label:SetTextColor(unpack(Style.C.text)) end)
+      b:SetScript("OnLeave", function() updateNav() end)
+      b:SetScript("OnClick", function() MainUI.Show(entry.key) end)
+      navByKey[entry.key] = b
+    end
+    b:ClearAllPoints()
+    b:SetPoint("TOPLEFT", 1, y)
+    table.insert(nav, b)
+    y = y - h
   end
 end
 
@@ -1093,28 +1514,7 @@ local function createFrame()
   edge:SetPoint("TOPLEFT", side, "TOPRIGHT")
   edge:SetPoint("BOTTOMLEFT", side, "BOTTOMRIGHT")
   edge:SetWidth(1)
-  local y = -(HEADER + 10)
-  for _, entry in ipairs(NAV) do
-    local h = entry.sub and 24 or 30
-    local b = CreateFrame("Button", nil, frame)
-    b:SetSize(SIDEBAR, h)
-    b:SetPoint("TOPLEFT", 1, y)
-    b.entry = entry
-    b.bg = Style.Solid(b, Style.C.hover, "ARTWORK")
-    b.bg:SetAllPoints()
-    b.bar = Style.Solid(b, Style.C.accent, "OVERLAY")
-    b.bar:SetPoint("TOPLEFT")
-    b.bar:SetPoint("BOTTOMLEFT")
-    b.bar:SetWidth(3)
-    b.label = Style.Text(b, entry.sub and 12 or 13)
-    b.label:SetPoint("LEFT", entry.sub and 30 or 16, 0)
-    b.label:SetText(entry.label)
-    b:SetScript("OnEnter", function(self) self.label:SetTextColor(unpack(Style.C.text)) end)
-    b:SetScript("OnLeave", function() updateNav() end)
-    b:SetScript("OnClick", function() MainUI.Show(entry.key) end)
-    table.insert(nav, b)
-    y = y - h
-  end
+  layoutNav()
 
   -- Page area.
   local content = CreateFrame("Frame", nil, frame)
@@ -1152,6 +1552,37 @@ function MainUI.Show(page)
   selectPage(page)
 end
 
+-- Adds a page from another file. build(pageFrame, width, height) creates its content on
+-- first use and may return an object with :Refresh() (called whenever the page shows).
+-- opts.after: key of the sidebar entry it follows (after that entry's sub entries);
+-- without it the page goes before the settings. Works before and after the window exists.
+function MainUI.RegisterPage(key, label, build, opts)
+  opts = opts or {}
+  PAGES[key] = function(p)
+    local obj = build(p, PAGE_W, PAGE_H)
+    if type(obj) == "table" and type(obj.Refresh) == "function" then
+      function p:Refresh() return obj:Refresh() end
+    end
+  end
+  local exists = false
+  for _, e in ipairs(NAV) do if e.key == key then exists = true end end
+  if not exists then
+    local at
+    for i, e in ipairs(NAV) do
+      if opts.after and (e.key == opts.after or (at and e.parent == opts.after)) then at = i + 1 end
+    end
+    if not at then
+      at = #NAV + 1
+      for i, e in ipairs(NAV) do if e.key == "settings" then at = i end end
+    end
+    table.insert(NAV, at, { key = key, label = label })
+  end
+  if frame then
+    layoutNav()
+    updateNav()
+  end
+end
+
 function MainUI.Toggle()
   if frame and frame:IsShown() then
     frame:Hide()
@@ -1171,7 +1602,7 @@ end
 local pending = false
 local function refreshSoon()
   if pending or not (frame and frame:IsShown()) then return end
-  if current ~= "overview" and current ~= "ledger" and current ~= "analysis" then return end
+  if current ~= "overview" and current ~= "ledger" and current ~= "analysis" and current ~= "planner" then return end
   pending = true
   C_Timer.After(0.5, function()
     pending = false
@@ -1184,3 +1615,9 @@ ns.On("MAIL_INBOX_UPDATE", refreshSoon)
 ns.On("AUCTION_HOUSE_CLOSED", refreshSoon)
 ns.On("DISPLAY_SIZE_CHANGED", function() MainUI.ApplyScale() end)
 ns.On("UI_SCALE_CHANGED", function() MainUI.ApplyScale() end)
+-- Planner: search buttons follow the auction house; new prices or a new profession
+-- scan mean a new path; bags change what is left to buy.
+ns.On("AUCTION_HOUSE_SHOW", function() ahShown = true; refreshSoon() end)
+ns.On("AUCTION_HOUSE_CLOSED", function() ahShown = false; plannerDirty = true end)
+ns.On("TRADE_SKILL_LIST_UPDATE", function() plannerDirty = true end)
+ns.On("BAG_UPDATE_DELAYED", refreshSoon)

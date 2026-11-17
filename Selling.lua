@@ -2,6 +2,8 @@
 -- Bestand logic would sell on the auction house, looks up the current lowest
 -- price live and posts one auction per click (the game requires a click for
 -- every post).
+-- Mode "Sniper": the sniper's whole watch list live (ns.Sniper.State) with progress,
+-- last cheapest price and last check per item; hits on top with a buy button.
 local ADDON, ns = ...
 
 local Selling = {}
@@ -16,7 +18,11 @@ local panel, rowsFrames, durationButtons, status
 local duration = 3
 local mode = "sell" -- "sell" or "sniper"
 local control, sniperLines, ledgerButton
-local SNIPER_ROWS = 14 -- leaves room for the status block
+local sniperView         -- watch list view of the sniper mode (createSniperView)
+local SNIPER_ROW = 20
+local GREEN, MUTED = "|cff5fd38d", "|cff99999e"
+-- Sniper columns right of the item name: buy up to, cheapest now, checked.
+local SNIPER_COLS = { { "Kauf bis", 62 }, { "billigst jetzt", 74 }, { "geprüft", 58 } }
 local modeTabs
 local entries = {}       -- current list
 local live = {}          -- itemID -> { price, own, t } from live searches
@@ -137,6 +143,130 @@ local function post(e)
   live[e.itemID] = nil -- the price changed with our own auction
 end
 
+-- Sniper watch list view -----------------------------------------------------------
+
+local function ago(t)
+  local s = math.max(0, time() - t)
+  if s < 60 then return string.format("vor %d s", s) end
+  if s < 3600 then return string.format("vor %d min", math.floor(s / 60)) end
+  return string.format("vor %d h", math.floor(s / 3600))
+end
+
+local function clock(seconds)
+  seconds = math.max(0, math.floor(seconds + 0.5))
+  return string.format("%d:%02d", math.floor(seconds / 60), seconds % 60)
+end
+
+-- Item tooltip, plus the hit figures when the row is a hit.
+local function sniperTooltip(self)
+  local e = self.entry
+  if not e then return end
+  GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+  GameTooltip:SetItemByID(e.itemID)
+  local h = e.hit
+  if h then
+    GameTooltip:AddLine(" ")
+    GameTooltip:AddLine(string.format("Treffer: %dx ab %s  ·  Wert %s (%s)", h.units, money(h.best), money(h.ref), h.source), 0.37, 0.83, 0.55)
+    GameTooltip:AddLine(string.format("Gewinn nach Gebühr +%s  ·  seit %d s", money(h.profit), time() - (h.firstSeen or time())), 0.37, 0.83, 0.55)
+    if h.cost > GetMoney() then GameTooltip:AddLine("Gold reicht nicht für alle.", 1, 0.71, 0.28) end
+  end
+  GameTooltip:Show()
+end
+
+local function sniperRow(body, i)
+  local Style = ns.Style
+  local r = CreateFrame("Frame", nil, body)
+  r:SetHeight(SNIPER_ROW)
+  r:SetPoint("TOPLEFT", 0, -(i - 1) * SNIPER_ROW)
+  r:SetPoint("RIGHT", body, "RIGHT")
+  r.stripe = Style.Solid(r, Style.C.row)
+  r.stripe:SetAllPoints()
+  r.icon = r:CreateTexture(nil, "ARTWORK")
+  r.icon:SetSize(SNIPER_ROW - 4, SNIPER_ROW - 4)
+  r.icon:SetPoint("LEFT", 2, 0)
+  r.cells = {}
+  local x = 0
+  for c = #SNIPER_COLS, 1, -1 do
+    local fs = Style.Text(r, 11)
+    fs:SetPoint("RIGHT", r, "RIGHT", -x - 4, 0)
+    fs:SetWidth(SNIPER_COLS[c][2] - 6)
+    fs:SetJustifyH("RIGHT")
+    r.cells[c] = fs
+    x = x + SNIPER_COLS[c][2]
+  end
+  r.name = Style.Text(r, 12)
+  r.name:SetPoint("LEFT", r.icon, "RIGHT", 5, 0)
+  r.name:SetPoint("RIGHT", r, "RIGHT", -x - 4, 0)
+  r.name:SetJustifyH("LEFT")
+  -- Buy button over the "checked" column; same purchase path as before (one click each).
+  r.button = Style.Button(r, "Kaufen", SNIPER_COLS[#SNIPER_COLS][2] - 2, SNIPER_ROW - 2, function(self)
+    if self.entry then ns.Safe(ns.Sniper.Buy, self.entry) end
+  end, Style.C.accent)
+  r.button:SetPoint("RIGHT", -1, 0)
+  r:EnableMouse(true)
+  r:SetScript("OnEnter", sniperTooltip)
+  r:SetScript("OnLeave", function() GameTooltip:Hide() end)
+  return r
+end
+
+local function createSniperView()
+  local Style = ns.Style
+  local v = CreateFrame("Frame", nil, panel)
+  v:SetPoint("TOPLEFT", 8, -34)
+  v:SetPoint("BOTTOMRIGHT", -8, 66) -- status block below
+  v.progress = Style.Text(v, 12)
+  v.progress:SetPoint("TOPLEFT", 2, -2)
+  v.progress:SetPoint("RIGHT", v, "RIGHT", -2, 0)
+  v.progress:SetJustifyH("LEFT")
+  local head = CreateFrame("Frame", nil, v)
+  head:SetHeight(14)
+  head:SetPoint("TOPLEFT", 0, -20)
+  head:SetPoint("RIGHT", v, "RIGHT", -10, 0)
+  local x = 0
+  for c = #SNIPER_COLS, 1, -1 do
+    local fs = Style.Text(head, 10)
+    fs:SetPoint("RIGHT", head, "RIGHT", -x - 4, 0)
+    fs:SetWidth(SNIPER_COLS[c][2] - 6)
+    fs:SetJustifyH("RIGHT")
+    fs:SetTextColor(unpack(Style.C.muted))
+    fs:SetText(SNIPER_COLS[c][1])
+    x = x + SNIPER_COLS[c][2]
+  end
+  local itemHead = Style.Text(head, 10)
+  itemHead:SetPoint("LEFT", 2, 0)
+  itemHead:SetTextColor(unpack(Style.C.muted))
+  itemHead:SetText("Item")
+  v.scroll, v.body = Style.Scroll(v)
+  v.scroll:SetPoint("TOPLEFT", 0, -36)
+  v.scroll:SetPoint("BOTTOMRIGHT", -10, 0)
+  v.rows = {}
+  return v
+end
+
+-- Texts of the three columns: buy up to, cheapest now (last search), checked.
+local function sniperCells(e)
+  local price, checked
+  if e.price == false and not e.hit then price = MUTED .. "nicht im Angebot|r"
+  elseif e.hit then price = GREEN .. money(e.hit.best) .. "|r"
+  elseif e.price then price = money(e.price)
+  else price = MUTED .. "–|r" end
+  if e.current then checked = ns.Style.ACCENT .. "gerade …|r"
+  elseif e.checked then checked = MUTED .. ago(e.checked) .. "|r"
+  else checked = MUTED .. "–|r" end
+  return e.limit and money(e.limit) or (MUTED .. "–|r"), price, checked
+end
+
+local function sniperProgress(st, lines)
+  if st.total == 0 then return lines[1] or "" end
+  if not st.running then
+    return string.format("%s  ·  Stand Runde %d: %d Items", lines[1] or "", st.round, st.total)
+  end
+  if st.phase == "detail" then
+    return string.format("Runde %d  ·  %d/%d  ·  %s bis zum Ende", st.round, st.index, st.total, clock(st.eta))
+  end
+  return string.format("Runde %d fertig  ·  %d/%d  ·  %s", st.round, st.index, st.total, lines[1] or "")
+end
+
 -- Panel --------------------------------------------------------------------------
 
 local function createPanel(parent)
@@ -200,9 +330,7 @@ local function createPanel(parent)
     r.price:SetPoint("RIGHT", -82, 0)
     r.price:SetJustifyH("RIGHT")
     r.button = Style.Button(r, "Einstellen", 74, 20, function(self)
-      if not self.entry then return end
-      if mode == "sniper" then ns.Safe(ns.Sniper.Buy, self.entry)
-      else ns.Safe(post, self.entry) end
+      if self.entry then ns.Safe(post, self.entry) end
     end, Style.C.accent)
     r.button:SetPoint("RIGHT", 0, 0)
     r:EnableMouse(true)
@@ -230,10 +358,20 @@ local function createPanel(parent)
     fs:SetTextColor(unpack(colors[i]))
     sniperLines[i] = fs
   end
+  -- Line 1 (state) moved into the progress line above the watch list.
   sniperLines.rule = Style.Solid(panel, Style.C.border)
   sniperLines.rule:SetHeight(1)
-  sniperLines.rule:SetPoint("BOTTOMLEFT", 8, 80)
-  sniperLines.rule:SetPoint("BOTTOMRIGHT", -8, 80)
+  sniperLines.rule:SetPoint("BOTTOMLEFT", 8, 63)
+  sniperLines.rule:SetPoint("BOTTOMRIGHT", -8, 63)
+  sniperView = createSniperView()
+  -- "geprüft vor 40 s" and the time left run on: refresh the sniper view once a second.
+  local elapsed = 0
+  panel:SetScript("OnUpdate", function(_, dt)
+    elapsed = elapsed + (dt or 0)
+    if elapsed < 1 then return end
+    elapsed = 0
+    if mode == "sniper" then ns.Safe(Selling.Refresh) end
+  end)
   status = Style.Text(panel, 11)
   status:SetPoint("BOTTOMLEFT", 10, 10)
   status:SetWidth(WIDTH - 20)
@@ -242,32 +380,46 @@ local function createPanel(parent)
 end
 
 local function refreshSniper()
-  local Sniper = ns.Sniper
-  local hits = Sniper.Hits()
+  local Sniper, Style = ns.Sniper, ns.Style
+  local st = Sniper.State()
   local pending = Sniper.Pending()
-  local gold = GetMoney()
-  for i, r in ipairs(rowsFrames) do
-    local h = i <= SNIPER_ROWS and hits[i] or nil
-    r.entry = h
+  local lines = Sniper.StatusLines()
+  local v = sniperView
+  local getIcon = (C_Item and C_Item.GetItemIconByID) or GetItemIcon
+  v.body:SetSize(WIDTH - 26, math.max(1, #st.rows * SNIPER_ROW))
+  for i, e in ipairs(st.rows) do
+    local r = v.rows[i]
+    if not r then r = sniperRow(v.body, i); v.rows[i] = r end
+    local h = e.hit
+    r.entry = e
     r.button.entry = h
+    r.icon:SetTexture(getIcon and getIcon(e.itemID) or nil)
+    local name = ns.ItemName(e.itemID) or ("#" .. e.itemID)
+    r.name:SetText(h and (GREEN .. name .. "  +" .. money(h.profit) .. "|r") or name)
+    local limit, price, checked = sniperCells(e)
+    r.cells[1]:SetText(limit)
+    r.cells[2]:SetText(price)
+    r.cells[3]:SetText(h and "" or checked)
     if h then
-      local age = time() - h.firstSeen
-      r.icon:SetTexture(((C_Item and C_Item.GetItemIconByID) or GetItemIcon)(h.itemID))
-      r.name:SetText(ns.ItemName(h.itemID))
-      r.info:SetText(string.format("%dx ab %s  ·  Wert %s (%s)  ·  %ds%s", h.units, money(h.best), money(h.ref),
-        h.source, age, h.cost > gold and "  ·  |cffffb547Gold reicht nicht für alle|r" or ""))
-      r.price:SetText("|cff5fd38d+" .. money(h.profit) .. "|r")
+      r.stripe:SetColorTexture(0.37, 0.83, 0.55, 0.14)
       local confirm = pending and pending.hit == h and pending.quoted
       r.button.label:SetText(confirm and "Bestätigen" or (h.commodity and "Kaufen" or "Kaufen 1"))
       r.button:Show()
-      r:Show()
     else
-      r:Hide()
+      r.stripe:SetColorTexture(unpack(e.current and Style.C.hover or Style.C.row))
+      r.button:Hide()
     end
+    r.stripe:SetShown((h or e.current or i % 2 == 0) and true or false)
+    r:Show()
   end
+  for i = #st.rows + 1, #v.rows do
+    v.rows[i].entry, v.rows[i].button.entry = nil, nil
+    v.rows[i]:Hide()
+  end
+  if v.scroll.UpdateBar then v.scroll.UpdateBar() end
+  v.progress:SetText(sniperProgress(st, lines))
   control.label:SetText(Sniper.NeedsClick() and "Suchen" or (Sniper.IsRunning() and "Stop" or "Start"))
-  local lines = Sniper.StatusLines()
-  for i = 1, 4 do sniperLines[i]:SetText(lines[i] or "") end
+  for i = 2, 4 do sniperLines[i]:SetText(lines[i] or "") end
   status:SetText("")
 end
 
@@ -277,10 +429,15 @@ function Selling.Refresh()
   for _, b in pairs(durationButtons) do b:SetShown(mode == "sell") end
   control:SetShown(mode == "sniper")
   ledgerButton:SetShown(mode ~= "sell")
-  for i = 1, 4 do sniperLines[i]:SetShown(mode == "sniper") end
+  sniperLines[1]:Hide()
+  for i = 2, 4 do sniperLines[i]:SetShown(mode == "sniper") end
   sniperLines.rule:SetShown(mode == "sniper")
+  sniperView:SetShown(mode == "sniper")
   status:SetShown(mode ~= "sniper")
-  if mode == "sniper" then return refreshSniper() end
+  if mode == "sniper" then
+    for _, r in ipairs(rowsFrames) do r.entry, r.button.entry = nil, nil; r:Hide() end
+    return refreshSniper()
+  end
   for d, b in pairs(durationButtons) do b:SetActive(d == duration) end
   -- Everything the Bestand logic sends to the auction house.
   entries = {}
