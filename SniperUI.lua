@@ -10,6 +10,7 @@ local GREEN, ORANGE, MUTED = "|cff5fd38d", "|cffffb547", "|cff99999e"
 local function money(c) return ns.FormatMoney(c or 0, true) end
 
 local DEMAND_STEPS = { { 0.05, "niedrig" }, { 1, "mittel" }, { 5, "hoch" }, { 20, "sehr hoch" } }
+local MAX_PRICE_STEPS = { 0, 50000, 100000, 250000, 500000, 1000000, 2500000, 5000000, 10000000, 25000000, 50000000 }
 
 local function demandLabel(v)
   local label = "kaum"
@@ -127,7 +128,7 @@ local function build(page, width, height)
   -- Settings ---------------------------------------------------------------------
   local settings = card(page, "Einstellungen")
   settings:SetPoint("TOPLEFT", PAD, -PAD)
-  settings:SetSize(leftW, 320)
+  settings:SetSize(leftW, 346)
   local function set(key, v) Deals.Set(key, v) end
   local updates = {}
   local function S() return Deals.Settings() end
@@ -175,6 +176,17 @@ local function build(page, width, height)
   table.insert(updates, toggle(settings, -268, "Rezepte im Discord melden",
     function() return ns.MyAuctions.Discord().recipes end,
     function() local d = ns.MyAuctions.Discord(); d.recipes = not d.recipes end))
+  local function stepMaxPrice(dir)
+    local current, index = S().maxPrice, 1
+    for i, step in ipairs(MAX_PRICE_STEPS) do
+      if current >= step then index = i end
+    end
+    index = math.max(1, math.min(#MAX_PRICE_STEPS, index + dir))
+    set("maxPrice", MAX_PRICE_STEPS[index])
+  end
+  table.insert(updates, stepper(settings, -294, "Maximalpreis pro Item",
+    function() return S().maxPrice == 0 and "Kein Limit" or money(S().maxPrice) end,
+    function() stepMaxPrice(-1) end, function() stepMaxPrice(1) end))
   local reset = Style.Button(settings, "Standard", 80, 18, function()
     ns.db.settings.sniper = nil
   end)
@@ -244,8 +256,10 @@ local function build(page, width, height)
     local candidates = Sniper and Sniper.WatchCandidates and Sniper.WatchCandidates() or {}
     local entries = {}
     for _, c in ipairs(candidates) do
+      local limit = c.avg * set.maxShare
+      if set.maxPrice > 0 then limit = math.min(limit, set.maxPrice) end
       table.insert(entries, { ns.ItemName(c.itemID) or ("#" .. c.itemID), money(c.avg),
-        money(c.avg * set.maxShare), demandLabel(c.demand), itemID = c.itemID })
+        money(limit), demandLabel(c.demand), itemID = c.itemID })
     end
     local recipes = Sniper and Sniper.RecipeItems and Sniper.RecipeItems() or {}
     local known = {}
