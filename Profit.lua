@@ -104,6 +104,43 @@ end
 
 -- Replays the ledger: per item figures in the period and the pools at the end.
 -- lost: event -> deposit lost (expired / cancelled with a known deposit).
+-- Cost per unit the player entered by hand (ItemDetail "Einstand eintragen"), for items whose
+-- purchase the ledger never saw (bought before the addon ran). Kept in the settings, so the
+-- sync between PCs carries it.
+local function manualCost(itemID)
+  local m = ns.db and ns.db.settings and ns.db.settings.manualCost
+  local v = m and (m[itemID] or m[tostring(itemID)])
+  return type(v) == "number" and v > 0 and v or nil
+end
+Profit.ManualCost = manualCost
+
+function Profit.SetManualCost(itemID, copper)
+  ns.db.settings = ns.db.settings or {}
+  ns.db.settings.manualCost = ns.db.settings.manualCost or {}
+  ns.db.settings.manualCost[itemID] = copper and copper > 0 and math.floor(copper + 0.5) or nil
+  ns.db.settings.manualCost[tostring(itemID)] = nil
+end
+
+-- "65g 20s", "65g", "20s 5c", "65" (gold), "65,5" (gold) -> copper, or nil.
+function Profit.ParseMoney(text)
+  if type(text) ~= "string" then return nil end
+  local t = text:lower():gsub("%s+", "")
+  if t == "" then return nil end
+  local plain = t:gsub(",", ".")
+  if plain:match("^%d+%.?%d*$") then return math.floor(tonumber(plain) * 10000 + 0.5) end
+  local total, any = 0, false
+  for digits, unit in t:gmatch("(%d+)([gsck])") do
+    any = true
+    local v = tonumber(digits)
+    if unit == "g" then total = total + v * 10000
+    elseif unit == "s" then total = total + v * 100
+    else total = total + v end
+  end
+  local rest = t:gsub("%d+[gsck]", "")
+  if not any or rest ~= "" then return nil end
+  return total
+end
+
 local function replay(since)
   local events = ns.Ledger and ns.Ledger.Events and ns.Ledger.Events() or {}
   local bought, crafted = {}, {}
@@ -179,9 +216,16 @@ local function replay(since)
       book(kb, TRADE, bv, bv)
       -- Not crafted per the log and not bought: made with a learned recipe before crafts were
       -- logged (material counts 0 like farmed), else farmed or looted.
-      local maker = ns.CraftedBy and ns.CraftedBy(id)
-      if maker and not profOf[id] then profOf[id] = maker end
-      book(u - k - kb, not maker and FARMED or nil, 0, 0)
+      local rest = u - k - kb
+      local manual = manualCost(id)
+      if manual then
+        -- Bought before the ledger ran, cost entered by hand: a trade at that cost.
+        book(rest, TRADE, manual * rest, manual * rest)
+      else
+        local maker = ns.CraftedBy and ns.CraftedBy(id)
+        if maker and not profOf[id] then profOf[id] = maker end
+        book(rest, not maker and FARMED or nil, 0, 0)
+      end
     elseif id and (e.k == "expired" or e.k == "cancelled") then
       local d = depo[id]
       local amount = d and d.u > 0 and d.dep / d.u * u or 0
@@ -190,7 +234,7 @@ local function replay(since)
         -- Same area as its sales: an item of a learned recipe belongs to that profession.
         local maker = not profOf[id] and ns.CraftedBy and ns.CraftedBy(id)
         if maker then profOf[id] = maker end
-        local group = not profOf[id] and (everBought[id] and TRADE or FARMED) or nil
+        local group = not profOf[id] and ((everBought[id] or manualCost(id)) and TRADE or FARMED) or nil
         local f = figures(id, group)
         f[e.k] = f[e.k] + 1
         f.depositsLost, f.fees = f.depositsLost + amount, f.fees + amount
@@ -386,6 +430,8 @@ function Profit.UnitCost(itemID)
   if p and p.q > 0 and p.v > 0 then return p.v / p.q, "hergestellt" end
   p = bought[itemID]
   if p and p.q > 0 then return p.v / p.q, "gekauft" end
+  local m = manualCost(itemID)
+  if m then return m, "von Hand eingetragen" end
   local c = ns.CraftingCost and ns.CraftingCost(itemID)
   if c then return c, "Material heute" end
 end
