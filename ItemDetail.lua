@@ -374,6 +374,28 @@ render = function()
   line("Nachfrage", demand or "–")
   line("Im AH", string.format("%s Angebote  ·  %s Stück", count(item.offers), count(item.quantity)))
 
+  -- 3b. What one unit cost the player (ns.Profit.UnitCost) and the room left to undercut.
+  local cost, costSource = nil, nil
+  if ns.Profit and ns.Profit.UnitCost then cost, costSource = ns.Profit.UnitCost(itemID) end
+  if cost then
+    section("Dein Einstand")
+    line("Einstand pro Stück", money(math.floor(cost + 0.5)) .. "  " .. Style.MUTED .. costSource .. "|r")
+    line("Ohne Verlust ab", money(ns.Profit.BreakEven(cost)) .. "  " .. Style.MUTED .. "nach 5 % Gebühr|r")
+    local other
+    if fresh and fresh.state == "done" then
+      for _, o in ipairs(fresh.offers) do
+        if not o.own then other = o.unit break end
+      end
+    else
+      other = item.cheapest
+    end
+    if other then
+      local room = math.floor((other - 1) * 0.95 - cost)
+      line("Luft beim Unterbieten", room >= 0 and ("|cff5fd38d" .. money(room) .. "|r")
+        or ("|cffff6b6b-" .. money(-room) .. " (unter Einstand)|r"))
+    end
+  end
+
   -- 4. Price stair: offers of the sniper's last search, else of the own full scan; left out
   -- without either. With a hit: bought levels green, the level sold under highlighted.
   -- The search started on opening wins: "suche …" while it runs, then "gerade gesucht".

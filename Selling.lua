@@ -34,7 +34,7 @@ local modeTabs
 local entries = {}       -- current list
 local live = {}          -- itemID -> { price, own, t } from live searches
 local mineView, checkButton -- mode "Auktionen" (createMineView)
-local MINE_ROW = 30
+local MINE_ROW = 44 -- name, status line, cost line
 local RED, ORANGE = "|cffff6b6b", "|cffffb547"
 -- Columns of the mode "Auktionen" right of the item: own price, cheapest of others, cancel button.
 local MINE_COLS = { { "Mein Preis", 64 }, { "Billigst fremd", 70 }, { "", 66 } }
@@ -308,7 +308,7 @@ local function mineRow(body, i)
   r.stripe:SetAllPoints()
   r.icon = r:CreateTexture(nil, "ARTWORK")
   r.icon:SetSize(20, 20)
-  r.icon:SetPoint("LEFT", 2, 0)
+  r.icon:SetPoint("TOPLEFT", 2, -4)
   r.cells = {}
   local x = 0
   for c = #MINE_COLS, 1, -1 do
@@ -326,7 +326,8 @@ local function mineRow(body, i)
   r.name:SetPoint("RIGHT", r, "RIGHT", -x - 4, 0)
   r.name:SetJustifyH("LEFT")
   r.info = Style.Text(r, 11)
-  r.info:SetPoint("BOTTOMLEFT", r.icon, "BOTTOMRIGHT", 5, -3)
+  r.info:SetPoint("TOPLEFT", r.name, "BOTTOMLEFT", 0, -2)
+  r.info:SetJustifyV("TOP")
   r.info:SetPoint("RIGHT", r, "RIGHT", -MINE_COLS[#MINE_COLS][2] - 4, 0)
   r.info:SetJustifyH("LEFT")
   -- Cancels exactly one auction of the row per click (ns.MyAuctions.Cancel).
@@ -404,6 +405,22 @@ function Selling.MineStatus(e)
   if e.searching and e.checked and e.status ~= "unknown" then text = text .. ns.Style.ACCENT .. "  suche …|r" end
   if e.checked and e.status ~= "sold" and e.status ~= "expired" then
     text = text .. MUTED .. "  ·  geprüft " .. ago(e.checked) .. "|r"
+  end
+  return text .. Selling.MineRoom(e)
+end
+
+-- "  ·  Einstand 12s (gekauft) · Luft 3s": what one unit cost and how far the price can still
+-- go down: undercutting the cheapest other offer by 1 copper, after the 5 % cut, minus the cost.
+function Selling.MineRoom(e)
+  local cost, source = ns.Profit and ns.Profit.UnitCost and ns.Profit.UnitCost(e.itemID)
+  if not cost then return "" end
+  local text = "\n" .. MUTED .. "Einstand " .. money(math.floor(cost + 0.5)) .. " (" .. source .. ")|r"
+  local target = e.foreign and (e.foreign - 1) or e.unit
+  if target then
+    local room = math.floor(target * (1 - 0.05) - cost)
+    text = text .. MUTED .. "  ·  |r" .. (room >= 0 and (GREEN .. "Luft " .. money(room))
+      or (RED .. "unter Einstand " .. money(-room))) .. "|r"
+      .. MUTED .. "  ·  ab " .. money(ns.Profit.BreakEven(cost)) .. " ohne Verlust|r"
   end
   return text
 end

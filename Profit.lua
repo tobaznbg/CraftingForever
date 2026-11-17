@@ -241,3 +241,24 @@ function Profit.Totals(since)
   end
   return t
 end
+
+-- What one unit of the item cost the player, for pricing decisions (not for the P&L):
+--   crafted pool (logged crafts, material at purchase price, farmed 0)  -> "hergestellt"
+--   bought pool (bought at the auction house)                          -> "gekauft"
+--   else, if the character can make it: the material at today's prices -> "Material heute"
+--     (farmed material counts at its market value here: selling it would bring that much)
+-- Returns copper per unit and the source text, or nil.
+function Profit.UnitCost(itemID)
+  local _, crafted, _, _, bought = replay(nil)
+  local p = crafted[itemID]
+  if p and p.q > 0 and p.v > 0 then return p.v / p.q, "hergestellt" end
+  p = bought[itemID]
+  if p and p.q > 0 then return p.v / p.q, "gekauft" end
+  local c = ns.CraftingCost and ns.CraftingCost(itemID)
+  if c then return c, "Material heute" end
+end
+
+-- The lowest unit price that still covers the cost after the auction house cut.
+function Profit.BreakEven(cost)
+  return cost and math.ceil(cost / (1 - 0.05)) or nil
+end
