@@ -6,7 +6,7 @@
 -- last cheapest price and last check per item; hits on top with a buy button. A click on a
 -- hit row opens the item's detail window (ItemDetail.lua) right of the panel.
 -- Alt+click on any row opens the detail too (ns.ItemDetail.AltClick).
--- Mode "Meine": the own running auctions per item (ns.MyAuctions) with the cheapest offer of
+-- Mode "Auktionen": the own running auctions per item (ns.MyAuctions) with the cheapest offer of
 -- somebody else and whether the own price is still the best; opening the mode or "Prüfen"
 -- searches every item once (ns.AHSearch). "Abbrechen" cancels exactly one auction per click.
 -- Live prices of the sell mode come from ns.AHSearch too (one search a second).
@@ -25,7 +25,7 @@ local duration = 3
 local mode = "sell" -- "sell", "sniper" or "mine"
 local control, sniperLines, ledgerButton
 local sniperView         -- watch list view of the sniper mode (createSniperView)
-local createMineView, refreshMine -- forward declared: mode "Meine", defined below the sniper view
+local createMineView, refreshMine -- forward declared: mode "Auktionen", defined below the sniper view
 local SNIPER_ROW = 20
 local GREEN, MUTED = "|cff5fd38d", "|cff99999e"
 -- Sniper columns right of the item name: buy up to, sell at (price stair of the hit), button.
@@ -33,10 +33,10 @@ local SNIPER_COLS = { { "Kauf bis", 62 }, { "Einstellen", 74 }, { "", 58 } }
 local modeTabs
 local entries = {}       -- current list
 local live = {}          -- itemID -> { price, own, t } from live searches
-local mineView, checkButton -- mode "Meine" (createMineView)
+local mineView, checkButton -- mode "Auktionen" (createMineView)
 local MINE_ROW = 30
 local RED, ORANGE = "|cffff6b6b", "|cffffb547"
--- Columns of the mode "Meine" right of the item: own price, cheapest of others, cancel button.
+-- Columns of the mode "Auktionen" right of the item: own price, cheapest of others, cancel button.
 local MINE_COLS = { { "Mein Preis", 64 }, { "Billigst fremd", 70 }, { "", 66 } }
 
 local api = C_AuctionHouse or {}
@@ -266,7 +266,7 @@ local function sniperProgress(st, lines)
   return string.format("Runde %d fertig  ·  %d/%d  ·  %s", st.round, st.index, st.total, lines[1] or "")
 end
 
--- Mode "Meine": own auctions ------------------------------------------------------------
+-- Mode "Auktionen": own auctions ------------------------------------------------------------
 
 local function mineTooltip(self)
   local e = self.entry
@@ -342,8 +342,9 @@ local function mineRow(body, i)
   r:EnableMouse(true)
   r:SetScript("OnEnter", mineTooltip)
   r:SetScript("OnLeave", function() GameTooltip:Hide() end)
+  -- A click opens the item's detail (a second click closes it), like a sniper hit.
   r:SetScript("OnMouseUp", function(self, button)
-    if button == "LeftButton" and self.entry then ns.Safe(ns.ItemDetail.AltClick, self.entry.itemID) end
+    if button == "LeftButton" and self.entry then ns.Safe(ns.ItemDetail.Toggle, self.entry.itemID) end
   end)
   return r
 end
@@ -476,10 +477,10 @@ local function createPanel(parent)
   Style.Panel(panel, 30)
   modeTabs = {}
   local mx = 6
-  for _, def in ipairs({ { "sell", "Verkaufen", 70 }, { "sniper", "Sniper", 70 }, { "mine", "Meine", 60 } }) do
+  for _, def in ipairs({ { "sell", "Verkaufen", 70 }, { "sniper", "Sniper", 70 }, { "mine", "Auktionen", 74 } }) do
     local tab = Style.Tab(panel, def[2], def[3], function()
       mode = def[1]
-      -- Opening "Meine" is the player's action that checks the own auctions.
+      -- Opening "Auktionen" is the player's action that checks the own auctions.
       if mode == "mine" and ns.MyAuctions then ns.Safe(ns.MyAuctions.Check) end
       ns.Safe(Selling.Refresh)
     end)
@@ -729,7 +730,7 @@ ns.On("AUCTION_HOUSE_SHOW", function()
     if not panel then ns.Safe(createPanel, parent) end
     if not panel then return end
     panel:Show()
-    -- Opening the auction house with "Meine" selected is opening that mode: check it.
+    -- Opening the auction house with "Auktionen" selected is opening that mode: check it.
     if mode == "mine" and ns.MyAuctions then ns.Safe(ns.MyAuctions.Check) end
     ns.Safe(Selling.Refresh)
   end)
@@ -740,7 +741,7 @@ ns.On("AUCTION_HOUSE_CLOSED", function()
 end)
 ns.On("BAG_UPDATE_DELAYED", function() ns.Safe(Selling.Refresh) end)
 ns.On("AUCTION_HOUSE_AUCTION_CREATED", function()
-  -- a new own auction: the list of the mode "Meine" is loaded again (no item searches)
+  -- a new own auction: the list of the mode "Auktionen" is loaded again (no item searches)
   if mode == "mine" and panel and panel:IsShown() and ns.MyAuctions then ns.Safe(ns.MyAuctions.Query) end
   ns.Safe(Selling.Refresh)
 end)
