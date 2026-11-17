@@ -1,10 +1,10 @@
--- Crafting: auction house tab. First a choice of all crafting professions (with icon),
+-- Crafting: table (auction house tab and main window). First a choice of all crafting professions (with icon),
 -- then every recipe of that profession that makes an item (Data_Recipes.lua, Blizzard
 -- API), priced via ns.Item: buy = merchant, else cheapest offer; sell = cheapest offer
 -- - 1 copper - 5 % cut, or a merchant if higher. Learned state and skill come from the
 -- character's own profession scan (open the profession window once); unlearned recipes
 -- get a red marker and, where the planner data knows it, how to learn them.
--- Opening the tab starts a live scan (every 15 min at most).
+-- Opening the tab starts a live scan (every 15 min at most, only with the AH open).
 local ADDON, ns = ...
 
 local function money(c) return c and ns.FormatMoney(c, true) or "–" end
@@ -87,7 +87,7 @@ local function rows(filter, professionID)
           table.insert(list, { itemID = out, recipe = rec[1], profession = data.name,
             score = (2 - group) * 1e12 + profit, learned = learned, learn = learn, tooHigh = tooHigh,
             unsure = ns.Item.Unsure(ns.Item(out)), nowPrice = ns.Item(out).now,
-            cost = cost, value = value, profit = profit, onAH = onAH, demand = ns.Item(out).demand or 0,
+            cost = cost, unitCost = cost / quantity, value = value, profit = profit, onAH = onAH, demand = ns.Item(out).demand or 0,
             produced = quantity, reagents = reagents })
         end
       end
@@ -175,8 +175,10 @@ local function detail(e, count)
     { string.format("%d× herstellen", count), string.format("ergibt %g Stück", produced) },
     { "Material gesamt", money(total) },
     { "davon noch kaufen", "|cffffb547" .. money(buyTotal) .. "|r" },
-    { "Verkauf netto", money(value) .. (e.unsure and e.nowPrice
-      and ("  |cffffb547(jetzt " .. money(e.nowPrice) .. ", unsicher)|r") or "") },
+    { "Einstand pro Stück", money(produced > 0 and total / produced or nil) },
+    { "Preis jetzt", e.nowPrice and (e.unsure and ("|cffffb547" .. money(e.nowPrice) .. " (unsicher)|r")
+      or money(e.nowPrice)) or "nicht im Angebot" },
+    { "Verkauf netto", money(value) },
     { "Gewinn", (profit >= 0 and "|cff5fd38d" or "|cffff6b6b-") .. money(math.abs(profit)) .. "|r" },
     { "dein Gold", money(GetMoney()) },
   }
@@ -209,18 +211,25 @@ ns.AHTable.Add({
     { key = "name", title = "Ergebnis", width = 0, align = "LEFT", fmt = function(e)
       return e.name .. (e.produced > 1 and string.format(" |cff99999ex%g|r", e.produced) or "")
     end },
-    { key = "cost", title = "Material", width = 95, muted = true, filter = "money",
+    { key = "cost", title = "Material", width = 90, muted = true, filter = "money",
       fmt = function(e) return money(e.cost) end },
-    { key = "value", title = "Verkauf", width = 95, filter = "money",
+    -- Per unit, next to each other: what one costs to make and what it is offered at.
+    { key = "unitCost", title = "Einstand", width = 85, muted = true, filter = "money", optional = true,
+      fmt = function(e) return money(e.unitCost) end },
+    { key = "nowPrice", title = "Preis jetzt", width = 90, filter = "money", optional = true,
+      fmt = function(e)
+        return e.unsure and ("|cffffb547" .. money(e.nowPrice) .. "|r") or money(e.nowPrice)
+      end },
+    { key = "value", title = "Verkauf", width = 90, filter = "money",
       fmt = function(e)
         local text = (e.onAH and "" or "|cff99999eH |r") .. money(e.value)
         return e.unsure and ("|cffffb547" .. text .. " ?|r") or text
       end },
-    { key = "profit", title = "Gewinn", width = 95, filter = "money", fmt = function(e)
+    { key = "profit", title = "Gewinn", width = 90, filter = "money", fmt = function(e)
       return (e.profit >= 0 and "|cff5fd38d" or "|cffff6b6b") .. (e.profit < 0 and "-" or "")
         .. money(math.abs(e.profit)) .. "|r"
     end },
-    { key = "demand", title = "Nachfrage", width = 80, muted = true, filter = "num",
+    { key = "demand", title = "Nachfrage", width = 75, muted = true, filter = "num",
       fmt = function(e) return ns.Item.DemandText(e) or "–" end },
   },
   rows = rows,

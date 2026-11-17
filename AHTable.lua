@@ -1,6 +1,17 @@
--- AHTable: reusable item table, used as own tabs in the auction house frame.
--- Sortable columns, per-column filters, optional view buttons, two-line rows and a
--- "Suchen" button per row.
+-- AHTable: reusable item table, used as own tabs in the auction house frame and embedded
+-- in other windows. Sortable columns, per-column filters, optional view buttons, two-line
+-- rows and a "Suchen" button per row (only while the auction house is open).
+--
+-- A definition (ns.AHTable.Add) can be shown any number of times: every host (an AH tab,
+-- ns.AHTable.Embed) gets its own instance with its own list, scroll position, sorting,
+-- view and filter display; definition and saved filters are shared.
+--
+-- ns.AHTable.Embed(id, parent, opts) -> frame
+--   Fills `parent` with a new instance of the table `id`. opts (all optional):
+--     detailAnchor = frame whose right edge the detail panel docks to (default AuctionHouseFrame),
+--     onTitle = function(text) (the table's title, e.g. after a chooser choice).
+--   frame:Refresh() recomputes the list. Works without the auction house (never opened):
+--   no search buttons, no live scan on open (onOpen only runs while the AH is open).
 --
 -- ns.AHTable.Add{
 --   id, label, title,
@@ -9,6 +20,8 @@
 --     fmt = function(entry) -> text (default: tostring(entry[key])),
 --     muted = true (grey text),
 --     filter = "money" | "pct" | "num" (column can be filtered; money in gold, pct in %),
+--     optional = true (dropped, right-most first, when the name column would get narrower
+--                      than MIN_NAME in a narrow host, e.g. the auction house),
 --   }... },
 --   rows = function(view, choice) -> list of entries (each with itemID and the column keys),
 --   chooser = function() -> { { key, label, icon, info, lines = { text... }, series = { n... } }... }
@@ -20,15 +33,16 @@
 --   sort = key, desc = true,
 --   rowColor = function(entry) -> { r, g, b } or nil (marker bar + faint tint),
 --   subtitle = function(entry) -> text (second line under the name),
---   onOpen = function(t) (runs inside the tab click, i.e. with a hardware event),
+--   onOpen = function(t) (runs inside the tab click, i.e. with a hardware event; embedded
+--            tables run it on show, only while the auction house is open),
 --   info = function() -> short text left of the entry count (e.g. price basis),
 --   detail = function(entry, count) -> { title, subtitle, columns = { { title, width }... },
 --            rows = { { itemID, cells = { text... } }... },
 --            summary = { { label, value }... } (single-line rows at the bottom), hint = text }
---            (click on a row opens it in a panel right of the auction house; with
---            detailCount = true the panel has a -/+ count that is passed in; the panel
---            stays open while searching/buying in Blizzard's tabs, until its X or the
---            auction house closes),
+--            (click on a row opens it in a panel right of the host's detailAnchor; with
+--            detailCount = true the panel has a -/+ count that is passed in; for AH tabs
+--            the panel stays open while searching/buying in Blizzard's tabs, until its X
+--            or the auction house closes; for embedded tables until the table hides),
 -- }
 --
 -- Filters: one input per filterable column in a row under the header, shown with the
@@ -47,14 +61,39 @@ local ROW, HEADER, TOOLBAR, FILTER_ROW, FOOTER = 30, 22, 28, 24, 8
 local CHART_BARS, CHART_H = 14, 22   -- chooser tiles: 14 days
 local BUTTON_W = 64
 local MAX_ROWS = 40
+local MIN_NAME = 200  -- narrowest name column before optional columns are dropped
 local SCALE = { money = 10000, pct = 0.01, num = 1 }
 
-local defs = {}       -- in tab order
-local created = false
+local defs = {}       -- definitions, in tab order
+local byId = {}       -- id -> definition
+local instances = {}  -- every shown table (AH tabs and embedded ones)
+local ahTabs = {}     -- the instances that are AH tabs, in tab order
+local created = false -- AH tabs built
+local ahShown = false -- auction house currently open
 local detail = { t = nil, entry = nil, count = 1 }   -- detail panel state (see below)
 local showDetail      -- defined with the detail panel below, used by row clicks
+local layoutColumns   -- defined with the frame, used when the AH opens/closes
+
+-- True while the auction house is open (AUCTION_HOUSE_SHOW .. AUCTION_HOUSE_CLOSED).
+local function ahOpen() return ahShown end
+
+-- Title of the host: the AH frame for AH tabs, opts.onTitle for embedded tables.
+local function setTitle(t, text)
+  if t.isAHTab then
+    local f = AuctionHouseFrame
+    if f and f.SetTitle then f:SetTitle(text) end
+  elseif t.onTitle then
+    ns.Safe(t.onTitle, text)
+  end
+end
 
 local function settings(t)
+  if not ns.db then
+    -- SavedVariables not loaded yet: defaults, not saved.
+    local s = { filters = {} }
+    for key, text in pairs(t.defaultFilters or {}) do s.filters[key] = text end
+    return s
+  end
   ns.db.ahTable = ns.db.ahTable or {}
   local s = ns.db.ahTable[t.id]
   if not s or not s.filters then
@@ -100,8 +139,9 @@ local function activeFilters(t)
   return n
 end
 
--- Switches to Blizzard's buy tab and searches the item there.
+-- Switches to Blizzard's buy tab and searches the item there (only with the AH open).
 local function search(itemID)
+  if not ahOpen() then return end
   if AuctionHouseFrame and AuctionHouseFrameDisplayMode then
     AuctionHouseFrame:SetDisplayMode(AuctionHouseFrameDisplayMode.Buy)
   end
@@ -198,6 +238,7 @@ end
 local function refresh(t)
   local f = t.frame
   if not f or not f:IsShown() then return end
+  if t.searchShown ~= ahOpen() then layoutColumns(t) end
   if showMode(t) then return end
   local n = math.max(1, math.min(MAX_ROWS, math.floor((f:GetHeight() - topOffset(t) - HEADER - FOOTER) / ROW)))
   t.offset = math.max(0, math.min(t.offset, #t.list - n))
@@ -233,13 +274,68 @@ local function refresh(t)
   t.countText:SetText((info and (info .. "   ·   ") or "") .. string.format("%d Einträge", #t.list))
 end
 
-local function createFrame(t, parent)
+-- Places the cells of header, filter row and rows: fixed columns right-aligned before the
+-- search button (only while the AH is open), the name column takes the rest. Optional
+-- columns are dropped (right-most first) while the name column would be too narrow.
+function layoutColumns(t)
+  local showSearch = ahOpen()
+  t.searchShown = showSearch
+  local right = showSearch and (BUTTON_W + 16) or 8
+  local width = t.frame and t.frame:GetWidth() or 0
+  local visible, fixed = {}, right
+  for i = 2, #t.columns do
+    visible[i] = true
+    fixed = fixed + t.columns[i].width
+  end
+  if width > 0 then
+    for i = #t.columns, 2, -1 do
+      if width - 34 - fixed >= MIN_NAME then break end
+      if t.columns[i].optional then
+        visible[i] = false
+        fixed = fixed - t.columns[i].width
+      end
+    end
+  end
+  for _, set in ipairs(t.cellSets or {}) do
+    local x = 0
+    for i = 2, #t.columns do
+      local cell = set.cells[i]
+      if visible[i] then x = x + t.columns[i].width end
+      if cell then
+        cell:SetShown(visible[i])
+        if visible[i] then
+          cell:ClearAllPoints()
+          cell:SetPoint("RIGHT", set.row, "RIGHT", -(fixed - x), 0)
+          cell:SetWidth(t.columns[i].width - 8)
+        end
+      end
+    end
+    local name = set.cells[1]
+    if name then
+      local y = set.twoLines and 7 or 0
+      name:ClearAllPoints()
+      name:SetPoint("LEFT", set.row, "LEFT", 34, y)
+      name:SetPoint("RIGHT", set.row, "RIGHT", -fixed, y)
+    end
+  end
+  for _, r in ipairs(t.rowFrames or {}) do
+    if r.searchButton then r.searchButton:SetShown(showSearch) end
+  end
+end
+
+-- parent: the AH frame (tab, fixed insets) or any frame (embedded, filled completely).
+local function createFrame(t, parent, embedded)
   local Style = ns.Style
   local f = CreateFrame("Frame", nil, parent)
   t.frame = f
-  f:SetPoint("TOPLEFT", parent, "TOPLEFT", 8, -60)
-  f:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -8, 28)
-  f:SetFrameLevel(parent:GetFrameLevel() + 20)
+  if embedded then
+    f:SetAllPoints(parent)
+    f:SetFrameLevel(parent:GetFrameLevel() + 1)
+  else
+    f:SetPoint("TOPLEFT", parent, "TOPLEFT", 8, -60)
+    f:SetPoint("BOTTOMRIGHT", parent, "BOTTOMRIGHT", -8, 28)
+    f:SetFrameLevel(parent:GetFrameLevel() + 20)
+  end
   Style.Solid(f, Style.C.bg):SetAllPoints()
   Style.Border(f)
 
@@ -248,7 +344,7 @@ local function createFrame(t, parent)
   if t.chooser then
     t.backButton = Style.Button(f, "‹ Zurück", 80, 20, function()
       t.choice, t.offset = nil, 0
-      if AuctionHouseFrame.SetTitle then AuctionHouseFrame:SetTitle(t.title) end
+      setTitle(t, t.title)
       refresh(t)
     end)
     t.backButton:SetPoint("TOPLEFT", 8, -5)
@@ -278,25 +374,12 @@ local function createFrame(t, parent)
   t.countText:SetPoint("RIGHT", t.filterButton, "LEFT", -10, 0)
   t.countText:SetTextColor(unpack(Style.C.muted))
 
-  -- Column layout: the name column takes what the fixed columns leave.
-  local fixed = BUTTON_W + 16
-  for i = 2, #t.columns do fixed = fixed + t.columns[i].width end
+  -- Column layout: cells are collected per row and placed by layoutColumns.
+  t.cellSets = {}
   local function place(row, makeCell, twoLines)
-    local x = 8
-    for i, c in ipairs(t.columns) do
-      local cell = makeCell(c)
-      if i > 1 then x = x + c.width end
-      if cell then
-        if i == 1 then
-          local y = twoLines and 7 or 0
-          cell:SetPoint("LEFT", row, "LEFT", 34, y)
-          cell:SetPoint("RIGHT", row, "RIGHT", -fixed, y)
-        else
-          cell:SetPoint("RIGHT", row, "RIGHT", -(fixed - x + 8), 0)
-          cell:SetWidth(c.width - 8)
-        end
-      end
-    end
+    local set = { row = row, cells = {}, twoLines = twoLines }
+    for i, c in ipairs(t.columns) do set.cells[i] = makeCell(c) end
+    table.insert(t.cellSets, set)
   end
 
   local head = CreateFrame("Frame", nil, f)
@@ -401,6 +484,7 @@ local function createFrame(t, parent)
       if r.entry then search(r.entry.itemID) end
     end, Style.C.accent)
     b:SetPoint("RIGHT", -8, 0)
+    r.searchButton = b
     r:EnableMouse(true)
     r:SetScript("OnEnter", function(self)
       hover:Show()
@@ -480,7 +564,7 @@ local function createFrame(t, parent)
       b:SetScript("OnClick", function(self)
         if not self.choice then return end
         t.choice, t.offset = self.choice.key, 0
-        if AuctionHouseFrame.SetTitle then AuctionHouseFrame:SetTitle(t.title .. " – " .. self.choice.label) end
+        setTitle(t, t.title .. " – " .. self.choice.label)
         build(t)
         refresh(t)
       end)
@@ -490,15 +574,26 @@ local function createFrame(t, parent)
     panel:Hide()
   end
 
-  f:SetScript("OnShow", function() build(t); refresh(t) end)
-  f:SetScript("OnSizeChanged", function() refresh(t) end)
+  layoutColumns(t)
+  f:SetScript("OnShow", function()
+    layoutColumns(t)
+    build(t)
+    refresh(t)
+    -- Embedded: the live scan only makes sense (and only works) with the AH open.
+    if embedded and t.onOpen and ahOpen() then ns.Safe(t.onOpen, t) end
+  end)
+  f:SetScript("OnSizeChanged", function() layoutColumns(t); refresh(t) end)
+  if embedded then
+    -- The detail panel belongs to the visible table.
+    f:SetScript("OnHide", function() if detail.t == t then AHTable.HideDetail() end end)
+  end
   f:Hide()
 end
 
 -- Detail panel -------------------------------------------------------------------------
 
-local DETAIL_W, DETAIL_ROWS, DETAIL_ROW = 460, 12, 26
-local SUMMARY_ROWS, SUMMARY_ROW = 6, 18
+local DETAIL_W, DETAIL_ROWS, DETAIL_ROW = 460, 10, 26
+local SUMMARY_ROWS, SUMMARY_ROW = 8, 18
 
 local function renderDetail()
   local d, t = detail, detail.t
@@ -552,8 +647,6 @@ local function createDetail(parent)
   local f = CreateFrame("Frame", "M4CompanionAHDetail", parent)
   detail.frame = f
   f:SetWidth(DETAIL_W)
-  f:SetPoint("TOPLEFT", parent, "TOPRIGHT", 4, 0)
-  f:SetPoint("BOTTOMLEFT", parent, "BOTTOMRIGHT", 4, 0)
   f:SetFrameStrata("HIGH")
   Style.Panel(f, 30)
   local close = Style.Close(f, function() f:Hide() end)
@@ -635,7 +728,7 @@ local function createDetail(parent)
       if not self.itemID then return end
       GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
       GameTooltip:SetItemByID(self.itemID)
-      GameTooltip:AddLine("Klick: im AH suchen", 0.31, 0.76, 0.63)
+      if ahOpen() then GameTooltip:AddLine("Klick: im AH suchen", 0.31, 0.76, 0.63) end
       GameTooltip:Show()
     end)
     r:SetScript("OnLeave", function() hover:Hide(); GameTooltip:Hide() end)
@@ -667,11 +760,28 @@ local function createDetail(parent)
   f:Hide()
 end
 
+-- Docks the panel to the host's anchor (AH tabs: the auction house frame); it is
+-- parented there so it scales and hides with it.
 function showDetail(t, entry)
-  if not detail.frame then createDetail(AuctionHouseFrame) end
+  local anchor = t.detailAnchor or AuctionHouseFrame or UIParent
+  if not detail.frame then createDetail(anchor) end
+  local f = detail.frame
+  if detail.anchor ~= anchor then
+    detail.anchor = anchor
+    f:SetParent(anchor)
+    f:SetFrameStrata("HIGH")
+    f:ClearAllPoints()
+    if anchor == UIParent then
+      f:SetPoint("TOPRIGHT", anchor, "TOPRIGHT", -20, -120)
+      f:SetHeight(560)
+    else
+      f:SetPoint("TOPLEFT", anchor, "TOPRIGHT", 4, 0)
+      f:SetPoint("BOTTOMLEFT", anchor, "BOTTOMRIGHT", 4, 0)
+    end
+  end
   if detail.entry ~= entry then detail.count = 1 end
   detail.t, detail.entry = t, entry
-  detail.frame:Show()
+  f:Show()
   renderDetail()
 end
 
@@ -683,19 +793,33 @@ local function selectTab(t)
   AuctionHouseFrame:SetDisplayMode({})
   AuctionHouseFrame.displayMode = nil
   for _, b in ipairs(AuctionHouseFrame.Tabs) do PanelTemplates_DeselectTab(b) end
-  for _, o in ipairs(defs) do
+  for _, o in ipairs(ahTabs) do
     if o ~= t then o.frame:Hide(); PanelTemplates_DeselectTab(o.tab) end
   end
   PanelTemplates_SelectTab(t.tab)
   if t.chooser then t.choice = nil end   -- a tab with a chooser always starts there
-  if AuctionHouseFrame.SetTitle then AuctionHouseFrame:SetTitle(t.title) end
+  setTitle(t, t.title)
   t.frame:Show()
   if t.onOpen then ns.Safe(t.onOpen, t) end
 end
 
+-- New instance of a definition: own list, scroll, sorting, view and choice; everything
+-- else (columns, rows, saved filters via the id) comes from the definition.
+local function newInstance(def, opts)
+  local t = setmetatable({
+    def = def,
+    offset = 0, list = {},
+    sortKey = def.sort or "name", sortDesc = def.desc ~= false,
+    view = def.views and def.views[1][1] or nil,
+  }, { __index = def })
+  for key, value in pairs(opts or {}) do t[key] = value end
+  table.insert(instances, t)
+  return t
+end
+
 -- Recomputes the lists of the visible tables (e.g. after new prices).
 function AHTable.Rebuild()
-  for _, t in ipairs(defs) do
+  for _, t in ipairs(instances) do
     if t.frame and t.frame:IsShown() then build(t); refresh(t) end
   end
   renderDetail()
@@ -710,8 +834,9 @@ local function createAll(parent)
   end
   -- Forever uses the retail auction house frame: retail tab spacing.
   local offsetX = 3
-  for _, t in ipairs(defs) do
-    createFrame(t, parent)
+  for _, def in ipairs(defs) do
+    local t = newInstance(def, { isAHTab = true, detailAnchor = parent })
+    createFrame(t, parent, false)
     local tab = CreateFrame("Button", "M4CompanionAHTab" .. t.id, parent, "AuctionHouseFrameDisplayModeTabTemplate")
     t.tab = tab
     tab:SetText(t.label)
@@ -719,32 +844,57 @@ local function createAll(parent)
     tab:SetPoint("TOPLEFT", anchor, "TOPRIGHT", offsetX, 0)
     PanelTemplates_DeselectTab(tab)
     tab:SetScript("OnClick", function() ns.Safe(selectTab, t) end)
+    table.insert(ahTabs, t)
     anchor = tab
   end
   hooksecurefunc(parent, "SetDisplayMode", function(_, displayMode)
     if type(displayMode) == "table" and #displayMode > 0 then
-      for _, t in ipairs(defs) do t.frame:Hide(); PanelTemplates_DeselectTab(t.tab) end
+      for _, t in ipairs(ahTabs) do t.frame:Hide(); PanelTemplates_DeselectTab(t.tab) end
     end
   end)
 end
 
 function AHTable.Add(def)
+  -- Defaults on the definition too (offline tests build a definition directly).
   def.offset, def.list = 0, {}
   def.sortKey, def.sortDesc = def.sort or "name", def.desc ~= false
   def.view = def.views and def.views[1][1] or nil
   table.insert(defs, def)
+  byId[def.id] = def
+end
+
+-- Embeds a new instance of the table `id` into `parent` (see the top of the file).
+function AHTable.Embed(id, parent, opts)
+  local def = byId[id]
+  if not def then error("AHTable.Embed: unknown table " .. tostring(id)) end
+  opts = opts or {}
+  local t = newInstance(def, { isAHTab = false, detailAnchor = opts.detailAnchor, onTitle = opts.onTitle })
+  createFrame(t, parent, true)
+  local f = t.frame
+  f.instance = t
+  function f:Refresh()
+    if not self:IsShown() then return end
+    build(t)
+    refresh(t)
+  end
+  f:Show()
+  return f
 end
 
 function AHTable.Refresh()
-  for _, t in ipairs(defs) do refresh(t) end
+  for _, t in ipairs(instances) do refresh(t) end
 end
 
 -- For offline tests.
 AHTable._parseFilter = parseFilter
 AHTable._build = build
+AHTable._instances = instances
 
 ns.On("AUCTION_HOUSE_SHOW", function()
+  ahShown = true
   C_Timer.After(0.3, function()
+    -- Embedded tables get their search buttons.
+    ns.Safe(AHTable.Refresh)
     local parent = AuctionHouseFrame
     if created or not parent or not parent.Tabs or not parent.SetDisplayMode then return end
     created = true
@@ -755,11 +905,11 @@ end)
 -- Names arrive from the server bit by bit: redraw once a burst of them is in.
 local namesPending = false
 ns.On("GET_ITEM_INFO_RECEIVED", function()
-  if namesPending or not created then return end
+  if namesPending or #instances == 0 then return end
   namesPending = true
   C_Timer.After(0.3, function()
     namesPending = false
-    for _, t in ipairs(defs) do
+    for _, t in ipairs(instances) do
       if t.frame and t.frame:IsShown() and t.sortKey == "name" then sortList(t) end
     end
     ns.Safe(AHTable.Refresh)
@@ -770,8 +920,11 @@ end)
 ns.On("BAG_UPDATE_DELAYED", function() ns.Safe(renderDetail) end)
 
 ns.On("AUCTION_HOUSE_CLOSED", function()
-  AHTable.HideDetail()
-  for _, t in ipairs(defs) do
+  ahShown = false
+  if detail.t and detail.t.isAHTab then AHTable.HideDetail() end
+  for _, t in ipairs(ahTabs) do
     if t.frame then t.frame:Hide(); PanelTemplates_DeselectTab(t.tab) end
   end
+  -- Embedded tables lose their search buttons.
+  ns.Safe(AHTable.Refresh)
 end)

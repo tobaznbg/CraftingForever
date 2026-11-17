@@ -3,12 +3,16 @@
 --   post       auction created (hooks on PostItem / PostCommodity)
 --   sale       "sold" mail with invoice: price and the auction house cut
 --   expired    "expired" mail, cancelled: "cancelled" mail
+--   craft      the player made an item (see "Crafting" below)
 -- Mails stay in the inbox until taken, so every scan sees them again. A mail counts
 -- once: same kind, item, amount and count and a receive time within MAIL_SLACK of
 -- an entry already logged is the same mail.
 -- db.ledger[charKey] = { events = { { t, k, i, n, u, c, cut, p, d }... } }
 --   t time, k kind, i itemID (nil if only the name is known), n item name,
---   u units, c copper (buy: paid, sale: price before cut), cut, p unit price (post), d duration
+--   u units, c copper (buy: paid, sale: price before cut), cut, p unit price (post), d duration,
+--   dep deposit paid for the post (copper, all units; nil when the client could not tell)
+--   craft only: prof profession name, pid profession id, rid recipe (spell) id, x casts,
+--   r reagents used { { i, n }... }, src "cast" or "loot" (how it was detected)
 local ADDON, ns = ...
 
 local Ledger = {}
@@ -112,12 +116,23 @@ local function itemAt(location)
   return ok and id or nil
 end
 
+-- Deposit the post costs; lost when the auction expires or is cancelled. The hooks run
+-- right after the post call, while the item is still in the bag.
+local function deposit(fn, ...)
+  if type(api[fn]) ~= "function" then return nil end
+  local ok, dep = pcall(api[fn], ...)
+  return ok and type(dep) == "number" and dep or nil
+end
+
 hook("PostItem", function(location, duration, quantity, bid, buyout)
-  table.insert(posting, { k = "post", i = itemAt(location), u = quantity or 1, p = buyout, d = duration })
+  table.insert(posting, { k = "post", i = itemAt(location), u = quantity or 1, p = buyout, d = duration,
+    dep = deposit("CalculateItemDeposit", location, duration, quantity or 1) })
 end)
 
 hook("PostCommodity", function(location, duration, quantity, unitPrice)
-  table.insert(posting, { k = "post", i = itemAt(location), u = quantity, p = unitPrice, d = duration })
+  local itemID = itemAt(location)
+  table.insert(posting, { k = "post", i = itemID, u = quantity, p = unitPrice, d = duration,
+    dep = itemID and deposit("CalculateCommodityDeposit", itemID, duration, quantity) })
 end)
 
 ns.On("AUCTION_HOUSE_AUCTION_CREATED", function()
@@ -190,32 +205,163 @@ end
 
 ns.On("MAIL_INBOX_UPDATE", function() ns.Safe(scanInbox) end)
 
+-- Crafting --------------------------------------------------------------------------
+-- How a craft is recognised (only what is certain):
+--   1. UNIT_SPELLCAST_SUCCEEDED for "player" whose spellID is a recipe of this character's
+--      own profession scan (ns.db.recipes, Recipes.lua; recipe ids are the craft spells).
+--      Recipes without an output item (enchantments) are ignored. Reagents and the expected
+--      units per cast come from that scan.
+--   2. The loot line "Ihr stellt her: <item>" (LOOT_ITEM_CREATED_SELF[_MULTIPLE], read from
+--      the client's format strings) corrects the units of a cast seen within LOOT_WINDOW.
+--      Without such a cast (no scan of that profession yet) the line alone counts as a craft
+--      only when the item is a product in ns.RecipeData; reagents then come from there.
+--      Conjured food and other created items are no recipe products and stay out.
+--   Repeated casts of the same recipe within MERGE seconds go into one event (x casts),
+--   so batch crafting does not push older trades out of the ledger.
+
+local LOOT_WINDOW = 5
+local MERGE = 60
+local state = nil  -- last craft: { e, t, open = casts awaiting their loot line, q, loot }
+
+-- "Ihr stellt her: %sx%d." -> pattern capturing link and (optional) count.
+local function lootPattern(fmt)
+  if type(fmt) ~= "string" then return nil end
+  local p = fmt:gsub("%%%d%$", "%%")          -- positional "%1$s" -> "%s"
+  p = p:gsub("([%(%)%.%+%-%*%?%[%]%^%$])", "%%%1")
+  p = p:gsub("%%s", "(.+)"):gsub("%%d", "(%%d+)")
+  return "^" .. p .. "$"
+end
+
+local CREATED_MULTI = lootPattern(LOOT_ITEM_CREATED_SELF_MULTIPLE)
+local CREATED = lootPattern(LOOT_ITEM_CREATED_SELF)
+
+-- The player's recipe for a spell id from the own profession scans.
+local function ownRecipe(spellID)
+  local prefix = ns.CharKey() .. ":"
+  for key, scan in pairs(ns.db.recipes or {}) do
+    local r = key:sub(1, #prefix) == prefix and scan.recipes and scan.recipes[spellID]
+    if r then return r, scan end
+  end
+end
+
+-- Profession and reagents of a product from the shipped recipe data.
+local function shippedRecipe(itemID)
+  for pid, data in pairs(ns.RecipeData or {}) do
+    for rid, rec in pairs(data.recipes or {}) do
+      if rec[2] == itemID then
+        local reagents, list = {}, rec[4] or {}
+        for i = 1, #list, 2 do table.insert(reagents, { i = list[i], n = list[i + 1] }) end
+        return { pid = pid, prof = data.name, rid = rid, q = rec[3] or 1, r = reagents }
+      end
+    end
+  end
+end
+
+local function addReagents(e, reagents)
+  e.r = e.r or {}
+  for _, g in ipairs(reagents or {}) do
+    if g.i and g.n then
+      local found
+      for _, have in ipairs(e.r) do
+        if have.i == g.i then found = have break end
+      end
+      if found then found.n = found.n + g.n else table.insert(e.r, { i = g.i, n = g.n }) end
+    end
+  end
+end
+
+local function onCast(spellID)
+  local recipe, scan = ownRecipe(spellID)
+  if not (recipe and recipe.out) then return end
+  local now = time()
+  local q = recipe.qmin or 1
+  local s = state
+  if s and s.e.i == recipe.out and now - s.t <= MERGE then
+    s.t = now
+    if s.loot > 0 and s.e.src == "loot" then
+      -- The loot line came first and already counted this cast.
+      s.loot = s.loot - 1
+      return
+    end
+    s.e.x, s.e.u = (s.e.x or 1) + 1, s.e.u + q
+    addReagents(s.e, recipe.r)
+    s.open = s.open + 1
+    return
+  end
+  local e = { k = "craft", i = recipe.out, u = q, x = 1, rid = spellID, src = "cast",
+    prof = scan.profession, pid = scan.professionID }
+  addReagents(e, recipe.r)
+  add(e)
+  state = { e = e, t = now, open = 1, q = q, loot = 0 }
+end
+
+local function onCreated(itemID, count)
+  local now = time()
+  local s = state
+  if s and s.e.i == itemID and s.open > 0 and now - s.t <= LOOT_WINDOW then
+    s.e.u = s.e.u + count - s.q
+    s.open = s.open - 1
+    return
+  end
+  local shipped = shippedRecipe(itemID)
+  if not shipped then return end
+  if s and s.e.i == itemID and s.e.src == "loot" and now - s.t <= MERGE then
+    s.e.x, s.e.u = (s.e.x or 1) + 1, s.e.u + count
+    addReagents(s.e, shipped.r)
+    s.t, s.loot = now, s.loot + 1
+    return
+  end
+  local e = { k = "craft", i = itemID, u = count, x = 1, rid = shipped.rid, src = "loot",
+    prof = shipped.prof, pid = shipped.pid }
+  addReagents(e, shipped.r)
+  add(e)
+  state = { e = e, t = now, open = 0, q = shipped.q, loot = 1 }
+end
+
+ns.On("UNIT_SPELLCAST_SUCCEEDED", function(_, unit, _, spellID)
+  if unit == "player" and spellID then onCast(spellID) end
+end)
+
+ns.On("CHAT_MSG_LOOT", function(_, text)
+  if type(text) ~= "string" then return end
+  local link, count = nil, nil
+  if CREATED_MULTI then link, count = text:match(CREATED_MULTI) end
+  if not link and CREATED then link = text:match(CREATED) end
+  local itemID = link and tonumber(link:match("item:(%d+)"))
+  if itemID then onCreated(itemID, tonumber(count) or 1) end
+end)
+
 -- Report ----------------------------------------------------------------------------
 
 -- Per item: bought/sold/posted units and money, plus totals.
+-- One trade event into the per-item summary (crafts are reported by Profit.lua).
+local function summarize(items, e)
+  local key = e.i or e.n or "?"
+  local it = items[key]
+  if not it then
+    it = { itemID = e.i, name = e.n, bought = 0, spent = 0, posted = 0, sold = 0, net = 0,
+      expired = 0, cancelled = 0, last = 0 }
+    items[key] = it
+  end
+  it.itemID = it.itemID or e.i
+  it.last = math.max(it.last, e.t or 0)
+  if e.k == "buy" then
+    it.bought, it.spent = it.bought + (e.u or 0), it.spent + (e.c or 0)
+  elseif e.k == "post" then
+    it.posted = it.posted + (e.u or 0)
+  elseif e.k == "sale" then
+    it.sold, it.net = it.sold + (e.u or 0), it.net + (e.c or 0) - (e.cut or 0)
+  elseif e.k == "expired" then
+    it.expired = it.expired + (e.u or 0)
+  elseif e.k == "cancelled" then
+    it.cancelled = it.cancelled + (e.u or 0)
+  end
+end
+
 function Ledger.Summary()
   local items, total = {}, { bought = 0, spent = 0, sold = 0, net = 0, ownNet = 0, profit = 0, held = 0 }
   for _, e in ipairs(book().events) do
-    local key = e.i or e.n or "?"
-    local it = items[key]
-    if not it then
-      it = { itemID = e.i, name = e.n, bought = 0, spent = 0, posted = 0, sold = 0, net = 0,
-        expired = 0, cancelled = 0, last = 0 }
-      items[key] = it
-    end
-    it.itemID = it.itemID or e.i
-    it.last = math.max(it.last, e.t or 0)
-    if e.k == "buy" then
-      it.bought, it.spent = it.bought + (e.u or 0), it.spent + (e.c or 0)
-    elseif e.k == "post" then
-      it.posted = it.posted + (e.u or 0)
-    elseif e.k == "sale" then
-      it.sold, it.net = it.sold + (e.u or 0), it.net + (e.c or 0) - (e.cut or 0)
-    elseif e.k == "expired" then
-      it.expired = it.expired + (e.u or 0)
-    elseif e.k == "cancelled" then
-      it.cancelled = it.cancelled + (e.u or 0)
-    end
+    if e.k ~= "craft" then summarize(items, e) end
   end
   local list = {}
   for _, it in pairs(items) do
@@ -235,6 +381,11 @@ function Ledger.Summary()
   end
   table.sort(list, function(a, b) return a.last > b.last end)
   return list, total
+end
+
+-- All events of this character, oldest first (read only; Profit.lua replays them).
+function Ledger.Events()
+  return book().events
 end
 
 function Ledger.Recent(n)

@@ -359,7 +359,8 @@ ns.On("AUCTION_HOUSE_SHOW", function()
     if button then button:Show() end
   end)
   C_Timer.After(1, function()
-    if not autoBlocked then ns.Safe(Scan.EnsureFresh) end
+    local off = ns.db.settings and ns.db.settings.autoScan == false
+    if not autoBlocked and not off then ns.Safe(Scan.EnsureFresh) end
   end)
 end)
 ns.On("AUCTION_HOUSE_CLOSED", abort)
