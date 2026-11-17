@@ -799,7 +799,7 @@ PAGES.ledger = function(p)
   local y = -(PAD + TOOLBAR + 6)
   local plH = 236
   local pl = grid(p, INNER_W, plH, {
-    { "Beruf", 0 }, { "Erlöse (brutto)", 120, "RIGHT" }, { "Material", 120, "RIGHT" },
+    { "Beruf", 0 }, { "Erlöse (brutto)", 120, "RIGHT" }, { "Einkauf", 120, "RIGHT" },
     { "Gebühren", 110, "RIGHT" }, { "Ergebnis", 120, "RIGHT" }, { "Bestand", 170, "RIGHT" } }, { scroll = true })
   pl:SetPoint("TOPLEFT", PAD, y)
 

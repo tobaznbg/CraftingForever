@@ -11,15 +11,18 @@
 -- A craft takes each reagent from the crafted pool first (own intermediate, e.g. a bolt of
 -- cloth: its cost moves into the product, it is no new material), then from the bought pool
 -- (material at purchase price), the rest is farmed / not bought and costs 0 (Tobias' rule).
--- A sale takes units from the crafted pool first; only those count for the profession
--- (revenue and cut pro rata), the rest are trades (bought pool), reported by the ledger.
+-- A sale takes units from the crafted pool first (they count for the profession), then
+-- from the bought pool (group TRADE: bought and sold again, their purchase price is the cost),
+-- the rest was made with a learned recipe before crafts were logged (its profession, material
+-- 0 like farmed) or farmed / looted (group FARMED, cost 0). Revenue and cut pro rata.
+-- Sales logged before item ids were recorded carry only the name; it is looked up.
 -- Expired and cancelled auctions of a crafted item lose the deposit of its posts (average
 -- deposit per unit of the item's posts; posts before deposits were logged count 0).
 --
 -- Figures (copper):
 --   revenue       sale price before the cut (gross)
 --   fees          auction house cut + lost deposits (cut and depositsLost also separate)
---   materials     bought reagents used by crafts in the period (farmed = 0)
+--   materials     bought reagents used by crafts (farmed = 0); for TRADE the purchase price
 --   profit        revenue - materials - fees
 --   stock         crafted units not sold or used yet x their average cost (now, not "since")
 -- "since" (epoch, nil = all) filters the figures by event time; the pools always replay the
@@ -36,6 +39,21 @@ local Profit = ns.Profit or {}
 ns.Profit = Profit
 
 local UNKNOWN = "Unbekannt"
+local TRADE = "Handel (gekauft, verkauft)"
+local FARMED = "Gesammelt (Farm, Beute)"
+Profit.TRADE, Profit.FARMED = TRADE, FARMED
+
+-- itemID of a ledger event: its id, else looked up by name (older events).
+local byName
+local function idOf(e)
+  if e.i then return e.i end
+  if not e.n then return nil end
+  if not byName then
+    byName = {}
+    for id, name in pairs(ns.ItemNames or {}) do byName[name] = id end
+  end
+  return byName[e.n]
+end
 
 local function pool(pools, itemID)
   local p = pools[itemID]
@@ -66,20 +84,28 @@ local function replay(since)
   local bought, crafted = {}, {}
   local profOf = {}     -- itemID -> profession name (last craft)
   local depo = {}       -- itemID -> { u, dep } of posts with a known deposit
-  local items = {}      -- itemID -> figures
-  local function figures(itemID)
-    local f = items[itemID]
+  local items = {}      -- itemID -> figures (crafted items, grouped by profession later)
+  local other = {}      -- TRADE / FARMED -> itemID -> figures
+  local everBought = {} -- itemID -> true
+  local function figures(itemID, group)
+    local t = items
+    if group then
+      other[group] = other[group] or {}
+      t = other[group]
+    end
+    local f = t[itemID]
     if not f then
       f = newFigures()
-      items[itemID] = f
+      t[itemID] = f
     end
     return f
   end
 
   for _, e in ipairs(events) do
     local inPeriod = not since or (e.t or 0) >= since
-    local id, u = e.i, e.u or 0
+    local id, u = idOf(e), e.u or 0
     if id and e.k == "buy" then
+      everBought[id] = true
       local p = pool(bought, id)
       p.q, p.v = p.q + u, p.v + (e.c or 0)
     elseif id and e.k == "craft" and u > 0 then
@@ -107,33 +133,56 @@ local function replay(since)
       end
     elseif id and e.k == "sale" and u > 0 then
       local k = take(crafted[id], u)
-      take(bought[id], u - k)
-      if k > 0 and inPeriod then
-        local f = figures(id)
-        local share = k / u
+      local kb, bv = take(bought[id], u - k)
+      local function book(n, group, cost)
+        if n <= 0 or not inPeriod then return end
+        local f = figures(id, group)
+        local share = n / u
         local cut = (e.cut or 0) * share
-        f.sold = f.sold + k
+        f.sold = f.sold + n
         f.revenue = f.revenue + (e.c or 0) * share
         f.cut, f.fees = f.cut + cut, f.fees + cut
+        f.materials = f.materials + (cost or 0)
       end
-    elseif id and (e.k == "expired" or e.k == "cancelled") and profOf[id] and inPeriod then
+      book(k, nil, 0)
+      book(kb, TRADE, bv)
+      -- Not crafted per the log and not bought: made with a learned recipe before crafts were
+      -- logged (material counts 0 like farmed), else farmed or looted.
+      local maker = ns.CraftedBy and ns.CraftedBy(id)
+      if maker and not profOf[id] then profOf[id] = maker end
+      book(u - k - kb, not maker and FARMED or nil, 0)
+    elseif id and (e.k == "expired" or e.k == "cancelled") and inPeriod then
       local d = depo[id]
       if d and d.u > 0 then
         local lost = d.dep / d.u * u
-        local f = figures(id)
+        local group = not profOf[id] and (everBought[id] and TRADE or FARMED) or nil
+        local f = figures(id, group)
         f.depositsLost, f.fees = f.depositsLost + lost, f.fees + lost
       end
     end
   end
-  return items, crafted, profOf
+  return items, crafted, profOf, other, bought
 end
 
 local function round(x) return math.floor(x + 0.5) end
 
 -- Per item rows of all crafted items: { itemId, prof, figures..., stock }.
 local function itemRows(since)
-  local items, crafted, profOf = replay(since)
+  local items, crafted, profOf, other, bought = replay(since)
   local rows = {}
+  for group, list in pairs(other) do
+    for id, f in pairs(list) do
+      local p = group == TRADE and bought[id] or nil
+      table.insert(rows, {
+        itemId = id, prof = group, name = ns.ItemName and ns.ItemName(id) or nil,
+        crafted = 0, sold = f.sold,
+        revenue = round(f.revenue), materials = round(f.materials), fees = round(f.fees),
+        cut = round(f.cut), depositsLost = round(f.depositsLost),
+        profit = round(f.revenue) - round(f.materials) - round(f.fees),
+        stockUnits = 0, stockValue = 0, unitCost = p and p.q > 0 and round(p.v / p.q) or nil,
+      })
+    end
+  end
   for id, prof in pairs(profOf) do
     local f = items[id] or newFigures()
     local p = crafted[id] or { q = 0, v = 0 }

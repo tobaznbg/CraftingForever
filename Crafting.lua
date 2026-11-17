@@ -96,6 +96,18 @@ local function rows(filter, professionID)
   return list
 end
 
+-- Name of the character's profession that makes the item with a learned recipe, or nil.
+-- (The P&L books sales of such items to that profession when no craft was logged.)
+function ns.CraftedBy(itemID)
+  for pid, mine in pairs(ownScans()) do
+    local known = mine.byItem[itemID]
+    if known and known.r.learned then
+      local data = ns.RecipeData and ns.RecipeData[pid]
+      return data and data.name or mine.scan.name
+    end
+  end
+end
+
 -- Material cost per unit of an item the character can make with a learned recipe (the
 -- cheapest such recipe), or nil. Used as the lowest sensible selling price.
 function ns.CraftingCost(itemID)
