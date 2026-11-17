@@ -11,24 +11,21 @@ end
 local function addLines(tooltip, itemID)
   if not itemID or tooltip.cfDone == itemID then return end
   tooltip.cfDone = itemID
-  local C = "|cff4fc2a1CF|r "
-  local m = ns.Farming and ns.Farming.Market(itemID)
-  if m then
-    local ask = math.max(1, (m.min or m.price) - 1)
-    tooltip:AddDoubleLine(C .. "AH-Erlös (unterbieten, -5 %)", ns.FormatMoney(ask * 0.95), 1, 1, 1, 1, 1, 1)
-    local demand = m.soldPerDay and string.format("%.0f verkauft/Tag", m.soldPerDay) or "Absatz noch offen"
-    tooltip:AddDoubleLine(C .. string.format("%d im AH", m.quantity or 0), demand, 0.7, 0.7, 0.7, 0.7, 0.7, 0.7)
-  else
+  local C = "|cff4fc2a1M4|r "
+  local item = ns.Item(itemID)
+  local net, viaAH = ns.Item.SellNet(item)
+  if item.now and viaAH then
+    tooltip:AddDoubleLine(C .. "AH-Gewinn", ns.FormatMoney(net), 1, 1, 1, 1, 1, 1)
+  elseif not item.now then
     tooltip:AddLine(C .. "nicht im AH", 0.7, 0.7, 0.7)
   end
-  -- Last 14 days in our auction house: lowest / average / highest hourly cheapest offer.
-  local house = ns.AHData and ns.AHData[113]
-  local row = house and house.items[itemID]
-  if row and row[11] then
-    -- Until 14 days of own data exist, the collector blends in the TSM start value.
+  if item.avg then
     tooltip:AddDoubleLine(C .. "min / Ø / max",
-      ns.FormatMoney(row[11]) .. " / " .. ns.FormatMoney(row[12]) .. " / " .. ns.FormatMoney(row[13]),
+      ns.FormatMoney(item.min) .. " / " .. ns.FormatMoney(item.avg) .. " / " .. ns.FormatMoney(item.max),
       0.7, 0.7, 0.7, 1, 1, 1)
+  end
+  if item.perDay then
+    tooltip:AddDoubleLine(C .. "Verkäufe pro Tag", string.format("%.0f", item.perDay), 0.7, 0.7, 0.7, 1, 1, 1)
   end
   -- Gap between the auction house block and recommendation / merchant price.
   tooltip:AddLine(" ")
@@ -43,7 +40,7 @@ local function addLines(tooltip, itemID)
     local action, reason = ns.Inventory.Advise(itemID, entry)
     local colors = { AH = { 0.37, 0.83, 0.55 }, ["Händler"] = { 0.85, 0.79, 0.64 }, behalten = { 0.6, 0.6, 0.6 } }
     local c = colors[action] or colors.behalten
-    tooltip:AddDoubleLine(C .. "Empfehlung", action .. " (" .. reason .. ")", 1, 1, 1, c[1], c[2], c[3])
+    tooltip:AddDoubleLine(C .. "Empfehlung", action, 1, 1, 1, c[1], c[2], c[3])
   end
   local price = sellPrice(itemID)
   if price then

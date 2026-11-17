@@ -1,61 +1,29 @@
 -- Crafting: auction house tab "Herstellen" - which learned recipes of the character's
 -- professions make a profit when every reagent is bought (merchant if it sells it,
 -- else the auction house) and the product is sold on the auction house.
---   live       opening the tab starts the own full scan (every 15 min at most); its
---              prices are used while it is at most an hour old (AuctionScan.LiveMin)
---   reagent    merchant price, else cheapest offer now (live scan), else collector
---              data, else TSM region value
---   product    cheapest offer now (live scan), else the lower of market value and
---              7-day median (collector); after the 5 % cut; a merchant price counts
---              if it is higher
+--   prices     ns.Item (Item.lua): buy = merchant, else cheapest offer now;
+--              sell = cheapest offer now - 1 copper - 5 % cut, or a merchant if higher.
+--              Opening the tab starts a live scan (every 15 min at most).
 -- Only professions whose window was opened once are known (Recipes.Scan); the scan
 -- also holds the recipes not learned yet. Those are shown with a red background and
 -- how to learn them (planner data: trainer, merchant, drop, quest; the pattern price
 -- is not part of the profit).
 local ADDON, ns = ...
 
-local CUT = 0.05
-local function live(itemID)
-  if not ns.AuctionScan then return nil, false end
-  return ns.AuctionScan.LiveMin(itemID)
-end
-
 local function money(c) return c and ns.FormatMoney(c, true) or "–" end
 
-local function houseRow(itemID)
-  local house = ns.AHData and ns.AHData[113]
-  return house and house.items[itemID]
-end
-
--- Copper per unit to buy a reagent, and whether it comes from a merchant.
+-- Copper per unit to buy a reagent (merchant, else cheapest offer, else the average
+-- when it is not on offer right now), and whether it comes from a merchant.
 local function buy(itemID)
-  local vendor = ns.db.vendorBuy and ns.db.vendorBuy[itemID]
-  if vendor then return vendor, true end
-  local now, fresh = live(itemID)
-  if now then return now end
-  if fresh then
-    -- Not on offer right now: the collector's last price is the best guess.
-    local row = houseRow(itemID)
-    return row and row[1] or nil
-  end
-  local row = houseRow(itemID)
-  if row and row[1] then return row[1] end
-  local unit, source = ns.Costs.Buy(itemID)
-  return unit, source == "Händler"
+  local e = ns.Item(itemID)
+  local unit, vendor = ns.Item.BuyCost(e)
+  return unit or e.avg, vendor
 end
 
--- Copper per unit the product brings after the cut (or from a merchant). The lower of
--- the current market value and the 7-day median, so a short price spike shows no profit.
+-- Copper per unit the product brings (undercut, minus cut; or a merchant), and
+-- whether via the auction house.
 local function sell(itemID)
-  local now, fresh = live(itemID)
-  local ah = now
-  if not fresh then
-    local row = houseRow(itemID)
-    ah = row and (row[2] or row[1])
-    if ah and row[3] then ah = math.min(ah, row[3]) end
-  end
-  local value = ah and math.floor(ah * (1 - CUT)) or 0
-  return math.max(value, ns.Prices.Vendor(itemID) or 0), ah ~= nil
+  return ns.Item.SellNet(ns.Item(itemID))
 end
 
 local SOURCES = { ["6"] = "Lehrer", ["5"] = "Händler", ["2"] = "Drop", ["4"] = "Quest" }
@@ -90,18 +58,18 @@ local function rows(filter)
             local unitValue, onAH = sell(r.out)
             local value = unitValue * produced
             local profit = value - cost
-            local m = ns.Market.Info(r.out)
+            local item = ns.Item(r.out)
             if filter ~= "profit" or (profit > 0 and onAH) then
               local learn, need = nil, nil
               if not r.learned then learn, need = learnInfo(scan.professionID, recipeID) end
               -- 0 learned, 1 learnable now, 2 later: what can be made now comes first.
               local group = r.learned and 0 or ((need and need > (scan.rank or 0)) and 2 or 1)
-              local fpd = m and m.soldPerDay or 0
+              local fpd = item.perDay or 0
               table.insert(list, { itemID = r.out, recipe = r.name, profession = scan.profession,
                 score = (2 - group) * 1e12 + profit,
                 learned = r.learned and true or false, learn = learn, tooHigh = need and need > (scan.rank or 0),
                 cost = cost, value = value, profit = profit, onAH = onAH,
-                margin = cost > 0 and profit / cost or 0, fpd = m and m.soldPerDay or 0,
+                fpd = fpd,
                 produced = produced, reagents = r.r })
             end
           end
@@ -175,7 +143,7 @@ ns.AHTable.Add({
       return (e.profit >= 0 and "|cff5fd38d" or "|cffff6b6b") .. (e.profit < 0 and "-" or "")
         .. money(math.abs(e.profit)) .. "|r"
     end },
-    { key = "fpd", title = "Verk./Tag EU", width = 85, muted = true, filter = "num",
+    { key = "fpd", title = "Verk./Tag", width = 75, muted = true, filter = "num",
       fmt = function(e) return string.format("%.0f", e.fpd) end },
   },
   rows = rows,

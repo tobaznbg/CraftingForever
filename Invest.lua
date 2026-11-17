@@ -9,24 +9,27 @@ ns.AHTable.Add({
   sort = "upside",
   columns = {
     { key = "name", title = "Item", width = 0, align = "LEFT" },
-    { key = "min", title = "Billigstes hier", width = 105, filter = "money", fmt = function(e)
-      return (e.min and e.min > GetMoney()) and ("|cffffb547" .. money(e.min) .. "|r") or money(e.min)
+    { key = "now", title = "Preis jetzt", width = 95, filter = "money", fmt = function(e)
+      return (e.now and e.now > GetMoney()) and ("|cffffb547" .. money(e.now) .. "|r") or money(e.now)
     end },
-    { key = "here", title = "Median 7 T", width = 90, muted = true, filter = "money",
-      fmt = function(e) return money(e.here) end },
+    { key = "avg", title = "Ø", width = 85, muted = true, filter = "money",
+      fmt = function(e) return money(e.avg) end },
     { key = "classic", title = "Classic Era", width = 90, muted = true, filter = "money",
       fmt = function(e) return money(e.classic) end },
     { key = "upside", title = "Faktor", width = 60, filter = "num",
       fmt = function(e) return string.format("|cff5fd38dx%.1f|r", e.upside) end },
-    { key = "fpd", title = "Verk./Tag EU", width = 85, muted = true, filter = "num",
+    { key = "fpd", title = "Verk./Tag", width = 75, muted = true, filter = "num",
       fmt = function(e) return string.format("%.1f", e.fpd) end },
   },
   rows = function()
-    local list, house = {}, ns.AHData and ns.AHData[113]
-    for itemID, v in pairs(ns.InvestData and ns.InvestData.items or {}) do
-      local row = house and house.items[itemID]
-      table.insert(list, { itemID = itemID, classic = v[1], here = v[2], upside = v[3], fpd = v[4] or 0,
-        min = row and row[1] })
+    local list, data = {}, ns.InvestData
+    for itemID, v in pairs(data and data.items or {}) do
+      local item = ns.Item(itemID)
+      local avg = item.avg or v[2]
+      -- Factor to the general Forever price level (relative to Classic Era).
+      local upside = avg and avg > 0 and data.level * v[1] / avg or v[3]
+      table.insert(list, { itemID = itemID, classic = v[1], avg = avg, now = item.now, upside = upside,
+        fpd = item.perDay or 0 })
     end
     return list
   end,
