@@ -25,9 +25,8 @@ local function addLines(tooltip, itemID)
   local house = ns.AHData and ns.AHData[113]
   local row = house and house.items[itemID]
   if row and row[11] then
-    local days = row[14] or 0
-    local label = days >= 13.5 and "14 Tage" or string.format("%s Tage", days < 1 and "<1" or tostring(math.floor(days + 0.5)))
-    tooltip:AddDoubleLine(C .. label .. " min / Ø / max",
+    -- Until 14 days of own data exist, the collector blends in the TSM start value.
+    tooltip:AddDoubleLine(C .. "14 Tage min / Ø / max",
       ns.FormatMoney(row[11]) .. " / " .. ns.FormatMoney(row[12]) .. " / " .. ns.FormatMoney(row[13]),
       0.7, 0.7, 0.7, 1, 1, 1)
   end
