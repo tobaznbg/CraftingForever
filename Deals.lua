@@ -12,7 +12,7 @@ ns.Deals = Deals
 -- Settings of the sniper, adjustable in the main window (ns.db.settings.sniper).
 Deals.DEFAULTS = {
   maxShare = 0.6,       -- offer at most 60 % of the reference
-  maxPrice = 0,         -- maximum unit price; 0 means no limit
+  maxPrice = 0,         -- maximum unit price and maximum usual price (Ø) on the watch list; 0 means no limit
   minProfit = 2000,     -- 20 silver per item line after the 5 % cut
   minDemand = 2,        -- ns.Item demand (cloud scale) for a hit
   watchMax = 150,       -- items on the watch list

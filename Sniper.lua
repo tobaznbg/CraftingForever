@@ -112,7 +112,9 @@ function Sniper.WatchCandidates()
     local avg, demand = ns.Deals.Reference(itemID, nil), item.demand
     local candidateLimit = avg and avg * set.maxShare
     if candidateLimit and set.maxPrice > 0 then candidateLimit = math.min(candidateLimit, set.maxPrice) end
-    if avg and demand and demand >= set.watchMinDemand and candidateLimit <= money then
+    -- Maximalpreis also limits the watch list: no items whose usual price is above it.
+    local tooExpensive = avg and set.maxPrice > 0 and avg > set.maxPrice
+    if avg and not tooExpensive and demand and demand >= set.watchMinDemand and candidateLimit <= money then
       local stack = math.max(1, math.min(20, (item.quantity or 1) / math.max(1, item.offers or 1)))
       if discount * avg * stack >= set.minProfit then
         table.insert(list, { itemID = itemID, score = avg * math.min(demand, 20), avg = avg, demand = demand })

@@ -10,7 +10,14 @@ local GREEN, ORANGE, MUTED = "|cff5fd38d", "|cffffb547", "|cff99999e"
 local function money(c) return ns.FormatMoney(c or 0, true) end
 
 local DEMAND_STEPS = { { 0.05, "niedrig" }, { 1, "mittel" }, { 5, "hoch" }, { 20, "sehr hoch" } }
-local MAX_PRICE_STEPS = { 0, 50000, 100000, 250000, 500000, 1000000, 2500000, 5000000, 10000000, 25000000, 50000000 }
+-- Maximalpreis steps: no limit, 1g..25g by 1g, then by 2g up to 100g, then by 5g up to 5000g.
+local MAX_PRICE_STEPS = { 0 }
+do
+  local GOLD = 10000
+  for g = 1, 25 do table.insert(MAX_PRICE_STEPS, g * GOLD) end
+  for g = 26, 100, 2 do table.insert(MAX_PRICE_STEPS, g * GOLD) end
+  for g = 105, 5000, 5 do table.insert(MAX_PRICE_STEPS, g * GOLD) end
+end
 
 local function demandLabel(v)
   local label = "kaum"
