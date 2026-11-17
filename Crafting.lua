@@ -191,8 +191,6 @@ ns.AHTable.Add({
       return (e.profit >= 0 and "|cff5fd38d" or "|cffff6b6b") .. (e.profit < 0 and "-" or "")
         .. money(math.abs(e.profit)) .. "|r"
     end },
-    { key = "margin", title = "Marge", width = 60, filter = "pct",
-      fmt = function(e) return string.format("%d %%", math.floor(e.margin * 100 + 0.5)) end },
     { key = "fpd", title = "Verk./Tag EU", width = 85, muted = true, filter = "num",
       fmt = function(e) return string.format("%.0f", e.fpd) end },
   },
