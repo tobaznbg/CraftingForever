@@ -110,9 +110,8 @@ function Sniper.WatchCandidates()
   for itemID in pairs(house.items) do
     local item = ns.Item(itemID)
     local avg, demand = ns.Deals.Reference(itemID, nil), item.demand
-    local candidateLimit = avg and avg * set.maxShare
-    if candidateLimit and set.maxPrice > 0 then candidateLimit = math.min(candidateLimit, set.maxPrice) end
-    if avg and demand and demand >= set.watchMinDemand and candidateLimit <= money then
+    if avg and (set.maxPrice == 0 or avg <= set.maxPrice)
+        and demand and demand >= set.watchMinDemand and avg * set.maxShare <= money then
       local stack = math.max(1, math.min(20, (item.quantity or 1) / math.max(1, item.offers or 1)))
       if discount * avg * stack >= set.minProfit then
         table.insert(list, { itemID = itemID, score = avg * math.min(demand, 20), avg = avg, demand = demand })
@@ -144,10 +143,7 @@ end
 -- Highest price a recipe hit may cost (nil = every offer, no usual price and no global cap).
 function Sniper.RecipeLimit(itemID)
   local usual = Sniper.RecipeUsual(itemID)
-  local set = ns.Deals.Settings()
-  local limit = usual and math.floor(usual * set.recipeMax + 0.5) or nil
-  if set.maxPrice > 0 and (not limit or set.maxPrice < limit) then return set.maxPrice end
-  return limit
+  return usual and math.floor(usual * ns.Deals.Settings().recipeMax + 0.5) or nil
 end
 
 -- Watched recipes, sorted by item id: { itemID... } (empty while switched off).
@@ -347,10 +343,7 @@ local function evaluate(c, listings, commodity)
   if ns.AHSearch then ns.AHSearch.Store(c.itemID, levels[c.itemID].list) end
   local house = #plain > 0 and ns.Deals.HousePrice(plain, 0.25) or nil
   local ref, source = ns.Deals.Reference(c.itemID, house)
-  local set = ns.Deals.Settings()
-  local limit = ref and ref * set.maxShare
-  if limit and set.maxPrice > 0 then limit = math.min(limit, set.maxPrice) end
-  seen[c.key] = { price = cheapest or false, limit = limit, t = time() }
+  seen[c.key] = { price = cheapest or false, limit = ref and ref * ns.Deals.MaxShare(), t = time() }
   -- Watched recipe: its own rule; the price stair only when it is on the normal list too.
   if Sniper.RecipeInfo(c.itemID) then
     seen[c.key].limit = Sniper.RecipeLimit(c.itemID) or seen[c.key].limit
@@ -364,7 +357,7 @@ local function evaluate(c, listings, commodity)
   -- sales assume at most one unit a day.
   local perDay, perDaySource = item.demand and math.min(item.demand, 1), "vorsichtig geschätzt"
   if item.certain and item.certain > 0 then perDay, perDaySource = item.certain, "sicher verkauft" end
-  local stair = ns.Deals.Staircase(listings, cap, perDay, set)
+  local stair = ns.Deals.Staircase(listings, cap, perDay)
   if not stair or stair.profit < ns.Deals.MinProfit() then return nil end
   local hit = { key = c.key, itemKey = c.itemKey, itemID = c.itemID, commodity = commodity, ref = ref,
     source = source, cap = cap, level = stair.level, sellAt = stair.sellAt, sellSource = stair.sellSource,
@@ -524,29 +517,19 @@ end
 
 local function affordable(hit)
   local money, units, cost = GetMoney(), 0, 0
-  local maxPrice = ns.Deals.Settings().maxPrice
-  local priceBlocked = false
   for _, a in ipairs(hit.auctions) do
-    if maxPrice > 0 and a.unit > maxPrice then priceBlocked = true; break end
     local n = math.min(a.count, math.floor((money - cost) / a.unit))
     if n <= 0 then break end
     units, cost = units + n, cost + n * a.unit
     if n < a.count then break end
   end
-  return units, cost, priceBlocked
+  return units, cost
 end
 
 function Sniper.Buy(hit)
   if not hit then return end
   if pending and pending.hit == hit then
     -- second click: confirm the quoted commodity purchase
-    local maxPrice = ns.Deals.Settings().maxPrice
-    if maxPrice > 0 and (pending.maxPrice == 0 or maxPrice < pending.maxPrice) then
-      pcall(api.CancelCommoditiesPurchase)
-      note = "Maximalpreis geändert – Kauf bitte neu anfragen."
-      pending = nil
-      return changed()
-    end
     api.ConfirmCommoditiesPurchase(hit.itemID, pending.units)
     pending.confirmed = true
     note = "Kauf bestätigt …"
@@ -554,22 +537,14 @@ function Sniper.Buy(hit)
   end
   if pending or buying then note = "Erst den laufenden Kauf abschließen."; return changed() end
   if hit.commodity then
-    local units, cost, priceBlocked = affordable(hit)
-    if units == 0 then
-      note = priceBlocked and "Kein Angebot unter dem Maximalpreis." or "Nicht genug Gold."
-      return changed()
-    end
-    pending = { hit = hit, units = units, cost = cost, maxPrice = ns.Deals.Settings().maxPrice }
+    local units, cost = affordable(hit)
+    if units == 0 then note = "Nicht genug Gold."; return changed() end
+    pending = { hit = hit, units = units, cost = cost }
     api.StartCommoditiesPurchase(hit.itemID, units)
     note = "Preis wird beim Server angefragt …"
   else
     local a = hit.auctions[1]
     if not a then return end
-    local maxPrice = ns.Deals.Settings().maxPrice
-    if maxPrice > 0 and a.buyout > maxPrice then
-      note = "Der Preis liegt über dem Maximalpreis."
-      return changed()
-    end
     if a.buyout > GetMoney() then note = "Nicht genug Gold."; return changed() end
     buying = { hit = hit, auction = a }
     api.PlaceBid(a.auctionID, a.buyout)
@@ -590,22 +565,9 @@ end
 handlers.COMMODITY_PRICE_UPDATED = function(unitPrice, totalPrice)
   if not pending or pending.quoted then return end
   pending.quoted, pending.total = true, totalPrice
-  local maxPrice = ns.Deals.Settings().maxPrice
-  local effectiveLimit = maxPrice
-  if pending.maxPrice > 0 and (effectiveLimit == 0 or pending.maxPrice < effectiveLimit) then
-    effectiveLimit = pending.maxPrice
-  end
-  local overLimit = effectiveLimit > 0 and unitPrice > effectiveLimit
-  local limitChanged = maxPrice > 0 and (pending.maxPrice == 0 or maxPrice < pending.maxPrice)
-  if totalPrice > pending.cost * PRICE_TOLERANCE or overLimit or limitChanged then
+  if totalPrice > pending.cost * PRICE_TOLERANCE then
     pcall(api.CancelCommoditiesPurchase)
-    if overLimit then
-      note = "Schon weg: Preis jetzt über dem Maximalpreis."
-    elseif limitChanged then
-      note = "Maximalpreis geändert – Kauf bitte neu anfragen."
-    else
-      note = "Schon weg: Preis jetzt " .. ns.FormatMoney(unitPrice, true) .. " pro Stück."
-    end
+    note = "Schon weg: Preis jetzt " .. ns.FormatMoney(unitPrice, true) .. " pro Stück."
     hits[pending.hit.key] = nil
     pending = nil
     later(0.5, nextStep)

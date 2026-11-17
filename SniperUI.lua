@@ -184,7 +184,7 @@ local function build(page, width, height)
     index = math.max(1, math.min(#MAX_PRICE_STEPS, index + dir))
     set("maxPrice", MAX_PRICE_STEPS[index])
   end
-  table.insert(updates, stepper(settings, -294, "Maximalpreis pro Item",
+  table.insert(updates, stepper(settings, -294, "Durchschnittspreis höchstens",
     function() return S().maxPrice == 0 and "Kein Limit" or money(S().maxPrice) end,
     function() stepMaxPrice(-1) end, function() stepMaxPrice(1) end))
   local reset = Style.Button(settings, "Standard", 80, 18, function()
@@ -256,10 +256,8 @@ local function build(page, width, height)
     local candidates = Sniper and Sniper.WatchCandidates and Sniper.WatchCandidates() or {}
     local entries = {}
     for _, c in ipairs(candidates) do
-      local limit = c.avg * set.maxShare
-      if set.maxPrice > 0 then limit = math.min(limit, set.maxPrice) end
       table.insert(entries, { ns.ItemName(c.itemID) or ("#" .. c.itemID), money(c.avg),
-        money(limit), demandLabel(c.demand), itemID = c.itemID })
+        money(c.avg * set.maxShare), demandLabel(c.demand), itemID = c.itemID })
     end
     local recipes = Sniper and Sniper.RecipeItems and Sniper.RecipeItems() or {}
     local known = {}

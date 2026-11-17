@@ -89,7 +89,6 @@ Deals.CUT = CUT
 --      few above them are just overpriced offers (Bauplan: Thoriumpatronen, 20 cheap, 4 above)
 --   3. resale never above cap (ns.Item average, else the reference)
 --   4. every bought level pays off on its own: unit <= resale * (1 - CUT) * (1 - minGap)
---   5. every bought unit stays at or below the optional maxPrice setting
 -- The P with the highest profit N * resale * (1 - CUT) - C wins.
 -- listings = { { unit, count, own }... }. Returns nil or
 --   { level = P, sellAt = resale, sellSource = "Mittelfeld" | "Ø-Obergrenze", buyUpTo, units,
@@ -113,7 +112,7 @@ function Deals.Staircase(listings, cap, perDay, set)
       local units, cost, ok = 0, 0, true
       for j = 1, i - 1 do
         local l = foreign[j]
-        if l.unit > ceiling or (set.maxPrice > 0 and l.unit > set.maxPrice) then ok = false break end
+        if l.unit > ceiling then ok = false break end
         units, cost = units + l.count, cost + l.unit * l.count
       end
       if ok and units > maxUnits then ok = false end
