@@ -18,7 +18,7 @@ ns.AHTable.Add({
       fmt = function(e) return money(e.classic) end },
     { key = "upside", title = "Faktor", width = 60, filter = "num",
       fmt = function(e) return string.format("|cff5fd38dx%.1f|r", e.upside) end },
-    { key = "fpd", title = "Verk./Tag", width = 70, muted = true, filter = "num",
+    { key = "fpd", title = "Verk./Tag EU", width = 85, muted = true, filter = "num",
       fmt = function(e) return string.format("%.1f", e.fpd) end },
   },
   rows = function()

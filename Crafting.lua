@@ -80,7 +80,7 @@ local function rows(filter)
               local group = r.learned and 0 or ((need and need > (scan.rank or 0)) and 2 or 1)
               local fpd = m and m.soldPerDay or 0
               table.insert(list, { itemID = r.out, recipe = r.name, profession = scan.profession,
-                score = (2 - group) * 1e12 + profit, potential = profit * fpd,
+                score = (2 - group) * 1e12 + profit,
                 learned = r.learned and true or false, learn = learn, tooHigh = need and need > (scan.rank or 0),
                 cost = cost, value = value, profit = profit, onAH = onAH,
                 margin = cost > 0 and profit / cost or 0, fpd = m and m.soldPerDay or 0,
@@ -155,11 +155,9 @@ ns.AHTable.Add({
       return (e.profit >= 0 and "|cff5fd38d" or "|cffff6b6b") .. (e.profit < 0 and "-" or "")
         .. money(math.abs(e.profit)) .. "|r"
     end },
-    { key = "potential", title = "Gewinn×Verk.", width = 95, muted = true, filter = "money",
-      fmt = function(e) return e.potential > 0 and money(e.potential) or "–" end },
     { key = "margin", title = "Marge", width = 60, filter = "pct",
       fmt = function(e) return string.format("%d %%", math.floor(e.margin * 100 + 0.5)) end },
-    { key = "fpd", title = "Verk./Tag", width = 70, muted = true, filter = "num",
+    { key = "fpd", title = "Verk./Tag EU", width = 85, muted = true, filter = "num",
       fmt = function(e) return string.format("%.0f", e.fpd) end },
   },
   rows = rows,

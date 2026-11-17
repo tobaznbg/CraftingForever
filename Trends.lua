@@ -26,7 +26,7 @@ ns.AHTable.Add({
     { key = "euMv", title = "EU jetzt", width = 90, muted = true, filter = "money", fmt = function(e) return money(e.euMv) end },
     { key = "euHist", title = "EU 60 T", width = 90, muted = true, fmt = function(e) return money(e.euHist) end },
     { key = "change", title = "Trend EU", width = 75, filter = "pct", fmt = function(e) return pct(e.change) end },
-    { key = "fpd", title = "Verk./Tag", width = 65, muted = true, filter = "num",
+    { key = "fpd", title = "Verk./Tag EU", width = 85, muted = true, filter = "num",
       fmt = function(e) return string.format("%.0f", e.fpd) end },
   },
   rows = function(filter)
