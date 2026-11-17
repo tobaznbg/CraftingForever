@@ -142,19 +142,22 @@ local function detail(e, count)
   end
   local produced = e.produced * count
   local value = e.value * count
-  local footer = string.format(
-    "%d× herstellen  ·  ergibt %g Stück\n"
-    .. "Material gesamt %s  ·  davon noch kaufen |cffffb547%s|r\n"
-    .. "Verkauf netto %s  ·  Gewinn %s%s|r  ·  dein Gold %s\n"
-    .. "|cff99999eKlick auf ein Material: im AH suchen  ·  Shift +/−: in 10er-Schritten  ·  H = Händler|r",
-    count, produced, money(total), money(buyTotal), money(value),
-    (value - total) >= 0 and "|cff5fd38d" or "|cffff6b6b", money(value - total), money(GetMoney()))
+  local profit = value - total
+  local summary = {
+    { string.format("%d× herstellen", count), string.format("ergibt %g Stück", produced) },
+    { "Material gesamt", money(total) },
+    { "davon noch kaufen", "|cffffb547" .. money(buyTotal) .. "|r" },
+    { "Verkauf netto", money(value) },
+    { "Gewinn", (profit >= 0 and "|cff5fd38d" or "|cffff6b6b-") .. money(math.abs(profit)) .. "|r" },
+    { "dein Gold", money(GetMoney()) },
+  }
   return {
     title = e.name,
     subtitle = e.profession .. " · " .. (e.learned and "gelernt" or ("nicht gelernt: " .. (e.learn or "?"))),
-    columns = { { "Braucht", 52 }, { "Habe", 44 }, { "Kaufen", 50 }, { "Preis", 66 }, { "Kosten", 70 } },
+    columns = { { "Braucht", 56 }, { "Habe", 46 }, { "Kaufen", 54 }, { "Preis", 84 }, { "Kosten", 90 } },
     rows = rows,
-    footer = footer,
+    summary = summary,
+    hint = "Klick auf Material: im AH suchen  ·  Shift +/−: 10er-Schritte  ·  H = Händler",
   }
 end
 

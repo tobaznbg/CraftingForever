@@ -25,6 +25,10 @@ local function addLines(tooltip, itemID)
   end
   local demand = ns.Item.DemandText(item)
   if demand then
+    if item.certain and item.certain >= 1 then
+      local n = math.floor(item.certain + 0.5)
+      demand = demand .. "  (mind. " .. (BreakUpLargeNumbers and BreakUpLargeNumbers(n) or tostring(n)) .. " / Tag)"
+    end
     tooltip:AddDoubleLine(C .. "Nachfrage", demand, 0.7, 0.7, 0.7, 1, 1, 1)
   end
   -- Gap between the auction house block and recommendation / merchant price.

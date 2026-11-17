@@ -9,6 +9,8 @@
 --                      two weeks (collector; at the start blended with TSM start values)
 --   demand     relative demand from the cloud (scale: TSM's real EU sales per day; our own
 --              estimate calibrated to it). Shown as a level, not as units: Item.DemandText
+--   certain    units certainly bought per day (partial purchases of commodities, a lower
+--              bound; nil for items that are not commodities)
 --   yesterday  daily price of the previous day (cloud); change = now / yesterday - 1
 --   trend      PPO of the daily prices, EMA 3 days / EMA 14 days - 1 (cloud)
 --   direction  1 rising, -1 falling, 0 sideways (EMA 3 / 7 / 14 in order or not)
@@ -89,7 +91,7 @@ function Item.Get(itemID)
   if o and o.t > bestT then e.now = o.now end
   if row then
     e.min, e.avg, e.max = row[11], row[12], row[13]
-    e.demand = row[18]
+    e.demand, e.certain = row[18], row[19]
     e.yesterday, e.trend, e.direction = row[15], row[16], row[17]
   end
   -- Same formula as the cloud (ahmetrics change24), with the newest price we have.

@@ -23,7 +23,8 @@
 --   onOpen = function(t) (runs inside the tab click, i.e. with a hardware event),
 --   info = function() -> short text left of the entry count (e.g. price basis),
 --   detail = function(entry, count) -> { title, subtitle, columns = { { title, width }... },
---            rows = { { itemID, cells = { text... } }... }, footer = text }
+--            rows = { { itemID, cells = { text... } }... },
+--            summary = { { label, value }... } (single-line rows at the bottom), hint = text }
 --            (click on a row opens it in a panel right of the auction house; with
 --            detailCount = true the panel has a -/+ count that is passed in; the panel
 --            stays open while searching/buying in Blizzard's tabs, until its X or the
@@ -496,7 +497,8 @@ end
 
 -- Detail panel -------------------------------------------------------------------------
 
-local DETAIL_W, DETAIL_ROWS, DETAIL_ROW = 400, 14, 26
+local DETAIL_W, DETAIL_ROWS, DETAIL_ROW = 460, 12, 26
+local SUMMARY_ROWS, SUMMARY_ROW = 6, 18
 
 local function renderDetail()
   local d, t = detail, detail.t
@@ -537,7 +539,12 @@ local function renderDetail()
       r:Hide()
     end
   end
-  d.footer:SetText(info.footer or "")
+  for i, line in ipairs(d.summary) do
+    local s = (info.summary or {})[i]
+    line.label:SetText(s and s[1] or "")
+    line.value:SetText(s and s[2] or "")
+  end
+  d.hint:SetText(info.hint or "")
 end
 
 local function createDetail(parent)
@@ -635,13 +642,28 @@ local function createDetail(parent)
     detail.rows[i] = r
   end
 
-  detail.footer = Style.Text(f, 12)
-  detail.footer:SetPoint("BOTTOMLEFT", 12, 12)
-  detail.footer:SetPoint("BOTTOMRIGHT", -12, 12)
-  detail.footer:SetJustifyH("LEFT")
-  detail.footer:SetJustifyV("BOTTOM")
-  detail.footer:SetWordWrap(true)
-  detail.footer:SetHeight(80)
+  -- Summary: single-line rows, label left, value right (money with coin icons must not wrap).
+  detail.hint = Style.Text(f, 11)
+  detail.hint:SetPoint("BOTTOMLEFT", 12, 10)
+  detail.hint:SetPoint("BOTTOMRIGHT", -12, 10)
+  detail.hint:SetJustifyH("LEFT")
+  detail.hint:SetTextColor(unpack(Style.C.muted))
+  local sep = Style.Solid(f, Style.C.border, "ARTWORK")
+  sep:SetHeight(1)
+  sep:SetPoint("BOTTOMLEFT", 8, 30 + SUMMARY_ROWS * SUMMARY_ROW)
+  sep:SetPoint("BOTTOMRIGHT", -8, 30 + SUMMARY_ROWS * SUMMARY_ROW)
+  detail.summary = {}
+  for i = 1, SUMMARY_ROWS do
+    local y = 28 + (SUMMARY_ROWS - i) * SUMMARY_ROW
+    local label = Style.Text(f, 12)
+    label:SetPoint("BOTTOMLEFT", 12, y)
+    label:SetJustifyH("LEFT")
+    label:SetTextColor(unpack(Style.C.muted))
+    local value = Style.Text(f, 12)
+    value:SetPoint("BOTTOMRIGHT", -12, y)
+    value:SetJustifyH("RIGHT")
+    detail.summary[i] = { label = label, value = value }
+  end
   f:Hide()
 end
 
