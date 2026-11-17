@@ -577,14 +577,43 @@ end
 
 -- Alt+left click on any item of the game UI (bags, bank, character, loot, chat links,
 -- Blizzard's auction house lists): a post hook, the original keeps running untouched.
+-- Both paths below can see the same click: open once.
+local lastID, lastAt = nil, 0
+local function openOnce(id)
+  local now = GetTime and GetTime() or 0
+  if id == lastID and now - lastAt < 0.5 then return end
+  lastID, lastAt = id, now
+  ns.Safe(Detail.Show, id)
+end
+
 if hooksecurefunc and HandleModifiedItemClick then
   hooksecurefunc("HandleModifiedItemClick", function(link)
     if type(link) ~= "string" or not Detail.IsAltClick() then return end
     local button = GetMouseButtonClicked and GetMouseButtonClicked()
     if button and button ~= "LeftButton" then return end
     local id = toID(link)
-    if id then ns.Safe(Detail.Show, id) end
+    if id then openOnce(id) end
   end)
+end
+
+-- Blizzard's auction house lists do not go through HandleModifiedItemClick. Every item the
+-- game shows a tooltip for can be opened instead: Alt+left click while the game tooltip
+-- shows an item (GLOBAL_MOUSE_DOWN only observes the click, nothing is intercepted).
+function Detail.TooltipItem()
+  if not (GameTooltip and GameTooltip:IsShown() and GameTooltip.GetItem) then return nil end
+  local _, link = GameTooltip:GetItem()
+  return toID(link)
+end
+
+if CreateFrame then
+  local watcher = CreateFrame("Frame")
+  if pcall(watcher.RegisterEvent, watcher, "GLOBAL_MOUSE_DOWN") then
+    watcher:SetScript("OnEvent", function(_, _, button)
+      if button ~= "LeftButton" or not Detail.IsAltClick() then return end
+      local id = Detail.TooltipItem()
+      if id then openOnce(id) end
+    end)
+  end
 end
 
 if ns.On then
