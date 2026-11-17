@@ -95,16 +95,27 @@ local function rows(filter, professionID)
   return list
 end
 
--- Crafting professions for the chooser, with icon and the character's skill if known.
+-- Crafting professions for the chooser: icon, the character's skill if known, and the
+-- cloud's profession figures (Data_Professions.lua): profitable recipes, average profit
+-- of the ten best, the best recipe, and the top-10 average of the last 14 days as chart.
 local function professions()
   local own, list = ownScans(), {}
+  local stats = ns.ProfessionStats and ns.ProfessionStats.professions or {}
   for id, data in pairs(ns.RecipeData or {}) do
     local mine = own[id]
     local n = 0
     for _, rec in pairs(data.recipes) do if rec[2] then n = n + 1 end end
+    local s = stats[id]
+    local lines, series = {}, {}
+    if s then
+      lines[1] = string.format("%d mit Gewinn  ·  Top 10 Ø |cff5fd38d%s|r", s[1] or 0, money(s[4]))
+      local best = s[2] and data.recipes[s[2]]
+      if best then lines[2] = "bestes: " .. best[1] .. "  |cff5fd38d" .. money(s[3]) .. "|r" end
+      for _, point in ipairs(s.series or {}) do table.insert(series, point[3] or 0) end
+    end
     table.insert(list, { key = id, label = data.name, icon = data.icon,
       info = mine and string.format("dein Skill %d / %d  ·  %d Rezepte", mine.scan.rank or 0, mine.scan.max or 0, n)
-        or string.format("%d Rezepte", n), mine = mine ~= nil })
+        or string.format("%d Rezepte", n), lines = lines, series = series, mine = mine ~= nil })
   end
   table.sort(list, function(a, b)
     if a.mine ~= b.mine then return a.mine end

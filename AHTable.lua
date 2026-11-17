@@ -11,8 +11,10 @@
 --     filter = "money" | "pct" | "num" (column can be filtered; money in gold, pct in %),
 --   }... },
 --   rows = function(view, choice) -> list of entries (each with itemID and the column keys),
---   chooser = function() -> { { key, label, icon, info }... } (optional: a first screen of
---             big buttons, e.g. professions; the list shows after a choice, "‹ Zurück" returns),
+--   chooser = function() -> { { key, label, icon, info, lines = { text... }, series = { n... } }... }
+--             (optional first screen of big tiles, e.g. professions: icon, label, info line,
+--             up to two more lines and a bar chart of `series`; the list shows after a
+--             choice, "‹ Zurück" returns),
 --   views = { { key, label, width }... } (optional buttons, the first is the default),
 --   defaultFilters = { [key] = ">= 1" ... } (until the user sets own filters),
 --   sort = key, desc = true,
@@ -41,6 +43,7 @@ local AHTable = {}
 ns.AHTable = AHTable
 
 local ROW, HEADER, TOOLBAR, FILTER_ROW, FOOTER = 30, 22, 28, 24, 8
+local CHART_BARS, CHART_H = 14, 22   -- chooser tiles: 14 days
 local BUTTON_W = 64
 local MAX_ROWS = 40
 local SCALE = { money = 10000, pct = 0.01, num = 1 }
@@ -168,6 +171,20 @@ local function showMode(t)
         b.icon:SetTexture(c.icon)
         b.label:SetText(c.label)
         b.info:SetText(c.info or "")
+        for j, fs in ipairs(b.lines) do fs:SetText(c.lines and c.lines[j] or "") end
+        -- Bar chart: one bar per value, scaled to the largest, newest right.
+        local series, maxV = c.series or {}, 0
+        for _, v in ipairs(series) do maxV = math.max(maxV, v or 0) end
+        for j, bar in ipairs(b.bars) do
+          local v = series[#series - #b.bars + j]
+          if v and maxV > 0 then
+            bar:SetHeight(math.max(2, CHART_H * v / maxV))
+            bar:Show()
+          else
+            bar:Hide()
+          end
+        end
+        b.chartBase:SetShown(#series > 0)
         b:Show()
       else
         b:Hide()
@@ -413,7 +430,7 @@ local function createFrame(t, parent)
     panel:SetPoint("TOPLEFT", 1, -(1 + TOOLBAR))
     panel:SetPoint("BOTTOMRIGHT", -1, 1)
     t.chooseButtons = {}
-    local W, H, COLS = 230, 64, 3
+    local W, H, COLS = 230, 128, 3
     for i = 1, 12 do
       local b = CreateFrame("Button", nil, panel)
       b:SetSize(W, H)
@@ -424,17 +441,39 @@ local function createFrame(t, parent)
       hover:SetAllPoints()
       hover:Hide()
       b.icon = b:CreateTexture(nil, "OVERLAY")
-      b.icon:SetSize(44, 44)
-      b.icon:SetPoint("LEFT", 10, 0)
+      b.icon:SetSize(40, 40)
+      b.icon:SetPoint("TOPLEFT", 10, -10)
       b.label = Style.Text(b, 14)
-      b.label:SetPoint("TOPLEFT", b.icon, "TOPRIGHT", 10, -4)
+      b.label:SetPoint("TOPLEFT", b.icon, "TOPRIGHT", 10, -3)
       b.label:SetPoint("RIGHT", -8, 0)
       b.label:SetJustifyH("LEFT")
       b.info = Style.Text(b, 11)
-      b.info:SetPoint("BOTTOMLEFT", b.icon, "BOTTOMRIGHT", 10, 4)
+      b.info:SetPoint("BOTTOMLEFT", b.icon, "BOTTOMRIGHT", 10, 3)
       b.info:SetPoint("RIGHT", -8, 0)
       b.info:SetJustifyH("LEFT")
       b.info:SetTextColor(unpack(Style.C.muted))
+      b.lines = {}
+      for j = 1, 2 do
+        local fs = Style.Text(b, 11)
+        fs:SetPoint("TOPLEFT", b.icon, "BOTTOMLEFT", 0, -6 - (j - 1) * 14)
+        fs:SetPoint("RIGHT", -8, 0)
+        fs:SetJustifyH("LEFT")
+        b.lines[j] = fs
+      end
+      -- Bar chart along the bottom edge.
+      b.chartBase = Style.Solid(b, Style.C.border, "ARTWORK")
+      b.chartBase:SetHeight(1)
+      b.chartBase:SetPoint("BOTTOMLEFT", 10, 8)
+      b.chartBase:SetPoint("BOTTOMRIGHT", -10, 8)
+      b.bars = {}
+      local barW = math.floor((W - 20) / CHART_BARS) - 2
+      for j = 1, CHART_BARS do
+        local bar = Style.Solid(b, Style.C.accent, "ARTWORK")
+        bar:SetWidth(barW)
+        bar:SetPoint("BOTTOMLEFT", 10 + (j - 1) * (barW + 2), 9)
+        bar:Hide()
+        b.bars[j] = bar
+      end
       b:SetScript("OnEnter", function() hover:Show() end)
       b:SetScript("OnLeave", function() hover:Hide() end)
       b:SetScript("OnClick", function(self)

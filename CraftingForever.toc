@@ -17,6 +17,7 @@ AuctionStats.lua
 Data_AH113.lua
 Data_Invest.lua
 Data_Recipes.lua
+Data_Professions.lua
 Data_ItemNames.lua
 Data_Gathering.lua
 Data_FarmSpots.lua
