@@ -10,6 +10,23 @@ local ADDON, ns = ...
 
 local MIN_MOVE = 0.10   -- at least 10 % away from the reference
 
+local Trends = {}
+ns.Trends = Trends
+
+-- Current price, 30-day average and the change between them, or nil without data.
+-- Current = cheapest offer in the live scan, else the collector's last market value.
+function Trends.Info(itemID)
+  local house = ns.AHData and ns.AHData[113]
+  local row = house and house.items[itemID]
+  local ref = row and row[9]
+  if not ref or ref <= 0 then return nil end
+  local now, fresh = nil, false
+  if ns.AuctionScan then now, fresh = ns.AuctionScan.LiveMin(itemID) end
+  if not fresh then now = row[2] end
+  if not now then return nil end
+  return now, ref, now / ref - 1, row
+end
+
 local function money(c) return c and ns.FormatMoney(c, true) or "–" end
 local function pct(v)
   if not v then return "–" end
@@ -35,13 +52,9 @@ ns.AHTable.Add({
   },
   rows = function(view)
     local list, house = {}, ns.AHData and ns.AHData[113]
-    for itemID, row in pairs(house and house.items or {}) do
-      local ref = row[9]
-      local mv, fresh = nil, false
-      if ns.AuctionScan then mv, fresh = ns.AuctionScan.LiveMin(itemID) end
-      if not fresh then mv = row[2] end
-      if mv and ref and ref > 0 then
-        local change = mv / ref - 1
+    for itemID in pairs(house and house.items or {}) do
+      local mv, ref, change, row = Trends.Info(itemID)
+      if mv then
         if (view == "up" and change >= MIN_MOVE) or (view == "down" and change <= -MIN_MOVE) then
           table.insert(list, { itemID = itemID, mv = mv, ref = ref, change = change, own = row[10] or 0,
             offers = row[7] or 0, strength = math.abs(change) })

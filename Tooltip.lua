@@ -23,6 +23,15 @@ local function addLines(tooltip, itemID)
   else
     tooltip:AddLine(C .. "nicht im AH", 0.7, 0.7, 0.7)
   end
+  -- Price against its 30-day average in our auction house (as in the Trends tab).
+  local now, avg, change = nil, nil, nil
+  if ns.Trends then now, avg, change = ns.Trends.Info(itemID) end
+  if avg then
+    local pct = math.floor(change * 100 + (change >= 0 and 0.5 or -0.5))
+    local color = change >= 0.10 and "|cff5fd38d" or (change <= -0.10 and "|cffff6b6b" or "|cffcccccc")
+    tooltip:AddDoubleLine(C .. "Ø 30 Tage", ns.FormatMoney(avg) .. "  (jetzt " .. color
+      .. string.format("%+d %%", pct) .. "|r)", 0.7, 0.7, 0.7, 1, 1, 1)
+  end
   -- Decision as in the Bestand tab; bag entry if the item is carried (bound state).
   if ns.Inventory then
     local inv = ns.db.inventory and ns.db.inventory[ns.CharKey()]
