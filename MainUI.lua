@@ -128,7 +128,7 @@ end
 local function recipeName(professionID, recipeID)
   local data = ns.RecipeData and ns.RecipeData[professionID]
   local recipe = data and data.recipes and data.recipes[recipeID]
-  return recipe and recipe[1], data and data.name
+  return recipe and recipe[1], data and data.name, recipe and recipe[2]
 end
 
 -- Widgets ------------------------------------------------------------------------
@@ -184,7 +184,9 @@ end
 -- Table: header row and striped rows.
 --   columns  { { title, width (0 = takes the rest), align }... }
 --   opts     { scroll = true }
--- g:SetRows(list, emptyText): list of { cell texts..., color = {r,g,b} (first cell),
+-- A column given as { title, width, align, true } is the item column: rows with
+-- data.itemID show the item icon there and the item tooltip on hover.
+-- g:SetRows(list, emptyText): list of { cell texts..., itemID = n, color = {r,g,b} (first cell),
 -- onClick = fn }.
 local function grid(parent, w, h, columns, opts)
   opts = opts or {}
@@ -194,6 +196,8 @@ local function grid(parent, w, h, columns, opts)
   local fixed = 0
   for _, c in ipairs(columns) do fixed = fixed + (c[2] or 0) end
   local xs, ws, x = {}, {}, 0
+  local itemCol
+  for i, c in ipairs(columns) do if c[4] then itemCol = i end end
   for i, c in ipairs(columns) do
     local cw = (c[2] and c[2] > 0) and c[2] or math.max(40, inner - fixed)
     xs[i], ws[i] = x, cw
@@ -248,8 +252,20 @@ local function grid(parent, w, h, columns, opts)
       t:SetJustifyH(columns[c][3] or "LEFT")
       r.cells[c] = t
     end
-    r:SetScript("OnEnter", function(self) if self.onClick then self.hover:Show() end end)
-    r:SetScript("OnLeave", function(self) self.hover:Hide() end)
+    if itemCol then
+      r.icon = r:CreateTexture(nil, "ARTWORK")
+      r.icon:SetSize(ROW - 6, ROW - 6)
+      r.icon:SetPoint("LEFT", xs[itemCol] + 4, 0)
+    end
+    r:SetScript("OnEnter", function(self)
+      if self.onClick or self.itemID then self.hover:Show() end
+      if self.itemID then
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetItemByID(self.itemID)
+        GameTooltip:Show()
+      end
+    end)
+    r:SetScript("OnLeave", function(self) self.hover:Hide(); GameTooltip:Hide() end)
     r:SetScript("OnClick", function(self) if self.onClick then ns.Safe(self.onClick) end end)
     rows[i] = r
     return r
@@ -263,6 +279,22 @@ local function grid(parent, w, h, columns, opts)
         cell:SetTextColor(unpack(Style.C.text))
       end
       if data.color then r.cells[1]:SetTextColor(unpack(data.color)) end
+      r.itemID = data.itemID
+      if r.icon then
+        local cell = r.cells[itemCol]
+        cell:ClearAllPoints()
+        if data.itemID then
+          local getIcon = (C_Item and C_Item.GetItemIconByID) or GetItemIcon
+          r.icon:SetTexture(getIcon and getIcon(data.itemID) or nil)
+          r.icon:Show()
+          cell:SetPoint("LEFT", xs[itemCol] + ROW, 0)
+          cell:SetWidth(ws[itemCol] - ROW - 6)
+        else
+          r.icon:Hide()
+          cell:SetPoint("LEFT", xs[itemCol] + 6, 0)
+          cell:SetWidth(ws[itemCol] - 12)
+        end
+      end
       r.onClick = data.onClick
       r:Show()
     end
@@ -450,7 +482,8 @@ local function eventRow(e)
     amount = Style.MUTED .. money(e.p * (e.u or 1)) .. "|r"
   end
   local name = e.n or (e.i and ns.ItemName(e.i)) or "?"
-  return { date("%d.%m. %H:%M", e.t or 0), KINDS[e.k] or tostring(e.k), name, tostring(e.u or 1), amount }
+  return { date("%d.%m. %H:%M", e.t or 0), KINDS[e.k] or tostring(e.k), name, tostring(e.u or 1), amount,
+    itemID = e.i }
 end
 
 -- Auctions that are probably still running (rough): posts within their duration whose
@@ -549,7 +582,7 @@ PAGES.overview = function(p)
   local recipeCard = card(p, colW, recipeH, "Lohnt sich gerade")
   recipeCard:SetPoint("TOPLEFT", profCard, "BOTTOMLEFT", 0, -GAP)
   local recipes = grid(recipeCard, colW - 2, recipeH - 30, {
-    { "Rezept", 0 }, { "Beruf", 110 }, { "Gewinn", 100, "RIGHT" } })
+    { "Rezept", 0, nil, true }, { "Beruf", 110 }, { "Gewinn", 100, "RIGHT" } })
   recipes:SetPoint("TOPLEFT", 1, -29)
 
   local marketCard = card(p, colW, avail - profH - recipeH - 2 * GAP, "Markt")
@@ -564,13 +597,13 @@ PAGES.overview = function(p)
   local openInfo = muted(Style.Text(openCard, 11))
   openInfo:SetPoint("TOPRIGHT", -10, -9)
   local open = grid(openCard, colW - 2, openH - 30, {
-    { "Item", 0 }, { "Menge", 50, "RIGHT" }, { "Wert", 100, "RIGHT" }, { "Endet", 60, "RIGHT" } })
+    { "Item", 0, nil, true }, { "Menge", 50, "RIGHT" }, { "Wert", 100, "RIGHT" }, { "Endet", 60, "RIGHT" } })
   open:SetPoint("TOPLEFT", 1, -29)
 
   local recentCard = card(p, colW, avail - openH - GAP, "Letzte Vorgänge")
   recentCard:SetPoint("TOPLEFT", openCard, "BOTTOMLEFT", 0, -GAP)
   local recent = grid(recentCard, colW - 2, avail - openH - GAP - 30, {
-    { "Zeit", 82 }, { "Art", 76 }, { "Item", 0 }, { "Menge", 44, "RIGHT" }, { "Betrag", 92, "RIGHT" } })
+    { "Zeit", 82 }, { "Art", 76 }, { "Item", 0, nil, true }, { "Menge", 44, "RIGHT" }, { "Betrag", 92, "RIGHT" } })
   recent:SetPoint("TOPLEFT", 1, -29)
 
   function p:Refresh()
@@ -600,9 +633,9 @@ PAGES.overview = function(p)
     local best = {}
     local stats = ns.ProfessionStats and ns.ProfessionStats.professions or {}
     for pid, s in pairs(stats) do
-      local name, profName = recipeName(pid, s[2])
+      local name, profName, itemID = recipeName(pid, s[2])
       if name and (s[3] or 0) > 0 then
-        table.insert(best, { name, profName or "", money(s[3]), profit = s[3],
+        table.insert(best, { name, profName or "", money(s[3]), profit = s[3], itemID = itemID,
           onClick = function() MainUI.Show("professions") end })
       end
     end
@@ -630,7 +663,7 @@ PAGES.overview = function(p)
     for i = 1, math.min(#list, 7) do
       local o = list[i]
       table.insert(rows, { o.e.n or (o.e.i and ns.ItemName(o.e.i)) or "?", tostring(o.u),
-        o.worth > 0 and money(o.worth) or "–", date("%H:%M", o.ends) })
+        o.worth > 0 and money(o.worth) or "–", date("%H:%M", o.ends), itemID = o.e.i })
     end
     open:SetRows(rows, "Keine offenen Auktionen")
     openInfo:SetText(#list > 0 and string.format("%d Stück · %s", units, money(value)) or "")
@@ -826,22 +859,23 @@ PAGES.analysis = function(p)
   local recipeCard = card(body, colW, listH, "Top-Rezepte")
   recipeCard:SetPoint("TOPLEFT", PAD, y)
   local recipes = grid(recipeCard, colW - 2, listH - 30, {
-    { "Rezept", 0 }, { "Beruf", 110 }, { "Gewinn", 96, "RIGHT" }, { "Nachfrage", 72, "RIGHT" } })
+    { "Rezept", 0, nil, true }, { "Beruf", 110 }, { "Gewinn", 96, "RIGHT" }, { "Nachfrage", 72, "RIGHT" } })
   recipes:SetPoint("TOPLEFT", 1, -29)
 
   local moverCard = card(body, colW, listH, "Gewinner und Verlierer")
   moverCard:SetPoint("TOPLEFT", PAD + colW + GAP, y)
   local half = (colW - 2 - GAP) / 2
-  local up = grid(moverCard, half, listH - 30, { { "Steigt", 0 }, { "", 64, "RIGHT" } })
+  local up = grid(moverCard, half, listH - 30, { { "Steigt", 0, nil, true }, { "", 64, "RIGHT" } })
   up:SetPoint("TOPLEFT", 1, -29)
-  local down = grid(moverCard, half, listH - 30, { { "Fällt", 0 }, { "", 64, "RIGHT" } })
+  local down = grid(moverCard, half, listH - 30, { { "Fällt", 0, nil, true }, { "", 64, "RIGHT" } })
   down:SetPoint("TOPLEFT", 1 + half + GAP, -29)
 
   local function moverRows(list)
     local rows = {}
     for i = 1, math.min(#(list or {}), 8) do
       local m = list[i]
-      table.insert(rows, { m.itemId and ns.ItemName(m.itemId) or "?", pct(m.change and m.change * 100, true) })
+      table.insert(rows, { m.itemId and ns.ItemName(m.itemId) or "?", pct(m.change and m.change * 100, true),
+        itemID = m.itemId })
     end
     return rows
   end
@@ -884,9 +918,10 @@ PAGES.analysis = function(p)
     local rows = {}
     for i = 1, math.min(#(s.topRecipes or {}), 5) do
       local r = s.topRecipes[i]
-      local _, profName = recipeName(r.professionId, r.id)
+      local _, profName, itemID = recipeName(r.professionId, r.id)
       table.insert(rows, { r.name or recipeName(r.professionId, r.id) or "?", profName or "",
-        r.profit and money(r.profit) or "–", r.demand and string.format("%.1f", r.demand) or "–" })
+        r.profit and money(r.profit) or "–", r.demand and string.format("%.1f", r.demand) or "–",
+        itemID = r.itemId or itemID })
     end
     recipes:SetRows(rows, "Keine Rezepte")
     local movers = s.movers or {}
