@@ -20,7 +20,7 @@ ns.SniperDetail = Detail -- old name, kept for callers that still use it
 local WIDTH = 340
 local FREE_HEIGHT = 560 -- height as a window of its own (docked it follows the anchor)
 local LINE = 16
-local CHART_H, SLOTS = 96, 48
+local CHART_H = 96
 local GREEN, ORANGE = "|cff5fd38d", "|cffffb547"
 
 local frame, body, scroll, itemID
@@ -171,23 +171,39 @@ local function hideFrom(list, first)
   for i = first, #list do list[i]:Hide() end
 end
 
--- Draws the 48 h history: quantity as muted bars, cheapest offer as an accent line
--- (broken where the item was sold out or no snapshot exists), sold-out hours as orange
--- ticks on the base line, buy up to (green) and sell at (white) as thin lines.
+-- Draws the history on a fixed 7-day axis ending now (same scale for every item, so charts
+-- compare): quantity as muted bars, cheapest offer as an accent line (broken where the item
+-- was sold out or no snapshot exists), sold-out slots as orange ticks on the base line, buy
+-- up to (green) and sell at (white) as thin lines. Time without data stays empty.
+local SPAN = 7 * 86400
+Detail.SPAN = SPAN
+
 local function drawChart(c, history, limit, sellAt)
   local Style = ns.Style
   local plot = c.plot
   local w = WIDTH - 34 -- body width minus the chart's margins
-  local slotW = w / SLOTS
   local prices, qty = history and history.prices or {}, history and history.qty or {}
+  local SLOTS = #prices
+  local step = history and history.step or 3600
+  local axisEnd = time()
+  local axisStart = axisEnd - SPAN
+  local slotW = w * step / SPAN
+  -- x of slot i on the fixed axis (nil: older than 7 days or in the future)
+  local function sx(i)
+    local t0 = history.start + (i - 1) * step
+    if t0 + step <= axisStart or t0 > axisEnd then return nil end
+    return (t0 - axisStart) / SPAN * w
+  end
   local lo, hi, qmax = nil, nil, 0
   for i = 1, SLOTS do
-    local p, q = prices[i], qty[i]
-    if p and p > 0 then lo = math.min(lo or p, p); hi = math.max(hi or p, p) end
-    if q and q > qmax then qmax = q end
+    if sx(i) then
+      local p, q = prices[i], qty[i]
+      if p and p > 0 then lo = math.min(lo or p, p); hi = math.max(hi or p, p) end
+      if q and q > qmax then qmax = q end
+    end
   end
   if not lo then
-    c.empty:SetText(history and "48 h lang nicht im Angebot" or "Kein Verlauf für dieses Item")
+    c.empty:SetText(history and "7 Tage lang nicht im Angebot" or "Kein Verlauf für dieses Item")
     c.empty:Show()
     hideFrom(c.bars, 1); hideFrom(c.lines, 1); hideFrom(c.ticks, 1)
     c.limit:Hide()
@@ -208,12 +224,12 @@ local function drawChart(c, history, limit, sellAt)
   -- quantity bars
   local nb = 0
   for i = 1, SLOTS do
-    local q = qty[i]
-    if q and q > 0 and qmax > 0 then
+    local q, x0 = qty[i], sx(i)
+    if x0 and q and q > 0 and qmax > 0 then
       nb = nb + 1
       local bar = pooled(c.bars, nb, function() return Style.Solid(plot, { 1, 1, 1, 0.09 }, "BORDER") end)
       bar:ClearAllPoints()
-      bar:SetPoint("BOTTOMLEFT", plot, "BOTTOMLEFT", (i - 1) * slotW + 0.5, 1)
+      bar:SetPoint("BOTTOMLEFT", plot, "BOTTOMLEFT", math.max(0, x0) + 0.5, 1)
       bar:SetSize(math.max(1, slotW - 1), math.max(1, (CHART_H - 2) * q / qmax))
     end
   end
@@ -221,9 +237,11 @@ local function drawChart(c, history, limit, sellAt)
   -- price line and sold-out ticks
   local nl, nt, last = 0, 0, nil
   for i = 1, SLOTS do
-    local p = prices[i]
-    local x = (i - 0.5) * slotW
-    if p and p > 0 then
+    local p, x0 = prices[i], sx(i)
+    local x = x0 and (x0 + slotW / 2)
+    if not x0 then
+      last = nil
+    elseif p and p > 0 then
       local yy = py(p)
       -- connected to the previous hour, or a short dash after a gap so it stays visible
       local x0, y0, x1 = x - 1.5, yy, x + 1.5
@@ -246,7 +264,7 @@ local function drawChart(c, history, limit, sellAt)
         nt = nt + 1
         local t = pooled(c.ticks, nt, function() return Style.Solid(plot, { 1, 0.71, 0.28, 0.9 }, "OVERLAY") end)
         t:ClearAllPoints()
-        t:SetPoint("BOTTOMLEFT", plot, "BOTTOMLEFT", (i - 1) * slotW + 0.5, 1)
+        t:SetPoint("BOTTOMLEFT", plot, "BOTTOMLEFT", math.max(0, x0) + 0.5, 1)
         t:SetSize(math.max(1, slotW - 1), 3)
       end
     end
@@ -272,11 +290,9 @@ local function drawChart(c, history, limit, sellAt)
   c.hi:SetText(money(hi))
   c.lo:SetText(money(lo))
   c.qtyMax:SetText(qmax > 0 and ("max " .. count(qmax) .. " Stück") or "")
-  local start, step = history.start, history.step
-  local lastT = start + (SLOTS - 1) * step
-  c.t1:SetText(stamp(start))
-  c.t2:SetText(stamp(start + (SLOTS / 2) * step))
-  c.t3:SetText(time() - lastT < 2 * 3600 and "jetzt" or stamp(lastT))
+  c.t1:SetText(stamp(axisStart))
+  c.t2:SetText(stamp(axisStart + SPAN / 2))
+  c.t3:SetText("jetzt")
   c.legend:SetText(ns.Style.ACCENT .. "Linie|r billigstes  ·  Balken Menge  ·  " .. ORANGE .. "orange|r ausverkauft"
     .. (limit and ("  ·  " .. GREEN .. "grün|r Kauf bis  ·  weiß Einstellen") or ""))
 end
@@ -410,7 +426,7 @@ render = function()
   end
 
   -- 2. History of the last 48 hours
-  section("Preis 48 Stunden")
+  section("Preis 7 Tage")
   if not chart then chart = createChart() end
   chart:ClearAllPoints()
   chart:SetPoint("TOPLEFT", body, "TOPLEFT", 4, -y)
