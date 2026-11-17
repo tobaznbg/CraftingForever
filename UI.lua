@@ -47,7 +47,7 @@ local function createFrame()
 
   local brand = Style.Text(frame, 13)
   brand:SetPoint("TOPLEFT", PADDING, -7)
-  brand:SetText(Style.ACCENT .. "Crafting|rForever")
+  brand:SetText(Style.ACCENT .. "m4|r-companion")
 
   local berufe = Style.Button(frame, "Berufe", 64, 18, function() ns.PlannerUI.Toggle() end)
   berufe:SetPoint("TOPRIGHT", -5, -4)
@@ -201,9 +201,7 @@ function UI.SetShown(shown)
   if shown then UI.Refresh() end
 end
 
-ns.OnReady(function()
-  if ns.db.ui.shown then UI.SetShown(true) end
-end)
+-- The farming tracker window is hidden for now (to be rebuilt); "/cf farm" still opens it.
 
 SLASH_M4COMPANION1 = "/cf"
 SLASH_M4COMPANION2 = "/m4"
@@ -219,9 +217,11 @@ SlashCmdList.M4COMPANION = function(msg)
     ns.PlannerUI.Toggle()
   elseif msg == "handel" or msg == "h" then
     ns.PlannerUI.Show("ledger")
-  elseif msg == "hilfe" or msg == "help" then
-    print("|cffffd100M4:|r /cf – Fenster an/aus, /cf berufe – Berufe-Fenster, /cf handel – Handelsbuch, /cf scan – AH-Vollscan, /cf neu – neue Sitzung")
-  else
+  elseif msg == "farm" then
     UI.SetShown(not (frame and frame:IsShown()))
+  elseif msg == "hilfe" or msg == "help" then
+    print("|cffffd100M4:|r /m4 – Fenster, /m4 handel – Handelsbuch, /m4 scan – AH-Vollscan, /m4 farm – Farm-Tracker")
+  else
+    if ns.MainUI then ns.MainUI.Toggle() else ns.PlannerUI.Toggle() end
   end
 end

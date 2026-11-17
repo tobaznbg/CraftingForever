@@ -1,6 +1,7 @@
 ## Interface: 16001
 ## Title: m4-companion
-## Notes: Tracks gathering and crafting value against its own auction house scans.
+## Notes: made four – Auktionshaus-Preise, Trends, Crafting-Gewinne und Handelsbuch für WoW Forever.
+## IconTexture: Interface\AddOns\m4-companion\media\icon
 ## Author: Tobias Vonau
 ## Version: 0.5.0
 ## SavedVariables: M4CompanionDB
@@ -8,6 +9,7 @@
 Core.lua
 Style.lua
 Item.lua
+Status.lua
 Tracker.lua
 Data_Leatherworking.lua
 Recipes.lua
@@ -41,3 +43,4 @@ AuctionScan.lua
 AuctionProbe.lua
 Tooltip.lua
 VendorPrices.lua
+Minimap.lua

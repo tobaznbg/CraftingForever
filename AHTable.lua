@@ -229,7 +229,7 @@ local function refresh(t)
   for key, b in pairs(t.viewButtons or {}) do b:SetActive(key == t.view) end
   local active = activeFilters(t)
   t.filterButton.label:SetText(active > 0 and string.format("Filter (%d)", active) or "Filter")
-  local info = t.info and t.info() or nil
+  local info = t.info and t.info() or (ns.Status and ns.Status.Text()) or nil
   t.countText:SetText((info and (info .. "   ·   ") or "") .. string.format("%d Einträge", #t.list))
 end
 
