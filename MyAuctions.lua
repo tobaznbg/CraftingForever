@@ -5,6 +5,12 @@
 -- ns.AHSearch (one search a second, handed to the sniper while it runs).
 -- Nothing is cancelled or posted automatically: MyAuctions.Cancel cancels exactly one
 -- auction and is only called from a click on the row's button.
+-- Every answer is also kept per character for the companion app (Discord messages on sales):
+--   ns.db.owned[charKey] = { t = time(), g = GetMoney(), list = { { id = auctionID, i = itemID,
+--     u = unit price, b = buyoutAmount, q = quantity, tl = timeLeftSeconds, s = 1 if sold }... },
+--     cx = { [auctionID] = time() of a cancel in game (AUCTION_CANCELED), kept CANCEL_KEEP } }
+-- Discord settings (read by the app, applied by the server): ns.db.settings.discord, see
+-- MyAuctions.Discord.
 local ADDON, ns = ...
 
 local My = {}
@@ -244,6 +250,53 @@ function My.Rows()
   return rows
 end
 
+-- Own auctions for the companion app: the last answer of this character (expired ones left out).
+local function storeOwned()
+  if not (ns.db and ns.CharKey) then return end
+  local list = {}
+  for _, a in ipairs(owned) do
+    if a.auctionID and not a.expired then
+      local offers = ns.AHSearch and ns.AHSearch.Last(a.itemID) or nil
+      table.insert(list, { id = a.auctionID, i = a.itemID, u = unitOf(a, offers), b = a.buyout,
+        q = a.quantity or 1, tl = a.timeLeftSeconds, s = a.sold and 1 or nil })
+    end
+  end
+  ns.db.owned = ns.db.owned or {}
+  local key = ns.CharKey()
+  local prev = ns.db.owned[key]
+  ns.db.owned[key] = { t = time(), g = GetMoney and GetMoney() or nil, list = list, cx = prev and prev.cx }
+end
+
+-- A cancel in game: the server must not report this auction as sold.
+local CANCEL_KEEP = 3 * 86400
+local function storeCancel(auctionID)
+  if not (ns.db and ns.CharKey and type(auctionID) == "number") then return end
+  ns.db.owned = ns.db.owned or {}
+  local key = ns.CharKey()
+  local o = ns.db.owned[key] or { t = time(), list = {} }
+  ns.db.owned[key] = o
+  local cx, now = {}, time()
+  for id, t in pairs(o.cx or {}) do
+    if now - t < CANCEL_KEEP then cx[id] = t end
+  end
+  cx[auctionID] = now
+  o.cx = cx
+end
+My.StoreOwned = storeOwned
+
+-- Discord messages of the companion server (ns.db.settings.discord): sold auctions, snipes from
+-- snipeMin copper profit on. Defaults filled in place.
+My.DISCORD_DEFAULTS = { sales = true, snipes = true, snipeMin = 100000 }
+function My.Discord()
+  ns.db.settings = ns.db.settings or {}
+  local d = ns.db.settings.discord
+  if type(d) ~= "table" then d = {}; ns.db.settings.discord = d end
+  for k, v in pairs(My.DISCORD_DEFAULTS) do
+    if d[k] == nil then d[k] = v end
+  end
+  return d
+end
+
 function My.Count() return #owned end
 function My.Updated() return ownedT end
 
@@ -272,13 +325,16 @@ end
 if ns.On then
   ns.On("OWNED_AUCTIONS_UPDATED", function()
     readOwned()
+    ns.Safe(storeOwned)
     if run then run.querying = nil end
     if wantCheck then startSearches() else changed() end
   end)
-  ns.On("AUCTION_CANCELED", function()
+  ns.On("AUCTION_CANCELED", function(_, auctionID)
+    ns.Safe(storeCancel, auctionID)
     if My.Query() then changed() end
   end)
   ns.On("AUCTION_HOUSE_CLOSED", function()
     run, wantCheck, failed = nil, false, {}
   end)
 end
+if ns.OnReady then ns.OnReady(function() My.Discord() end) end

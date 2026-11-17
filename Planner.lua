@@ -63,7 +63,9 @@ function Planner.Candidates(scanRecipes, data, buyCost, vendorSell, ahSell, all)
   local list, skipped = {}, {}
   for recipeID, recipe in pairs(scanRecipes) do
     local d = data[recipeID]
+    -- Recipes known from the start (learned at skill 1) carry no source in the data.
     local trainer = hasSource(d and d[7], "6")
+      or (d ~= nil and (d[7] == nil or d[7] == "") and (d[5] or d[1] or 99) <= 1)
     local vendorPattern = not trainer and hasSource(d and d[7], "5")
     local special = (Planner.SPECIALIZATION[recipeID] or (d and d.spec)) and not recipe.learned
       and all ~= true
