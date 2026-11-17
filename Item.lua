@@ -17,8 +17,9 @@
 --   vendorSell what a merchant pays, vendorBuy what a merchant charges (nil if unknown)
 -- }
 -- Derived (the only formulas for these):
---   Item.SellNet(e)  selling one unit: undercut the cheapest offer by 1 copper, minus the
---                    5 % cut (no offer: the average); a merchant if he pays more
+--   Item.SellNet(e)  selling one unit: the lower of (cheapest offer - 1 copper) and the
+--                    average, minus the 5 % cut; a merchant if he pays more (same rule as
+--                    the cloud's ahprofessions)
 --   Item.BuyCost(e)  buying one unit: merchant, else cheapest offer, else the average
 --   Item.Value(e)    what one unit is worth to the player (= SellNet)
 -- Producers report live observations with Item.Observe (single item searches).
@@ -129,7 +130,10 @@ function Item.Observe(itemID, cheapest, t)
 end
 
 function Item.SellNet(e)
+  -- Sustained price: undercut the cheapest offer, but never above the 14-day average
+  -- (one seller listing far above the usual price does not make it sellable there).
   local base = e.now and (e.now - 1) or e.avg
+  if base and e.avg then base = math.min(base, e.avg) end
   local ah = base and base > 0 and math.floor(base * (1 - CUT)) or 0
   local vendor = e.vendorSell or 0
   if ah > 0 and ah >= vendor then return ah, true end
