@@ -100,6 +100,27 @@ function Item.Get(itemID)
   return e
 end
 
+-- All offers of the item in the own full scan, cheapest first: { { unit, count }... }, and
+-- the scan time; nil without a scan. (The only place that reads the scan's listings.)
+function Item.Listings(itemID)
+  local last = ns.db and ns.db.ah and ns.db.ah.last
+  local keys = last and last.items and last.items[itemID]
+  if not keys then return nil, last and last.t end
+  local list = {}
+  for _, key in ipairs(keys) do
+    local unit, count = key:match("^(%d+):(%d+):")
+    if unit then table.insert(list, { unit = tonumber(unit), count = tonumber(count) }) end
+  end
+  table.sort(list, function(x, y) return x.unit < y.unit end)
+  return list, last.t
+end
+
+-- Items in the own full scan (itemID -> true).
+function Item.ScannedItems()
+  local last = ns.db and ns.db.ah and ns.db.ah.last
+  return last and last.items or {}
+end
+
 -- A single item search saw this cheapest offer (nil = none on offer) right now.
 function Item.Observe(itemID, cheapest, t)
   observed[itemID] = { now = cheapest, t = t or (time and time()) or 0 }
