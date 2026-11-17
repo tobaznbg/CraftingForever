@@ -101,7 +101,7 @@ function Sniper.WatchCandidates()
   local discount = 1 - set.maxShare - ns.Deals.CUT
   for itemID in pairs(house.items) do
     local item = ns.Item(itemID)
-    local avg, demand = item.avg, item.demand
+    local avg, demand = ns.Deals.Reference(itemID, nil), item.demand
     if avg and demand and demand >= set.watchMinDemand and avg * set.maxShare <= money then
       local stack = math.max(1, math.min(20, (item.quantity or 1) / math.max(1, item.offers or 1)))
       if discount * avg * stack >= set.minProfit then

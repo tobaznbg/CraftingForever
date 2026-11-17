@@ -51,7 +51,12 @@ end
 
 -- Reference value and a short source text, or nil.
 function Deals.Reference(itemID, house)
-  local avg = ns.Item(itemID).avg
+  local e = ns.Item(itemID)
+  local avg = e.avg
+  -- While our own history is short, the average leans on the TSM start value, which can be
+  -- far above this realm (Untoter Motor: 16g average, 4g real). Buying never trusts more
+  -- than yesterday's real daily price here.
+  if e.yesterday and (not avg or e.yesterday < avg) then avg = e.yesterday end
   if house and (not avg or house < avg) then return house, "AH-Preis" end
   if avg then return avg, "Ø" end
   return nil
