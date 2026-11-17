@@ -76,7 +76,11 @@ local function rows(filter)
             if filter ~= "profit" or (profit > 0 and onAH) then
               local learn, need = nil, nil
               if not r.learned then learn, need = learnInfo(scan.professionID, recipeID) end
+              -- 0 learned, 1 learnable now, 2 later: what can be made now comes first.
+              local group = r.learned and 0 or ((need and need > (scan.rank or 0)) and 2 or 1)
+              local fpd = m and m.soldPerDay or 0
               table.insert(list, { itemID = r.out, recipe = r.name, profession = scan.profession,
+                score = (2 - group) * 1e12 + profit, potential = profit * fpd,
                 learned = r.learned and true or false, learn = learn, tooHigh = need and need > (scan.rank or 0),
                 cost = cost, value = value, profit = profit, onAH = onAH,
                 margin = cost > 0 and profit / cost or 0, fpd = m and m.soldPerDay or 0,
@@ -92,27 +96,31 @@ end
 
 ns.AHTable.Add({
   id = "Crafting", label = "Herstellen", title = "Herstellen – was sich mit gekauften Materialien lohnt",
-  sort = "profit",
+  sort = "score",          -- learned first, then learnable now, then later; each by profit
+  salesFilter = true,
   filters = { { "profit", "Mit Gewinn" }, { "learned", "Nur gelernte" }, { "all", "Alle Rezepte" } },
-  rowColor = function(e) return not e.learned and { 0.75, 0.15, 0.15, 0.22 } or nil end,
+  rowColor = function(e) return not e.learned and { 0.85, 0.25, 0.25 } or nil end,
+  subtitle = function(e)
+    if e.learned then return e.profession .. "  ·  gelernt" end
+    return (e.tooHigh and "|cffff6b6b" or "|cffffb547") .. "nicht gelernt: " .. e.learn .. "|r"
+  end,
   columns = {
     { "name", "Ergebnis", 0, "LEFT", function(e)
       return e.name .. (e.produced > 1 and string.format(" |cff99999ex%g|r", e.produced) or "")
     end },
-    { "learn", "Lernen", 170, "LEFT", function(e)
-      if e.learned then return "|cff99999egelernt|r" end
-      return (e.tooHigh and "|cffff6b6b" or "|cffffb547") .. e.learn .. "|r"
+    { "cost", "Material", 95, "RIGHT", function(e) return money(e.cost) end, true },
+    { "value", "Verkauf", 95, "RIGHT", function(e)
+      return (e.onAH and "" or "|cff99999eH |r") .. money(e.value)
     end },
-    { "cost", "Material", 100, "RIGHT", function(e) return money(e.cost) end, true },
-    { "value", "Verkauf netto", 110, "RIGHT", function(e)
-      return money(e.value) .. (e.onAH and "" or " |cff99999e(Händler)|r")
-    end },
-    { "profit", "Gewinn", 100, "RIGHT", function(e)
+    { "profit", "Gewinn", 95, "RIGHT", function(e)
       return (e.profit >= 0 and "|cff5fd38d" or "|cffff6b6b") .. (e.profit < 0 and "-" or "")
         .. money(math.abs(e.profit)) .. "|r"
     end },
-    { "margin", "Marge", 70, "RIGHT", function(e) return string.format("%d %%", math.floor(e.margin * 100 + 0.5)) end },
-    { "fpd", "Verk./Tag EU", 90, "RIGHT", function(e) return string.format("%.0f", e.fpd) end, true },
+    { "potential", "Gewinn×Verk.", 95, "RIGHT", function(e)
+      return e.potential > 0 and money(e.potential) or "–"
+    end, true },
+    { "margin", "Marge", 60, "RIGHT", function(e) return string.format("%d %%", math.floor(e.margin * 100 + 0.5)) end },
+    { "fpd", "Verk./Tag", 70, "RIGHT", function(e) return string.format("%.0f", e.fpd) end, true },
   },
   rows = rows,
   status = function(list)
@@ -122,7 +130,8 @@ ns.AHTable.Add({
       if key:sub(1, #prefix) == prefix then table.insert(profs, scan.profession) end
     end
     if #profs == 0 then return "Noch kein Beruf bekannt: einmal das Berufsfenster öffnen, dann erscheinen die Rezepte hier." end
-    return string.format("%d Rezepte  ·  Berufe: %s  ·  rot = noch nicht gelernt (Musterpreis nicht eingerechnet)  ·"
-      .. " Material: Händler, sonst billigstes AH-Angebot  ·  Verkauf: Marktwert hier minus 5 %% Gebühr", #list, table.concat(profs, ", "))
+    return string.format("%d Rezepte (%s)  ·  roter Rand = noch nicht gelernt, Musterpreis nicht eingerechnet\n"
+      .. "Material: Händler, sonst billigstes AH-Angebot  ·  Verkauf: Marktwert hier − 5 %% Gebühr (H = Händler)"
+      .. "  ·  Verk./Tag = EU  ·  Gewinn×Verk. = Gewinn × EU-Verkäufe pro Tag", #list, table.concat(profs, ", "))
   end,
 })

@@ -11,18 +11,29 @@
 --   status = function(list) -> text,
 --   filters = { { key, label }... } (optional, first is the default),
 --   sort = key, desc = true,
---   rowColor = function(entry) -> { r, g, b, a } or nil (optional row tint),
+--   rowColor = function(entry) -> { r, g, b } or nil (optional marker: bar + faint tint),
+--   subtitle = function(entry) -> text (optional second line under the name),
+--   salesFilter = true: button "Verk./Tag ≥ n" that hides entries with entry.fpd < n
+--                 (cycles through SALES_STEPS, remembered per tab),
 -- }
 local ADDON, ns = ...
 
 local AHTable = {}
 ns.AHTable = AHTable
 
-local ROW, HEADER, TOOLBAR = 24, 22, 28
-local BUTTON_W = 70
+local ROW, HEADER, TOOLBAR = 30, 22, 28
+local FOOTER = 40          -- two status lines
+local BUTTON_W = 64
 local MAX_ROWS = 40
 
+local SALES_STEPS = { 0, 1, 2, 5, 10, 25 }
 local defs = {}       -- in tab order
+
+local function settings(t)
+  ns.db.ahTable = ns.db.ahTable or {}
+  ns.db.ahTable[t.id] = ns.db.ahTable[t.id] or { minSales = 1 }
+  return ns.db.ahTable[t.id]
+end
 local created = false
 
 -- Switches to Blizzard's buy tab and searches the item there.
@@ -46,6 +57,13 @@ end
 
 local function build(t)
   t.list = t.rows(t.filter) or {}
+  if t.salesFilter then
+    local min, kept = settings(t).minSales or 0, {}
+    for _, e in ipairs(t.list) do
+      if (e.fpd or 0) >= min then table.insert(kept, e) end
+    end
+    t.list = kept
+  end
   for _, e in ipairs(t.list) do e.name = ns.ItemName(e.itemID) or ("#" .. e.itemID) end
   sortList(t)
 end
@@ -54,15 +72,20 @@ local function refresh(t)
   local f = t.frame
   if not f or not f:IsShown() then return end
   local top = HEADER + (t.filters and TOOLBAR or 0)
-  local n = math.max(1, math.min(MAX_ROWS, math.floor((f:GetHeight() - top - 34) / ROW)))
+  local n = math.max(1, math.min(MAX_ROWS, math.floor((f:GetHeight() - top - FOOTER) / ROW)))
   t.offset = math.max(0, math.min(t.offset, #t.list - n))
   for i, r in ipairs(t.rowFrames) do
     local e = i <= n and t.list[t.offset + i] or nil
     r.entry = e
     if e then
-      local tint = t.rowColor and t.rowColor(e)
-      r.tint:SetShown(tint ~= nil)
-      if tint then r.tint:SetColorTexture(unpack(tint)) end
+      local mark = t.rowColor and t.rowColor(e)
+      r.tint:SetShown(mark ~= nil)
+      r.bar:SetShown(mark ~= nil)
+      if mark then
+        r.tint:SetColorTexture(mark[1], mark[2], mark[3], 0.08)
+        r.bar:SetColorTexture(mark[1], mark[2], mark[3], 1)
+      end
+      if r.sub then r.sub:SetText(t.subtitle(e) or "") end
       r.icon:SetTexture(((C_Item and C_Item.GetItemIconByID) or GetItemIcon)(e.itemID))
       e.name = ns.ItemName(e.itemID) or e.name
       for _, c in ipairs(t.columns) do
@@ -77,6 +100,9 @@ local function refresh(t)
     h.label:SetTextColor(unpack(h.key == t.sortKey and ns.Style.C.accent or ns.Style.C.muted))
   end
   for key, b in pairs(t.filterButtons or {}) do b:SetActive(key == t.filter) end
+  if t.salesButton then
+    t.salesButton.label:SetText(string.format("Verk./Tag ≥ %d", settings(t).minSales or 0))
+  end
   t.statusText:SetText(t.status and t.status(t.list) or "")
 end
 
@@ -106,6 +132,18 @@ local function createFrame(t, parent)
     end
     top = top + TOOLBAR
   end
+  if t.salesFilter then
+    t.salesButton = Style.Button(f, "", 110, 20, function()
+      local s, nextValue = settings(t), SALES_STEPS[1]
+      for i, v in ipairs(SALES_STEPS) do
+        if v == (s.minSales or 0) then nextValue = SALES_STEPS[i % #SALES_STEPS + 1] end
+      end
+      s.minSales, t.offset = nextValue, 0
+      build(t)
+      refresh(t)
+    end)
+    t.salesButton:SetPoint("TOPRIGHT", -8, -5)
+  end
 
   -- Column layout: the name column takes what the fixed columns leave.
   local fixed = BUTTON_W + 16
@@ -115,8 +153,9 @@ local function createFrame(t, parent)
     for i, c in ipairs(t.columns) do
       local cell = makeCell(c)
       if i == 1 then
-        cell:SetPoint("LEFT", row, "LEFT", 30, 0)
-        cell:SetPoint("RIGHT", row, "RIGHT", -fixed, 0)
+        local y = (t.subtitle and row ~= t.head) and 7 or 0
+        cell:SetPoint("LEFT", row, "LEFT", 34, y)
+        cell:SetPoint("RIGHT", row, "RIGHT", -fixed, y)
       else
         x = x + c[3]
         cell:SetPoint("RIGHT", row, "RIGHT", -(fixed - x + 8), 0)
@@ -126,6 +165,7 @@ local function createFrame(t, parent)
   end
 
   local head = CreateFrame("Frame", nil, f)
+  t.head = head
   head:SetPoint("TOPLEFT", 1, -top)
   head:SetPoint("TOPRIGHT", -1, -top)
   head:SetHeight(HEADER)
@@ -162,11 +202,16 @@ local function createFrame(t, parent)
     r.tint = Style.Solid(r, { 0, 0, 0, 0 }, "BACKGROUND", 1)
     r.tint:SetAllPoints()
     r.tint:Hide()
+    r.bar = Style.Solid(r, { 0, 0, 0, 0 }, "ARTWORK")
+    r.bar:SetPoint("TOPLEFT")
+    r.bar:SetPoint("BOTTOMLEFT")
+    r.bar:SetWidth(3)
+    r.bar:Hide()
     local hover = Style.Solid(r, Style.C.hover, "ARTWORK")
     hover:SetAllPoints()
     hover:Hide()
     r.icon = r:CreateTexture(nil, "ARTWORK")
-    r.icon:SetSize(18, 18)
+    r.icon:SetSize(22, 22)
     r.icon:SetPoint("LEFT", 8, 0)
     r.cells = {}
     place(r, function(c)
@@ -176,6 +221,13 @@ local function createFrame(t, parent)
       r.cells[c[1]] = fs
       return fs
     end)
+    if t.subtitle then
+      r.sub = Style.Text(r, 11)
+      r.sub:SetPoint("LEFT", r, "LEFT", 34, -7)
+      r.sub:SetPoint("RIGHT", r.cells.name, "RIGHT", 0, 0)
+      r.sub:SetJustifyH("LEFT")
+      r.sub:SetTextColor(unpack(Style.C.muted))
+    end
     local b = Style.Button(r, "Suchen", BUTTON_W, 18, function()
       if r.entry then search(r.entry.itemID) end
     end, Style.C.accent)
@@ -199,8 +251,11 @@ local function createFrame(t, parent)
   end)
 
   t.statusText = Style.Text(f, 11)
-  t.statusText:SetPoint("BOTTOMLEFT", 10, 10)
-  t.statusText:SetPoint("BOTTOMRIGHT", -10, 10)
+  t.statusText:SetPoint("BOTTOMLEFT", 10, 6)
+  t.statusText:SetPoint("BOTTOMRIGHT", -10, 6)
+  t.statusText:SetHeight(FOOTER - 10)
+  t.statusText:SetWordWrap(true)
+  t.statusText:SetJustifyV("MIDDLE")
   t.statusText:SetJustifyH("LEFT")
   t.statusText:SetTextColor(unpack(Style.C.muted))
 
@@ -228,7 +283,8 @@ local function createAll(parent)
   if lib and lib.internalState and #lib.internalState.Tabs > 0 then
     anchor = lib.internalState.Tabs[#lib.internalState.Tabs]
   end
-  local offsetX = WOW_PROJECT_ID == WOW_PROJECT_MAINLINE and 3 or -14
+  -- Forever uses the retail auction house frame: retail tab spacing.
+  local offsetX = 3
   for _, t in ipairs(defs) do
     createFrame(t, parent)
     local tab = CreateFrame("Button", "CraftingForeverAHTab" .. t.id, parent, "AuctionHouseFrameDisplayModeTabTemplate")

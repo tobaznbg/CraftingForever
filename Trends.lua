@@ -21,12 +21,12 @@ ns.AHTable.Add({
   filters = { { "up", "Steigend" }, { "down", "Fallend" } },
   columns = {
     { "name", "Item", 0, "LEFT" },
-    { "mvHere", "Wert hier", 100, "RIGHT", function(e) return money(e.mvHere) end },
-    { "houseChange", "Trend hier", 90, "RIGHT", function(e) return pct(e.houseChange) end },
-    { "euMv", "EU jetzt", 100, "RIGHT", function(e) return money(e.euMv) end, true },
-    { "euHist", "EU 60 T", 100, "RIGHT", function(e) return money(e.euHist) end, true },
-    { "change", "Trend EU", 90, "RIGHT", function(e) return pct(e.change) end },
-    { "fpd", "Verk./Tag EU", 90, "RIGHT", function(e) return string.format("%.0f", e.fpd) end, true },
+    { "mvHere", "Wert hier", 90, "RIGHT", function(e) return money(e.mvHere) end },
+    { "houseChange", "Trend hier", 75, "RIGHT", function(e) return pct(e.houseChange) end },
+    { "euMv", "EU jetzt", 90, "RIGHT", function(e) return money(e.euMv) end, true },
+    { "euHist", "EU 60 T", 90, "RIGHT", function(e) return money(e.euHist) end, true },
+    { "change", "Trend EU", 75, "RIGHT", function(e) return pct(e.change) end },
+    { "fpd", "Verk./Tag", 65, "RIGHT", function(e) return string.format("%.0f", e.fpd) end, true },
   },
   rows = function(filter)
     local list, house = {}, ns.AHData and ns.AHData[113]
@@ -47,7 +47,7 @@ ns.AHTable.Add({
     if not data then return "Keine Trenddaten (Data_Trend.lua fehlt)." end
     local hours = house and house.hours or 0
     return string.format("%d Items  ·  Trend EU = TSM-Marktwert gegen 60-Tage-Schnitt, bereinigt um die allgemeine"
-      .. " Preisbewegung (%+d %%)  ·  TSM-Daten %s  ·  Trend hier: %s",
+      .. " Preisbewegung (%+d %%)\nTSM-Daten %s  ·  Trend hier: %s  ·  Verk./Tag = EU",
       #list, math.floor((data.level - 1) * 100 + 0.5), data.updated or "–",
       hours >= HOUSE_MIN_HOURS and "Wert gegen 7-Tage-Median" or
         string.format("erst ab %d h Sammlerdaten (jetzt %d h)", HOUSE_MIN_HOURS, hours))
