@@ -130,7 +130,7 @@ end
 -- Watched recipe of the item ({ profession, skill, product, usual }) while recipes are watched.
 function Sniper.RecipeInfo(itemID)
   local r = ns.RecipeWatch and ns.RecipeWatch[itemID]
-  if not r or not ns.Deals.Settings().recipeWatch then return nil end
+  if not r or not ns.Deals.Settings().recipeWatch or ns.Deals.Falling(itemID) then return nil end
   return r
 end
 
@@ -157,7 +157,10 @@ end
 function Sniper.RecipeItems()
   local list = {}
   if not ns.RecipeWatch or not ns.Deals.Settings().recipeWatch then return list end
-  for itemID in pairs(ns.RecipeWatch) do table.insert(list, itemID) end
+  -- Falling recipes (Deals.Falling, same setting as the items) stay off the list as well.
+  for itemID in pairs(ns.RecipeWatch) do
+    if not ns.Deals.Falling(itemID) then table.insert(list, itemID) end
+  end
   table.sort(list)
   return list
 end

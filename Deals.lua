@@ -22,7 +22,7 @@ Deals.DEFAULTS = {
   recipeWatch = true,   -- watch the tradeable recipes of ns.RecipeWatch as well (own category)
   recipeMax = 0.7,      -- recipe hit: offer at most this share of its usual price (most are listed near it)
   fallLimit = 0.10,     -- leave out items whose 3-day average is at least this far below the 14-day
-                        -- one (Deals.Falling); 0 = keep falling items. Buying into a falling market
+                        -- one (Deals.Falling); 0 = keep falling items, -1 = only rising items. Buying into a falling market
                         -- means reselling below today's price.
 }
 local CUT = 0.05
@@ -31,10 +31,13 @@ local CUT = 0.05
 -- (setting, default 10 %) below the 14-day one. (The direction 3 < 7 < 14 alone flagged most items, since prices
 -- drift down slightly after the launch.) Same rule as the cloud's snipes (ahnotify.falling_items).
 Deals.FALLING_PPO = -0.10 -- default of the setting fallLimit; the cloud's snipes use it fixed
+-- fallLimit < 0 means "only rising": everything not at least RISING up counts as falling.
+Deals.RISING = 0.03 -- same as the word "steigt" (Item.TrendText)
 function Deals.Falling(itemID)
   local limit = Deals.Settings().fallLimit or 0
-  if limit <= 0 then return false end
+  if limit == 0 then return false end
   local e = ns.Item(itemID)
+  if limit < 0 then return not (e.trend ~= nil and e.trend >= Deals.RISING) end
   return e.trend ~= nil and e.trend <= -limit
 end
 

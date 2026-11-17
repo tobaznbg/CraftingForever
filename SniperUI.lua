@@ -201,16 +201,18 @@ local function build(page, width, height)
     function() return S().maxPrice == 0 and "Kein Limit" or money(S().maxPrice) end,
     function() stepMaxPrice(-1) end, function() stepMaxPrice(1) end))
   -- Falling items (Deals.Falling): left out from this fall on, "aus" keeps them.
-  local FALL_STEPS = { 0, 0.03, 0.05, 0.10, 0.15, 0.20, 0.30 }
+  -- strict -> lenient: only rising, from -1 %, ... -30 %, off ("−" makes it stricter)
+  local FALL_STEPS = { -1, 0.01, 0.03, 0.05, 0.10, 0.15, 0.20, 0.30, 0 }
   local function stepFall(dir)
-    local cur, idx = S().fallLimit or 0, 1
-    for i, v in ipairs(FALL_STEPS) do if cur >= v - 1e-9 then idx = i end end
+    local cur, idx = S().fallLimit or 0, #FALL_STEPS
+    for i, v in ipairs(FALL_STEPS) do if math.abs(v - cur) < 1e-9 then idx = i end end
     set("fallLimit", FALL_STEPS[math.max(1, math.min(#FALL_STEPS, idx + dir))])
   end
   table.insert(updates, stepper(settings, -294, "Fallende Items auslassen ab",
     function()
       local v = S().fallLimit or 0
-      return v <= 0 and "aus" or string.format("−%d %%", math.floor(v * 100 + 0.5))
+      if v < 0 then return "nur steigende" end
+      return v == 0 and "aus" or string.format("−%d %%", math.floor(v * 100 + 0.5))
     end,
     function() stepFall(-1) end, function() stepFall(1) end))
   local reset = Style.Button(settings, "Standard", 80, 18, function()
