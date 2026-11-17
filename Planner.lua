@@ -63,13 +63,17 @@ function Planner.Candidates(scanRecipes, data, buyCost, vendorSell, ahSell, all)
   local list, skipped = {}, {}
   for recipeID, recipe in pairs(scanRecipes) do
     local d = data[recipeID]
-    -- Recipes known from the start (learned at skill 1) carry no source in the data.
-    local trainer = hasSource(d and d[7], "6")
-      or (d ~= nil and (d[7] == nil or d[7] == "") and (d[5] or d[1] or 99) <= 1)
+    -- Start recipes (orange from skill 0/1, given when the profession is learned) carry no
+    -- source in the data; their "learned at" (d[5]) is the first rank's cap, not a skill.
+    local startRecipe = d ~= nil and (d[7] == nil or d[7] == "") and (d[1] or 99) <= 1
+    local trainer = hasSource(d and d[7], "6") or startRecipe
+    -- Transmutations have a cooldown (Forever: 1 hour, Arcanite ~2 days): they cannot be
+    -- crafted dozens of times in a row, so they are no way to raise the skill.
+    local cooldown = recipe.name and recipe.name:find("^Transmutieren") ~= nil
     local vendorPattern = not trainer and hasSource(d and d[7], "5")
     local special = (Planner.SPECIALIZATION[recipeID] or (d and d.spec)) and not recipe.learned
       and all ~= true
-    if d and (recipe.out or recipe.noOutput) and not special
+    if d and (recipe.out or recipe.noOutput) and not special and not cooldown
         and (all == true or recipe.learned or trainer or (all == "vendor" and vendorPattern)) then
       local cost, missing = 0, nil
       for _, reagent in ipairs(recipe.r or {}) do
@@ -92,7 +96,7 @@ function Planner.Candidates(scanRecipes, data, buyCost, vendorSell, ahSell, all)
           name = recipe.name,
           learned = recipe.learned and true or false,
           -- A learned recipe can be used at any skill (its learn level is irrelevant).
-          learnAt = recipe.learned and 0 or (d[5] or d[1]),
+          learnAt = recipe.learned and 0 or (startRecipe and 0) or (d[5] or d[1]),
           artisan = not recipe.learned and trainer and (d[5] or d[1] or 0) >= Planner.ARTISAN_FROM or nil,
           learnCost = recipe.learned and 0 or (d[6] or 0),
           colors = { d[1], d[2], d[3], d[4] },
