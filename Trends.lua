@@ -5,7 +5,7 @@ local ADDON, ns = ...
 local function money(c) return c and ns.FormatMoney(c, true) or "–" end
 local function pct(v)
   if not v then return "–" end
-  local s = string.format("%+d %%", math.floor(v * 100 + (v >= 0 and 0.5 or -0.5)))
+  local s = string.format("%+d %%", (math.floor(math.abs(v) * 100 + 0.5) * (v < 0 and -1 or 1)))
   return (v >= 0 and "|cff5fd38d" or "|cffff6b6b") .. s .. "|r"
 end
 
