@@ -377,8 +377,12 @@ render = function()
   -- 3b. What one unit cost the player (ns.Profit.UnitCost) and the room left to undercut.
   local cost, costSource = nil, nil
   if ns.Profit and ns.Profit.UnitCost then cost, costSource = ns.Profit.UnitCost(itemID) end
+  section("Dein Einstand")
+  if not cost then
+    line("Einstand pro Stück", Style.MUTED .. "unbekannt|r")
+    line("", Style.MUTED .. "kein Kauf, keine Herstellung im Handelsbuch, kein gelerntes Rezept|r")
+  end
   if cost then
-    section("Dein Einstand")
     line("Einstand pro Stück", money(math.floor(cost + 0.5)) .. "  " .. Style.MUTED .. costSource .. "|r")
     line("Ohne Verlust ab", money(ns.Profit.BreakEven(cost)) .. "  " .. Style.MUTED .. "nach 5 % Gebühr|r")
     local other
