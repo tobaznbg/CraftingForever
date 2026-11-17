@@ -19,6 +19,16 @@ do
   for g = 105, 5000, 5 do table.insert(MAX_PRICE_STEPS, g * GOLD) end
 end
 
+-- "+4 % steigt" (green) / "-12 % fällt" (red) / sideways muted; "–" without data (ns.Item).
+local function trendText(itemID)
+  local e = ns.Item(itemID)
+  local text = ns.Item.TrendText(e)
+  if not text then return MUTED .. "–|r" end
+  if e.trend and e.trend >= 0.03 then return GREEN .. text .. "|r" end
+  if e.trend and e.trend <= -0.03 then return "|cffff6b6b" .. text .. "|r" end
+  return MUTED .. text .. "|r"
+end
+
 local function demandLabel(v)
   local label = "kaum"
   for _, step in ipairs(DEMAND_STEPS) do if v >= step[1] then label = step[2] end end
@@ -231,13 +241,22 @@ local function build(page, width, height)
   local watchInfo = Style.Text(watchCard, 11)
   watchInfo:SetPoint("TOPRIGHT", -10, -9)
   watchInfo:SetTextColor(unpack(Style.C.muted))
-  local head = Style.Text(watchCard, 11)
-  head:SetPoint("TOPLEFT", 10, -28)
-  head:SetPoint("RIGHT", -16, 0)
-  head:SetJustifyH("RIGHT")
-  head:SetTextColor(unpack(Style.C.muted))
-  head:SetText("Ø Preis          Vorauswahl     Nachfrage")
-  local watch = itemList(watchCard, { 0, 100, 100, 90 })
+  -- Column heads at the same right-aligned offsets as the list's cells (itemList).
+  local WATCH_COLS = { 0, 80, 80, 70, 95 }
+  local WATCH_HEADS = { "", "Ø Preis", "Vorauswahl", "Nachfrage", "Trend" }
+  do
+    local x = 0
+    for c = #WATCH_COLS, 2, -1 do
+      local h = Style.Text(watchCard, 11)
+      h:SetPoint("TOPRIGHT", watchCard, "TOPRIGHT", -x - 6 - 11, -28) -- 11: room of the scroll bar
+      h:SetWidth(WATCH_COLS[c] - 8)
+      h:SetJustifyH("RIGHT")
+      h:SetTextColor(unpack(Style.C.muted))
+      h:SetText(WATCH_HEADS[c])
+      x = x + WATCH_COLS[c]
+    end
+  end
+  local watch = itemList(watchCard, WATCH_COLS)
   watch.scroll:SetPoint("TOPLEFT", 1, -46)
   watch.scroll:SetPoint("BOTTOMRIGHT", -10, 4)
 
@@ -264,7 +283,7 @@ local function build(page, width, height)
       local limit = c.avg * set.maxShare
       if set.maxPrice > 0 then limit = math.min(limit, set.maxPrice) end
       table.insert(entries, { ns.ItemName(c.itemID) or ("#" .. c.itemID), money(c.avg),
-        money(limit), demandLabel(c.demand), itemID = c.itemID })
+        money(limit), demandLabel(c.demand), trendText(c.itemID), itemID = c.itemID })
     end
     local recipes = Sniper and Sniper.RecipeItems and Sniper.RecipeItems() or {}
     local known = {}
@@ -275,7 +294,7 @@ local function build(page, width, height)
         local limit = Sniper.RecipeLimit(itemID)
         table.insert(entries, { ORANGE .. "Rezept|r  " .. (ns.ItemName(itemID) or ("#" .. itemID)),
           r.usual and money(r.usual) or (MUTED .. "–|r"), limit and money(limit) or (MUTED .. "jedes|r"),
-          r.skill and ("Skill " .. r.skill) or "", itemID = itemID })
+          r.skill and ("Skill " .. r.skill) or "", trendText(itemID), itemID = itemID })
       end
     end
     watch:Set(entries, rightW - 12)
