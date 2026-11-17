@@ -166,6 +166,22 @@ local function known(sig, t, used)
   return false
 end
 
+-- A purchase the hooks logged (same item and amount, no mail signature yet, within
+-- BUY_SLACK of the mail): tag it with the mail's signature; true if found.
+local BUY_SLACK = 2 * 3600
+local function tagLoggedBuy(e, t, used)
+  local events = book().events
+  for idx = #events, 1, -1 do
+    local x = events[idx]
+    if x.k == "buy" and not x.m and not used[idx] and x.c == e.c and (x.u or 1) == e.u
+        and (x.i == e.i or (e.i == nil and x.n == e.n)) and math.abs((x.t or 0) - t) <= BUY_SLACK then
+      x.m, used[idx] = e.m, true
+      return true
+    end
+  end
+  return false
+end
+
 local function scanInbox()
   if not GetInboxNumItems then return end
   local used = {}
@@ -179,6 +195,11 @@ local function scanInbox()
     local e
     if invoiceType == "seller" and itemName and bid then
       e = { k = "sale", n = itemName, u = count or 1, c = bid, cut = cut or 0 }
+    elseif invoiceType == "buyer" and itemName and bid then
+      -- A won auction: the purchase, also when the click was not seen (bought before the
+      -- addon ran, or a way of buying the hooks miss). A buy the hooks logged already is
+      -- only tagged with this mail's signature (no second purchase).
+      e = { k = "buy", n = itemName, u = count or 1, c = bid }
     elseif subject then
       local name = EXPIRED and subject:match(EXPIRED)
       local kind = name and "expired"
@@ -194,7 +215,10 @@ local function scanInbox()
     if e then
       e.i = e.i or idForName(e.n)
       e.m = table.concat({ e.k, e.n, e.c or 0, e.u }, "|")
-      if not known(e.m, received, used) then
+      local seen = known(e.m, received, used)
+      if not seen and e.k == "buy" and tagLoggedBuy(e, received, used) then
+        -- logged by the purchase hooks already, now tagged with this mail
+      elseif not seen then
         e.t = received
         add(e)
         used[#book().events] = true
