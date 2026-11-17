@@ -14,7 +14,7 @@ local DURATIONS = { { 1, "2 h" }, { 2, "8 h" }, { 3, "24 h" } }
 
 local panel, rowsFrames, durationButtons, status
 local duration = 3
-local mode = "sell" -- "sell", "deals" or "sniper"
+local mode = "sell" -- "sell", "deals", "sniper" or "invest"
 local control, sniperLines, ledgerButton
 local SNIPER_ROWS = 14 -- leaves room for the status block
 local modeTabs
@@ -141,14 +141,15 @@ local function createPanel(parent)
   Style.Panel(panel, 30)
   modeTabs = {}
   local mx = 6
-  for _, def in ipairs({ { "sell", "Verkaufen" }, { "deals", "Schnäppchen" }, { "sniper", "Sniper" } }) do
-    local tab = Style.Tab(panel, def[2], 70, function()
+  for _, def in ipairs({ { "sell", "Verkaufen", 68 }, { "deals", "Schnäppchen", 72 }, { "sniper", "Sniper", 50 },
+      { "invest", "Anlage", 54 } }) do
+    local tab = Style.Tab(panel, def[2], def[3], function()
       mode = def[1]
       ns.Safe(Selling.Refresh)
     end)
     tab:SetPoint("TOPLEFT", mx, -2)
     modeTabs[def[1]] = tab
-    mx = mx + 72
+    mx = mx + def[3] + 2
   end
 
   ledgerButton = Style.Button(panel, "Handelsbuch", 84, 20, function()
@@ -194,7 +195,7 @@ local function createPanel(parent)
     r.price:SetJustifyH("RIGHT")
     r.button = Style.Button(r, "Einstellen", 74, 20, function(self)
       if not self.entry then return end
-      if mode == "deals" then ns.Safe(ns.Deals.Search, self.entry.itemID)
+      if mode == "deals" or mode == "invest" then ns.Safe(ns.Deals.Search, self.entry.itemID)
       elseif mode == "sniper" then ns.Safe(ns.Sniper.Buy, self.entry)
       else ns.Safe(post, self.entry) end
     end, Style.C.accent)
@@ -264,6 +265,42 @@ local function refreshDeals()
   end
 end
 
+-- Long-term investments: items far below their Classic Era price (tools/invest.py).
+local function refreshInvest()
+  local data = ns.InvestData
+  local list = {}
+  local house = ns.AHData and ns.AHData[113]
+  for itemID, v in pairs(data and data.items or {}) do
+    local row = house and house.items[itemID]
+    table.insert(list, { itemID = itemID, classic = v[1], here = v[2], upside = v[3], min = row and row[1] })
+  end
+  table.sort(list, function(a, b) return a.upside > b.upside end)
+  local gold = GetMoney()
+  for i, r in ipairs(rowsFrames) do
+    local e = list[i]
+    r.entry = e
+    r.button.entry = e
+    if e then
+      r.icon:SetTexture(((C_Item and C_Item.GetItemIconByID) or GetItemIcon)(e.itemID))
+      r.name:SetText(ns.ItemName(e.itemID))
+      r.info:SetText(string.format("hier %s  ·  Classic Era %s%s", money(e.min or e.here), money(e.classic),
+        (e.min or e.here) > gold and "  ·  |cffffb547Gold reicht nicht|r" or ""))
+      r.price:SetText(string.format("|cff5fd38dx%.1f|r", e.upside))
+      r.button.label:SetText("Suchen")
+      r.button:Show()
+      r:Show()
+    else
+      r:Hide()
+    end
+  end
+  if not data then
+    status:SetText("Keine Vergleichsdaten (Data_Invest.lua fehlt).")
+  else
+    status:SetText(string.format("Preise hier ≈ %d %% von Classic Era. x = Faktor bis zu diesem Niveau. Kein Versprechen.",
+      math.floor(data.level * 100 + 0.5)))
+  end
+end
+
 local function refreshSniper()
   local Sniper = ns.Sniper
   local hits = Sniper.Hits()
@@ -305,6 +342,7 @@ function Selling.Refresh()
   status:SetShown(mode ~= "sniper")
   if mode == "sniper" then return refreshSniper() end
   if mode == "deals" then return refreshDeals() end
+  if mode == "invest" then return refreshInvest() end
   for d, b in pairs(durationButtons) do b:SetActive(d == duration) end
   -- Everything the Bestand logic sends to the auction house.
   entries = {}
