@@ -46,6 +46,20 @@ local function detectApi()
   return nil
 end
 
+-- Seconds since the last finished scan, or nil.
+function Scan.Age()
+  local t = ns.db and ns.db.ah and ns.db.ah.currentT
+  return t and (time() - t) or nil
+end
+
+function Scan.Running()
+  return state ~= nil
+end
+
+-- Called after every finished scan.
+local doneListeners = {}
+function Scan.OnDone(fn) table.insert(doneListeners, fn) end
+
 function Scan.HasData()
   return ns.db and ns.db.ah and ns.db.ah.lastScanT ~= nil
 end
@@ -194,6 +208,7 @@ finish = function()
       scanState.count, #itemIDs, now - scanState.started,
       diff and string.format(" Seit dem letzten Scan vermutlich %d Angebote verkauft.", soldTotal) or ""))
     if ns.PlannerUI and ns.PlannerUI.Refresh then ns.Safe(ns.PlannerUI.Refresh) end
+    for _, fn in ipairs(doneListeners) do ns.Safe(fn) end
   end
   state = nil
   step()

@@ -16,6 +16,8 @@
 --   sort = key, desc = true,
 --   rowColor = function(entry) -> { r, g, b } or nil (marker bar + faint tint),
 --   subtitle = function(entry) -> text (second line under the name),
+--   onOpen = function(t) (runs inside the tab click, i.e. with a hardware event),
+--   info = function() -> short text left of the entry count (e.g. price basis),
 --   detail = function(entry, count) -> { title, subtitle, columns = { { title, width }... },
 --            rows = { { itemID, cells = { text... } }... }, footer = text }
 --            (click on a row opens it in a panel right of the auction house; with
@@ -175,7 +177,8 @@ local function refresh(t)
   for key, b in pairs(t.viewButtons or {}) do b:SetActive(key == t.view) end
   local active = activeFilters(t)
   t.filterButton.label:SetText(active > 0 and string.format("Filter (%d)", active) or "Filter")
-  t.countText:SetText(string.format("%d Einträge", #t.list))
+  local info = t.info and t.info() or nil
+  t.countText:SetText((info and (info .. "   ·   ") or "") .. string.format("%d Einträge", #t.list))
 end
 
 local function createFrame(t, parent)
@@ -537,6 +540,15 @@ local function selectTab(t)
   PanelTemplates_SelectTab(t.tab)
   if AuctionHouseFrame.SetTitle then AuctionHouseFrame:SetTitle(t.title) end
   t.frame:Show()
+  if t.onOpen then ns.Safe(t.onOpen, t) end
+end
+
+-- Recomputes the lists of the visible tables (e.g. after new prices).
+function AHTable.Rebuild()
+  for _, t in ipairs(defs) do
+    if t.frame and t.frame:IsShown() then build(t); refresh(t) end
+  end
+  renderDetail()
 end
 
 local function createAll(parent)

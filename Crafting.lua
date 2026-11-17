@@ -1,10 +1,13 @@
 -- Crafting: auction house tab "Herstellen" - which learned recipes of the character's
 -- professions make a profit when every reagent is bought (merchant if it sells it,
 -- else the auction house) and the product is sold on the auction house.
---   reagent    merchant price, else cheapest offer (own scan, else collector data,
---              else TSM region value)
---   product    lower of market value and 7-day median in this house (collector),
---              else own scan, after the 5 % cut; a merchant price counts if it is higher
+--   live       opening the tab starts the own full scan (every 15 min at most); its
+--              prices are used while it is at most LIVE_MAX old
+--   reagent    merchant price, else cheapest offer now (live scan), else collector
+--              data, else TSM region value
+--   product    cheapest offer now (live scan), else the lower of market value and
+--              7-day median (collector); after the 5 % cut; a merchant price counts
+--              if it is higher
 -- Only professions whose window was opened once are known (Recipes.Scan); the scan
 -- also holds the recipes not learned yet. Those are shown with a red background and
 -- how to learn them (planner data: trainer, merchant, drop, quest; the pattern price
@@ -12,6 +15,15 @@
 local ADDON, ns = ...
 
 local CUT = 0.05
+local LIVE_MAX = 60 * 60
+
+-- Cheapest offer in the own full scan, if that scan is recent.
+local function live(itemID)
+  local age = ns.AuctionScan and ns.AuctionScan.Age()
+  if not age or age > LIVE_MAX then return nil, false end
+  local row = ns.db.ah and ns.db.ah.current and ns.db.ah.current[itemID]
+  return row and row[1] and row[1] > 0 and row[1] or nil, true
+end
 
 local function money(c) return c and ns.FormatMoney(c, true) or "–" end
 
@@ -24,8 +36,13 @@ end
 local function buy(itemID)
   local vendor = ns.db.vendorBuy and ns.db.vendorBuy[itemID]
   if vendor then return vendor, true end
-  local own = ns.Prices.Auction(itemID)
-  if own then return own end
+  local now, fresh = live(itemID)
+  if now then return now end
+  if fresh then
+    -- Not on offer right now: the collector's last price is the best guess.
+    local row = houseRow(itemID)
+    return row and row[1] or nil
+  end
   local row = houseRow(itemID)
   if row and row[1] then return row[1] end
   local unit, source = ns.Costs.Buy(itemID)
@@ -35,10 +52,13 @@ end
 -- Copper per unit the product brings after the cut (or from a merchant). The lower of
 -- the current market value and the 7-day median, so a short price spike shows no profit.
 local function sell(itemID)
-  local row = houseRow(itemID)
-  local ah = row and (row[2] or row[1])
-  if ah and row[3] then ah = math.min(ah, row[3]) end
-  ah = ah or ns.Prices.Auction(itemID)
+  local now, fresh = live(itemID)
+  local ah = now
+  if not fresh then
+    local row = houseRow(itemID)
+    ah = row and (row[2] or row[1])
+    if ah and row[3] then ah = math.min(ah, row[3]) end
+  end
   local value = ah and math.floor(ah * (1 - CUT)) or 0
   return math.max(value, ns.Prices.Vendor(itemID) or 0), ah ~= nil
 end
@@ -146,6 +166,19 @@ ns.AHTable.Add({
   end,
   detail = detail,
   detailCount = true,
+  onOpen = function()
+    local Scan = ns.AuctionScan
+    if Scan and not Scan.Running() and (Scan.Age() or math.huge) > 15 * 60 and Scan.Wait() == 0 then
+      Scan.Start()
+    end
+  end,
+  info = function()
+    local Scan = ns.AuctionScan
+    if Scan and Scan.Running() then return "|cffffb547Live-Preise werden geholt …|r" end
+    local age = Scan and Scan.Age()
+    if age and age <= LIVE_MAX then return string.format("Live-Preise, %d min alt", math.floor(age / 60)) end
+    return "|cffffb547Keine Live-Preise – Daten vom Server|r"
+  end,
   columns = {
     { key = "name", title = "Ergebnis", width = 0, align = "LEFT", fmt = function(e)
       return e.name .. (e.produced > 1 and string.format(" |cff99999ex%g|r", e.produced) or "")
@@ -165,3 +198,10 @@ ns.AHTable.Add({
   },
   rows = rows,
 })
+
+-- New live prices: recompute the list and the detail panel (AuctionScan loads later).
+ns.OnReady(function()
+  if ns.AuctionScan and ns.AuctionScan.OnDone then
+    ns.AuctionScan.OnDone(function() ns.AHTable.Rebuild() end)
+  end
+end)
