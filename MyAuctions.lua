@@ -286,11 +286,16 @@ My.StoreOwned = storeOwned
 
 -- Discord messages of the companion server (ns.db.settings.discord): sold auctions, snipes from
 -- snipeMin copper profit on. Defaults filled in place.
-My.DISCORD_DEFAULTS = { sales = true, snipes = true, snipeMin = 100000 }
+My.DISCORD_DEFAULTS = { sales = true, snipes = true, snipeMin = 50000 }
 function My.Discord()
   ns.db.settings = ns.db.settings or {}
   local d = ns.db.settings.discord
   if type(d) ~= "table" then d = {}; ns.db.settings.discord = d end
+  -- 0.11.0 filled in 10g; the default is 5g now (unless it was changed since).
+  if not d.v then
+    if d.snipeMin == 100000 then d.snipeMin = nil end
+    d.v = 2
+  end
   for k, v in pairs(My.DISCORD_DEFAULTS) do
     if d[k] == nil then d[k] = v end
   end
