@@ -12,6 +12,7 @@ Item.lua
 Status.lua
 Tracker.lua
 Data_Leatherworking.lua
+Data_Skill.lua
 Recipes.lua
 Merchant.lua
 Planner.lua
