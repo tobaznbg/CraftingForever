@@ -156,11 +156,15 @@ function Item.Listings(itemID)
   return list, last.t
 end
 
--- Hourly history of the last 48 hours from the collector (Data_History.lua, every listed
--- item, compact format; the older table format is read too): { start = epoch of the first slot, step = 3600,
---   prices = { cheapest offer per hour, 0 = not listed, false = no snapshot }, qty = {...} }
--- or nil. The live copy from the data addon (m4-companion_Data, kept current by the
--- companion app, global M4CompanionData) wins over the one shipped with this addon.
+-- Price history from the collector (Data_History.lua, every listed item, compact format; the
+-- older table format is read too): { start = epoch of the first slot, step = seconds per slot,
+--   prices = { cheapest offer per slot, 0 = not listed, false = no snapshot }, qty = {...},
+--   hourly = true for the 1-hour slots } or nil.
+-- Item.History(id)        the last 7 days in 2-hour slots
+-- Item.History(id, true)  the last 48 hours in 1-hour slots (ns.History.hours); a file without
+--                         them (older collector) gives its 2-hour slots instead
+-- The live copy from the data addon (m4-companion_Data, kept current by the companion app,
+-- global M4CompanionData) wins over the one shipped with this addon.
 -- Looked up per call: the data addon loads after this one.
 local function historyTable()
   local live = rawget(_G, "M4CompanionData")
@@ -181,25 +185,34 @@ local function decodeSlots(text, n)
   return out
 end
 
-local decoded = setmetatable({}, { __mode = "k" }) -- history table -> itemID -> result
+local decoded = setmetatable({}, { __mode = "k" }) -- history table -> key -> result
 
-local function historyFrom(history, itemID)
+-- "prices;qty" of one item -> history, false if unreadable.
+local function decodeLine(text, start, step, n)
+  if type(text) ~= "string" then return false end
+  local p, q = text:match("^([^;]*);(.*)$")
+  if not p then return false end
+  return { start = start, step = step, prices = decodeSlots(p, n), qty = decodeSlots(q, n) }
+end
+
+local function historyFrom(history, itemID, hourly)
   if not history then return nil end
   if type(history.items) == "table" then
-    -- Compact format (all listed items): ns.History = { start, step, n, items = { [id] = "p;q" } }
+    -- Compact format (all listed items): ns.History = { start, step, n, items = { [id] = "p;q" },
+    -- hourStart, hourStep, hourN, hours = { [id] = "p;q" } }
     local cache = decoded[history]
     if not cache then cache = {}; decoded[history] = cache end
-    if cache[itemID] ~= nil then return cache[itemID] or nil end
-    local text = history.items[itemID]
+    local key = hourly and ("h" .. itemID) or itemID
+    if cache[key] ~= nil then return cache[key] or nil end
     local result = false
-    if type(text) == "string" then
-      local p, q = text:match("^([^;]*);(.*)$")
-      if p then
-        result = { start = history.start, step = history.step or 3600,
-          prices = decodeSlots(p, history.n), qty = decodeSlots(q, history.n) }
-      end
+    if hourly and type(history.hours) == "table" and history.hours[itemID] then
+      result = decodeLine(history.hours[itemID], history.hourStart, history.hourStep or 3600, history.hourN)
+      if result then result.hourly = true end
     end
-    cache[itemID] = result
+    if not result then
+      result = decodeLine(history.items[itemID], history.start, history.step or 3600, history.n)
+    end
+    cache[key] = result
     return result or nil
   end
   local h = history[itemID]
@@ -209,9 +222,10 @@ end
 
 -- The app's live copy first; an item it does not know (older or smaller file) from the copy
 -- shipped with the addon.
-function Item.History(itemID)
+function Item.History(itemID, hourly)
   local live = historyTable()
-  return historyFrom(live, itemID) or (live ~= ns.History and historyFrom(ns.History, itemID)) or nil
+  return historyFrom(live, itemID, hourly)
+    or (live ~= ns.History and historyFrom(ns.History, itemID, hourly)) or nil
 end
 
 -- Items in the own full scan (itemID -> true).

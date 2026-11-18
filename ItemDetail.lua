@@ -4,8 +4,8 @@
 -- Opened from everywhere: a click on a sniper hit at the auction house (Selling.lua),
 -- Alt+left click on an item (bags, bank, character, loot, chat links, Blizzard's AH lists via
 -- HandleModifiedItemClick; the addon's own tables via ItemDetail.AltClick) and /m4 item.
--- Shows why the offer is a sniper hit (only while it is one), the hourly price and quantity
--- of the last 48 hours (ns.Item.History), the market figures (ns.Item), the price stair
+-- Shows why the offer is a sniper hit (only while it is one), the price and quantity of the
+-- last 48 hours hourly or of the last 7 days (ns.Item.History, switchable), the market figures (ns.Item), the price stair
 -- (the sniper's last search, else the own full scan via ns.Item.Listings) and the crafting
 -- cost (ns.CraftInfo from Tooltip.lua); for recipe items what the recipe teaches
 -- (ns.RecipeTeachInfo from Crafting.lua). No own price logic here.
@@ -44,9 +44,41 @@ local function ago(t)
 end
 
 local WEEKDAYS = { "So", "Mo", "Di", "Mi", "Do", "Fr", "Sa" }
--- "Mo 14:00" in local time.
+
+-- Days since 1970-01-01 of a calendar date (proleptic Gregorian).
+local function epochDays(yr, mo, d)
+  if mo <= 2 then yr = yr - 1 end
+  local era = math.floor(yr / 400)
+  local yoe = yr - era * 400
+  local doy = math.floor((153 * ((mo + 9) % 12) + 2) / 5) + d - 1
+  return era * 146097 + yoe * 365 + math.floor(yoe / 4) - math.floor(yoe / 100) + doy - 719468
+end
+
+-- 01:00 UTC on the last Sunday of a month: the EU daylight saving switch.
+local function lastSunday(yr, mo)
+  local days = epochDays(yr, mo, 31)
+  return (days - (days + 4) % 7) * 86400 + 3600
+end
+
+-- German time (CET / CEST) of an epoch, as an epoch to format with date("!...").
+local function berlin(t)
+  local yr = tonumber(date("!%Y", t))
+  local summer = t >= lastSunday(yr, 3) and t < lastSunday(yr, 10)
+  return t + (summer and 7200 or 3600)
+end
+Detail.Berlin = berlin
+
+-- "Mo 14:00" in German time.
 local function stamp(t)
-  return (WEEKDAYS[tonumber(date("%w", t)) + 1] or "") .. " " .. date("%H:%M", t)
+  local b = berlin(t)
+  return (WEEKDAYS[tonumber(date("!%w", b)) + 1] or "") .. " " .. date("!%H:%M", b)
+end
+
+-- "Mo 16.11., 14:00–15:00" in German time.
+local function stampRange(t0, t1)
+  local b0, b1 = berlin(t0), berlin(t1)
+  return (WEEKDAYS[tonumber(date("!%w", b0)) + 1] or "") .. " " .. date("!%d.%m.", b0) .. ", "
+    .. date("!%H:%M", b0) .. "–" .. date("!%H:%M", b1)
 end
 
 -- Days / units per day with one decimal, German style: "1,5".
@@ -115,6 +147,47 @@ end
 
 -- Chart ------------------------------------------------------------------------------
 
+-- The two views of the history, both on a fixed axis ending now (same scale for every item,
+-- so charts compare). The choice is kept in ns.db.itemDetail.chart; 48 hours by default.
+local VIEWS = {
+  ["48h"] = { span = 48 * 3600, hourly = true, button = "48 h", title = "Preis 48 Stunden",
+              empty = "48 Stunden lang nicht im Angebot" },
+  ["7d"] = { span = 7 * 86400, button = "7 Tage", title = "Preis 7 Tage",
+             empty = "7 Tage lang nicht im Angebot" },
+}
+local VIEW_ORDER = { "48h", "7d" }
+Detail.SPAN = VIEWS["7d"].span
+
+local function chartView()
+  local v = ns.db and ns.db.itemDetail and ns.db.itemDetail.chart
+  return VIEWS[v] and v or "48h"
+end
+Detail.ChartView = chartView
+
+-- Scale of the price axis without outliers: every price within [low, high] is drawn true to
+-- scale, the rest is cut at the edge (low/high nil: nothing cut). Quartiles of the listed
+-- prices; the fences are Tukey's "far out" ones (3 IQR beyond the quartiles), widened to at
+-- least ×1.5 / ÷1.5 of the quartile, so a calm item does not lose a normal swing of a few
+-- per cent (its IQR is about 0). Needs 8 prices, with fewer nothing is cut.
+function Detail.ChartScale(values)
+  local n = #values
+  if n < 8 then return nil, nil end
+  local sorted = {}
+  for i = 1, n do sorted[i] = values[i] end
+  table.sort(sorted)
+  local function quantile(q)
+    local pos = 1 + (n - 1) * q
+    local i = math.floor(pos)
+    local f = pos - i
+    return sorted[i] + ((sorted[i + 1] or sorted[i]) - sorted[i]) * f
+  end
+  local q1, q3 = quantile(0.25), quantile(0.75)
+  local iqr = q3 - q1
+  local high = math.max(q3 + 3 * iqr, q3 * 1.5)
+  local low = math.min(q1 - 3 * iqr, q1 / 1.5)
+  return (sorted[1] < low) and low or nil, (sorted[n] > high) and high or nil
+end
+
 local function createChart()
   local Style = ns.Style
   local c = CreateFrame("Frame", nil, body)
@@ -129,7 +202,7 @@ local function createChart()
   c.base:SetHeight(1)
   c.base:SetPoint("BOTTOMLEFT")
   c.base:SetPoint("BOTTOMRIGHT")
-  c.bars, c.lines, c.ticks = {}, {}, {}
+  c.bars, c.lines, c.ticks, c.marks, c.markLabels = {}, {}, {}, {}, {}
   c.limit = Style.Solid(c.plot, { 0.37, 0.83, 0.55, 0.5 }, "ARTWORK")
   c.limit:SetHeight(1)
   c.sell = Style.Solid(c.plot, { 1, 1, 1, 0.45 }, "ARTWORK")
@@ -158,6 +231,54 @@ local function createChart()
   c.empty = Style.Text(c.plot, 11)
   c.empty:SetPoint("CENTER")
   c.empty:SetTextColor(unpack(Style.C.muted))
+  -- Segment switch "48 h | 7 Tage" on the section's title row, right above the chart.
+  c.views = {}
+  local right
+  for k = #VIEW_ORDER, 1, -1 do
+    local key = VIEW_ORDER[k]
+    local b = Style.Button(c, VIEWS[key].button, key == "7d" and 46 or 38, 16, function()
+      ns.db.itemDetail = ns.db.itemDetail or {}
+      ns.db.itemDetail.chart = key
+      render()
+    end)
+    b.label:SetFontObject(Style.Font(10))
+    if right then
+      b:SetPoint("BOTTOMRIGHT", right, "BOTTOMLEFT", 1, 0) -- shared border, one segment control
+    else
+      b:SetPoint("BOTTOMRIGHT", c.plot, "TOPRIGHT", 0, 5)
+    end
+    b.key = key
+    c.views[key] = b
+    right = b
+  end
+  -- Hover: a vertical line and a bubble with time, cheapest offer and units of that slot.
+  c.cursor = Style.Solid(c.plot, { 1, 1, 1, 0.4 }, "OVERLAY")
+  c.cursor:SetWidth(1)
+  c.cursor:Hide()
+  c.bubble = CreateFrame("Frame", nil, c)
+  c.bubble:SetFrameLevel((c.plot:GetFrameLevel() or 1) + 5)
+  local bbg = Style.Solid(c.bubble, Style.C.header)
+  bbg:SetAllPoints()
+  Style.Border(c.bubble)
+  c.bubble.text = Style.Text(c.bubble, 10)
+  c.bubble.text:SetPoint("TOPLEFT", 5, -4)
+  c.bubble.text:SetJustifyH("LEFT")
+  c.bubble.text:SetWordWrap(true)
+  c.bubble:Hide()
+  local plot = c.plot
+  plot:EnableMouse(true)
+  local function track(self)
+    local x = GetCursorPosition()
+    local scale = self:GetEffectiveScale() or 1
+    local left = self:GetLeft()
+    if not (x and left) then return end
+    Detail.ChartHover(x / scale - left)
+  end
+  plot:SetScript("OnEnter", function(self) self:SetScript("OnUpdate", track) end)
+  plot:SetScript("OnLeave", function(self)
+    self:SetScript("OnUpdate", nil)
+    Detail.ChartHover(nil)
+  end)
   return c
 end
 
@@ -172,16 +293,23 @@ local function hideFrom(list, first)
   for i = first, #list do list[i]:Hide() end
 end
 
--- Draws the history on a fixed 7-day axis ending now (same scale for every item, so charts
--- compare): quantity as muted bars, cheapest offer as an accent line (broken where the item
--- was sold out or no snapshot exists), sold-out slots as orange ticks on the base line, buy
--- up to (green) and sell at (white) as thin lines. Time without data stays empty.
-local SPAN = 7 * 86400
-Detail.SPAN = SPAN
-
-local function drawChart(c, history, limit, sellAt)
+-- Draws the history on the fixed axis of the chosen view (48 hours in 1-hour slots or 7 days
+-- in 2-hour slots, "jetzt" at the right edge): quantity as muted bars, cheapest offer as an
+-- accent line (broken where the item was sold out or no snapshot exists), sold-out slots as
+-- orange ticks on the base line, buy up to (green) and sell at (white) as thin lines. Time
+-- without data stays empty. Outliers (Detail.ChartScale) are drawn at the edge and marked
+-- with their price ("276g ▲"), so they do not flatten the normal range.
+local function drawChart(c, history, limit, sellAt, viewKey)
   local Style = ns.Style
+  local view = VIEWS[viewKey] or VIEWS["48h"]
+  local SPAN = view.span
   local plot = c.plot
+  for key, b in pairs(c.views) do
+    local on = key == viewKey
+    b.active = on
+    b.bg:SetColorTexture(unpack(on and Style.C.buttonHi or Style.C.button))
+    b.label:SetTextColor(unpack(on and Style.C.accent or Style.C.muted))
+  end
   local w = WIDTH - 34 -- body width minus the chart's margins
   local prices, qty = history and history.prices or {}, history and history.qty or {}
   local SLOTS = #prices
@@ -189,24 +317,28 @@ local function drawChart(c, history, limit, sellAt)
   local axisEnd = time()
   local axisStart = axisEnd - SPAN
   local slotW = w * step / SPAN
-  -- x of slot i on the fixed axis (nil: older than 7 days or in the future)
+  -- x of slot i on the fixed axis (nil: before the axis or in the future)
   local function sx(i)
     local t0 = history.start + (i - 1) * step
     if t0 + step <= axisStart or t0 > axisEnd then return nil end
     return (t0 - axisStart) / SPAN * w
   end
-  local lo, hi, qmax = nil, nil, 0
+  c.view = nil
+  c.cursor:Hide()
+  c.bubble:Hide()
+  local values, qmax = {}, 0
   for i = 1, SLOTS do
     if sx(i) then
       local p, q = prices[i], qty[i]
-      if p and p > 0 then lo = math.min(lo or p, p); hi = math.max(hi or p, p) end
+      if p and p > 0 then values[#values + 1] = p end
       if q and q > qmax then qmax = q end
     end
   end
-  if not lo then
-    c.empty:SetText(history and "7 Tage lang nicht im Angebot" or "Kein Verlauf für dieses Item")
+  if #values == 0 then
+    c.empty:SetText(history and view.empty or "Kein Verlauf für dieses Item")
     c.empty:Show()
     hideFrom(c.bars, 1); hideFrom(c.lines, 1); hideFrom(c.ticks, 1)
+    hideFrom(c.marks, 1); hideFrom(c.markLabels, 1)
     c.limit:Hide()
     c.sell:Hide()
     c.hi:SetText(""); c.lo:SetText(""); c.qtyMax:SetText("")
@@ -215,13 +347,24 @@ local function drawChart(c, history, limit, sellAt)
     return
   end
   c.empty:Hide()
+  local cutLow, cutHigh = Detail.ChartScale(values)
+  local lo, hi
+  for _, p in ipairs(values) do
+    if not (cutLow and p < cutLow) and not (cutHigh and p > cutHigh) then
+      lo, hi = math.min(lo or p, p), math.max(hi or p, p)
+    end
+  end
   local top, bottom = hi, lo
   for _, v in ipairs({ limit or 0, sellAt or 0 }) do
     if v > 0 then top, bottom = math.max(top, v), math.min(bottom, v) end
   end
   if top == bottom then top, bottom = top * 1.05 + 1, bottom * 0.95 end
   local plotTop, plotBottom = CHART_H - 14, 12 -- room for the min/max labels
-  local function py(p) return plotBottom + (p - bottom) / (top - bottom) * (plotTop - plotBottom) end
+  local function py(p)
+    p = math.max(bottom, math.min(top, p))
+    return plotBottom + (p - bottom) / (top - bottom) * (plotTop - plotBottom)
+  end
+  c.view = { history = history, axisStart = axisStart, span = SPAN, w = w, step = step, sx = sx }
   -- quantity bars
   local nb = 0
   for i = 1, SLOTS do
@@ -235,16 +378,27 @@ local function drawChart(c, history, limit, sellAt)
     end
   end
   hideFrom(c.bars, nb + 1)
-  -- price line and sold-out ticks
+  -- price line, sold-out ticks and the runs of cut outliers (one marker each, at its extreme)
   local nl, nt, last = 0, 0, nil
+  local runs, run = {}, nil
   for i = 1, SLOTS do
     local p, x0 = prices[i], sx(i)
     local x = x0 and (x0 + slotW / 2)
+    local side = x0 and p and p > 0 and ((cutHigh and p > cutHigh and 1) or (cutLow and p < cutLow and -1)) or nil
+    if side and run and run.side == side and run.last == i - 1 then
+      run.last = i
+      if p * side > run.p * side then run.p, run.x = p, x end
+    elseif side then
+      run = { side = side, last = i, p = p, x = x }
+      runs[#runs + 1] = run
+    else
+      run = nil
+    end
     if not x0 then
       last = nil
     elseif p and p > 0 then
       local yy = py(p)
-      -- connected to the previous hour, or a short dash after a gap so it stays visible
+      -- connected to the previous slot, or a short dash after a gap so it stays visible
       local x0, y0, x1 = x - 1.5, yy, x + 1.5
       if last and last[1] == i - 1 then x0, y0, x1 = last[2], last[3], x end
       if plot.CreateLine then
@@ -272,6 +426,43 @@ local function drawChart(c, history, limit, sellAt)
   end
   hideFrom(c.lines, nl + 1)
   hideFrom(c.ticks, nt + 1)
+  -- Outlier markers: a small cap on the edge and the price; the most extreme runs first, at
+  -- most 3 labels and none overlapping another one (the caps are always drawn).
+  table.sort(runs, function(a, b) return math.abs(a.p - (a.side > 0 and top or bottom)) > math.abs(b.p - (b.side > 0 and top or bottom)) end)
+  local nm, placed, coverHi, coverLo = 0, {}, false, false
+  for k, r in ipairs(runs) do
+    local cap = pooled(c.marks, k, function() return Style.Solid(plot, { 1, 0.71, 0.28, 1 }, "OVERLAY") end)
+    cap:ClearAllPoints()
+    cap:SetPoint("CENTER", plot, "BOTTOMLEFT", r.x, r.side > 0 and plotTop + 1 or plotBottom - 1)
+    cap:SetSize(5, 3)
+    local free = nm < 3
+    for _, px in ipairs(placed) do
+      if math.abs(px - r.x) < 64 then free = false end
+    end
+    if free then
+      nm = nm + 1
+      placed[#placed + 1] = r.x
+      local fs = pooled(c.markLabels, nm, function()
+        local t = Style.Text(c, 10)
+        t:SetTextColor(1, 0.71, 0.28, 1)
+        return t
+      end)
+      fs:ClearAllPoints()
+      local lx = math.max(32, math.min(w - 32, r.x)) -- keep the label inside the plot
+      if lx < 90 then
+        if r.side > 0 then coverHi = true else coverLo = true end
+      end
+      if r.side > 0 then
+        fs:SetPoint("BOTTOM", plot, "BOTTOMLEFT", lx, plotTop + 3)
+        fs:SetText(money(r.p) .. " ▲")
+      else
+        fs:SetPoint("TOP", plot, "BOTTOMLEFT", lx, plotBottom - 1)
+        fs:SetText(money(r.p) .. " ▼")
+      end
+    end
+  end
+  hideFrom(c.marks, #runs + 1)
+  hideFrom(c.markLabels, nm + 1)
   if sellAt and sellAt > 0 then
     c.sell:ClearAllPoints()
     c.sell:SetPoint("BOTTOMLEFT", plot, "BOTTOMLEFT", 0, py(sellAt))
@@ -288,14 +479,62 @@ local function drawChart(c, history, limit, sellAt)
   else
     c.limit:Hide()
   end
-  c.hi:SetText(money(hi))
-  c.lo:SetText(money(lo))
+  -- min/max labels: the true-to-scale range (left out where an outlier label sits)
+  c.hi:SetText(coverHi and "" or money(hi))
+  c.lo:SetText(coverLo and "" or money(lo))
   c.qtyMax:SetText(qmax > 0 and ("max " .. count(qmax) .. " Stück") or "")
   c.t1:SetText(stamp(axisStart))
   c.t2:SetText(stamp(axisStart + SPAN / 2))
   c.t3:SetText("jetzt")
   c.legend:SetText(ns.Style.ACCENT .. "Linie|r billigstes  ·  Balken Menge  ·  " .. ORANGE .. "orange|r ausverkauft"
     .. (limit and ("  ·  " .. GREEN .. "grün|r Kauf bis  ·  weiß Einstellen") or ""))
+end
+
+-- Hover at x pixels from the plot's left edge (nil: mouse left): line on the slot under the
+-- mouse and the bubble "Mo 16.11., 14:00–15:00 / billigstes … / … Stück". Returns the bubble
+-- text (nil when nothing is shown).
+function Detail.ChartHover(x)
+  local c = chart
+  if not c then return nil end
+  local v = c.view
+  if not (x and v and x >= 0 and x <= v.w) then
+    c.cursor:Hide()
+    c.bubble:Hide()
+    return nil
+  end
+  local h = v.history
+  local i = math.floor((v.axisStart + x / v.w * v.span - h.start) / v.step) + 1
+  local x0 = i >= 1 and i <= #h.prices and v.sx(i)
+  if not x0 then
+    c.cursor:Hide()
+    c.bubble:Hide()
+    return nil
+  end
+  local cx = math.max(0, math.min(v.w, x0 + v.w * v.step / v.span / 2))
+  local t0 = h.start + (i - 1) * v.step
+  local p, q = h.prices[i], h.qty[i]
+  local priceText
+  if p and p > 0 then priceText = "billigstes " .. money(p)
+  elseif p == 0 then priceText = ORANGE .. "nicht im Angebot|r"
+  else priceText = ns.Style.MUTED .. "kein Snapshot|r" end
+  local text = stampRange(t0, t0 + v.step) .. "\n" .. priceText
+    .. ((q and q > 0) and ("\n" .. count(q) .. " Stück") or "")
+  c.cursor:ClearAllPoints()
+  c.cursor:SetPoint("TOPLEFT", c.plot, "TOPLEFT", cx, 0)
+  c.cursor:SetPoint("BOTTOMLEFT", c.plot, "BOTTOMLEFT", cx, 0)
+  c.cursor:Show()
+  local b = c.bubble
+  b.text:SetText(text)
+  b:SetSize(math.max(60, (b.text:GetStringWidth() or 0) + 10), (b.text:GetStringHeight() or 0) + 8)
+  b:ClearAllPoints()
+  -- beside the line, on the side with more room
+  if cx > v.w / 2 then
+    b:SetPoint("TOPRIGHT", c.plot, "TOPLEFT", cx - 4, -2)
+  else
+    b:SetPoint("TOPLEFT", c.plot, "TOPLEFT", cx + 4, -2)
+  end
+  b:Show()
+  return text
 end
 
 -- Content ------------------------------------------------------------------------------
@@ -468,13 +707,14 @@ render = function()
     end
   end
 
-  -- 2. History of the last 48 hours
-  section("Preis 7 Tage")
+  -- 2. Price history: the last 48 hours hourly or the last 7 days (switch on the title row)
+  local view = chartView()
+  section(VIEWS[view].title)
   if not chart then chart = createChart() end
   chart:ClearAllPoints()
   chart:SetPoint("TOPLEFT", body, "TOPLEFT", 4, -y)
   chart:SetPoint("RIGHT", body, "RIGHT", -4, 0)
-  drawChart(chart, ns.Item.History(itemID), h and h.buyUpTo, h and h.sellAt)
+  drawChart(chart, ns.Item.History(itemID, VIEWS[view].hourly), h and h.buyUpTo, h and h.sellAt, view)
   y = y + CHART_H + 44
 
   -- 3. Market figures (ns.Item)
