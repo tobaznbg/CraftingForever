@@ -1,15 +1,22 @@
 # m4-companion
 
-World of Warcraft addon for **WoW Forever** (Interface 16001) by made four: auction house prices and trends, crafting profits for every profession, investment list, selling panel, sniper and trading ledger. No dependencies.
+## ⬇️ [Download: m4-companion.exe (Windows)](https://github.com/tobaznbg/m4-companion/releases/latest/download/m4-companion.exe)
 
-## Install
+**Das ist alles, was du brauchst.** Die App installiert das Addon selbst, hält es und die Preisdaten aktuell und aktualisiert sich selbst.
 
-**Recommended: the companion app (Windows).**
-[Download m4-companion.exe](https://github.com/tobaznbg/m4-companion/releases/latest/download/m4-companion.exe), start it and log in with Discord. It installs the addon into `Interface\AddOns\m4-companion`, keeps the addon and its price data current and updates itself. After an update type `/reload` in game. Windows may warn about an unsigned app: *More info → Run anyway*.
+1. `m4-companion.exe` herunterladen und starten.
+2. Mit Discord anmelden (du musst auf dem made-four-Discord sein).
+3. WoW starten – fertig. Nach Updates im Spiel `/reload`.
 
-Manually (without the app): download the ZIP (Code → Download ZIP), extract it into `Interface\AddOns` and rename the folder `m4-companion-main` to `m4-companion`. Data files then stay as old as the download.
+Windows warnt evtl. vor einer unbekannten App: *Weitere Informationen → Trotzdem ausführen*.
 
-**Coming from CraftingForever:** close WoW, rename the folder `CraftingForever` to `m4-companion` (or clone anew and delete the old one), and in `WTF\Account\<account>\SavedVariables` rename `CraftingForever.lua` to `m4-companion.lua` and change its first line `CraftingForeverDB = {` to `M4CompanionDB = {` – otherwise the ledger and settings start empty.
+> ⚠️ **Bitte nicht** den Code (grüner Knopf „Code → Download ZIP“) herunterladen. Ohne die App fehlen die aktuellen Preise, der Verlauf, der Abgleich zwischen PCs und die Discord-Meldungen – und das Addon wird nicht aktualisiert.
+
+---
+
+*English: download and run **m4-companion.exe** above, log in with Discord, start WoW. The app installs and updates the addon – do not download the source code.*
+
+World of Warcraft addon for **WoW Forever** by made four: auction house prices and trends, crafting profits for every profession, sniper, trading ledger (P&L), item details with a 7-day price history.
 
 ## Use
 
