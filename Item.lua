@@ -25,6 +25,7 @@
 --                    average, minus the 5 % cut; a merchant if he pays more (same rule as
 --                    the cloud's ahprofessions)
 --   Item.BuyCost(e)  buying one unit: merchant, else cheapest offer, else the average
+--   Item.MaterialCost(list)  buying a reagent list { itemID, count, ... } via BuyCost
 --   Item.Value(e)    what one unit is worth to the player (= SellNet)
 -- Producers report live observations with Item.Observe (single item searches).
 -- Pure Lua apart from guarded game calls, so tools/ can load it too.
@@ -211,6 +212,19 @@ end
 function Item.BuyCost(e)
   if e.vendorBuy then return e.vendorBuy, true end
   return e.now or e.avg, false
+end
+
+-- Copper for a reagent list { itemID, count, ... } (recipe format), each unit via BuyCost.
+-- nil and the first item without a price when one is missing. The only formula for
+-- material costs (crafting tab, tooltip, recipe items).
+function Item.MaterialCost(list)
+  local cost = 0
+  for i = 1, #(list or {}), 2 do
+    local unit = Item.BuyCost(Item.Get(list[i]))
+    if not unit then return nil, list[i] end
+    cost = cost + unit * (list[i + 1] or 1)
+  end
+  return cost
 end
 
 -- The current price is far from the average (more than 50 % above or below): a single

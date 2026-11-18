@@ -4,6 +4,8 @@
 -- - 1 copper - 5 % cut, or a merchant if higher. Learned state and skill come from the
 -- character's own profession scan (open the profession window once); unlearned recipes
 -- get a red marker and, where the planner data knows it, how to learn them.
+-- Also answers what a recipe item teaches (ns.RecipeTeaches / ns.RecipeTeachInfo) for the
+-- tooltip and the item detail window.
 -- Opening the tab starts a live scan (every 15 min at most, only with the AH open).
 local ADDON, ns = ...
 
@@ -63,15 +65,10 @@ local function rows(filter, professionID)
     local known = mine and out and mine.byItem[out]
     local learned = known and known.r.learned and true or false
     if out and (learned or filter ~= "learned") then
-      local reagents, cost, missing = {}, 0, false
-      for i = 1, #reagentList, 2 do
-        local id, n = reagentList[i], reagentList[i + 1]
-        table.insert(reagents, { i = id, n = n })
-        local unit = buy(id)
-        if not unit then missing = true break end
-        cost = cost + unit * n
-      end
-      if not missing then
+      local cost = ns.Item.MaterialCost(reagentList)
+      if cost then
+        local reagents = {}
+        for i = 1, #reagentList, 2 do table.insert(reagents, { i = reagentList[i], n = reagentList[i + 1] }) end
         local unitValue, onAH = sell(out)
         local value = unitValue * quantity
         local profit = value - cost
@@ -118,12 +115,7 @@ function ns.CraftingCost(itemID)
       local data = ns.RecipeData and ns.RecipeData[pid]
       for _, rec in pairs(data and data.recipes or {}) do
         if rec[2] == itemID then
-          local cost, list = 0, rec[4] or {}
-          for i = 1, #list, 2 do
-            local unit = buy(list[i])
-            if not unit then cost = nil break end
-            cost = cost + unit * list[i + 1]
-          end
+          local cost = ns.Item.MaterialCost(rec[4])
           if cost then
             cost = cost / (rec[3] or 1)
             if not best or cost < best then best = cost end
@@ -133,6 +125,213 @@ function ns.CraftingCost(itemID)
     end
   end
   return best
+end
+
+-- Recipe items ----------------------------------------------------------------------
+-- What a recipe item ("Muster: Dämmerrüstung") teaches: the watch list (Data_RecipeWatch.lua)
+-- first, else the item name without its prefix, looked up in the skill data (Data_Skill.lua,
+-- spell ids, skill to learn) and the recipe data (Data_Recipes.lua). The name index is built
+-- on the first call, every item's answer is kept.
+
+-- Prefix -> professions it can stand for (narrows down recipes of the same name).
+local RECIPE_PREFIXES = {
+  { "Rezept", { Alchimie = true, Kochkunst = true } },
+  { "Muster", { Lederverarbeitung = true, Schneiderei = true } },
+  { "Pläne", { Schmiedekunst = true } },
+  { "Bauplan", { Ingenieurskunst = true } },
+  { "Schema", { Ingenieurskunst = true } },
+  { "Schematic", { Ingenieurskunst = true } },
+  { "Formel", { Verzauberkunst = true } },
+  { "Handbuch", { ["Erste Hilfe"] = true } },
+}
+
+-- Short profession names for compact lines ("Leder 300").
+local SHORT = { Lederverarbeitung = "Leder", Schmiedekunst = "Schmied", Verzauberkunst = "Verzauber",
+  Ingenieurskunst = "Ingenieur", Kochkunst = "Kochen" }
+function ns.ProfessionShort(name) return SHORT[name] or name or "?" end
+
+-- Lower case without spaces and dashes: "Waffe – Kreuzfahrer" = "Waffe - Kreuzfahrer",
+-- "Fallschirm-Umhang" = "Fallschirmumhang".
+local function norm(name)
+  local s = tostring(name or ""):lower():gsub("\226\128\147", ""):gsub("\226\128\148", "")
+  s = s:gsub("[%s%-]+", "")
+  return s
+end
+
+-- The recipe name in a recipe item's name and the professions its prefix stands for;
+-- nil if it has none of the prefixes.
+local function stripPrefix(name)
+  if type(name) ~= "string" then return nil end
+  for _, prefix in ipairs(RECIPE_PREFIXES) do
+    local rest = name:match("^" .. prefix[1] .. ": (.+)$")
+    if rest then return rest, prefix[2] end
+  end
+end
+
+-- Other spellings of the same recipe: "Eisen in Gold transmutieren" is the spell
+-- "Transmutieren: Eisen in Gold", "Stiefel verzaubern - Geschwindigkeit" is "Stiefel - Geschwindigkeit".
+local function spellings(rest)
+  local list = { rest }
+  local what = rest:match("^(.+) transmutieren$")
+  if what then table.insert(list, "Transmutieren: " .. what) end
+  local slot, effect = rest:match("^(.+) verzaubern %- (.+)$")
+  if slot then table.insert(list, slot .. " - " .. effect) end
+  return list
+end
+
+-- One recipe out of several of the same name: the prefix's professions, then the ones the
+-- skill data knows (learnable from an item; the recipe data also lists variants made by
+-- other means), then the same era (Forever's own recipe items have ids above 200000 and
+-- make items above 200000). nil if it stays ambiguous.
+local NEW_IDS = 200000
+local function choose(list, professions, itemID)
+  local function keep(test)
+    local out = {}
+    for _, c in ipairs(list) do if test(c) then table.insert(out, c) end end
+    if #out > 0 then list = out end
+  end
+  if professions then keep(function(c) return professions[c.profession] end) end
+  if #list > 1 then keep(function(c) return c.spell ~= nil end) end
+  if #list > 1 then keep(function(c) return c.product and (c.product > NEW_IDS) == (itemID > NEW_IDS) end) end
+  return #list == 1 and list[1] or nil
+end
+
+local byName, byProduct   -- normalized recipe name / product item -> { candidates }
+local function addCandidate(c)
+  local key = norm(c.name)
+  local list = byName[key]
+  if not list then list = {}; byName[key] = list end
+  for _, other in ipairs(list) do
+    -- The same recipe from the other data file (or another rank making the same item): fill gaps.
+    if other.pid == c.pid and other.product == c.product then
+      for k, v in pairs(c) do if other[k] == nil then other[k] = v end end
+      return
+    end
+  end
+  table.insert(list, c)
+  if c.product then
+    byProduct[c.product] = byProduct[c.product] or {}
+    table.insert(byProduct[c.product], c)
+  end
+end
+
+local function buildIndex()
+  byName, byProduct = {}, {}
+  -- Skill data first: it knows the spell and the skill needed to learn it.
+  for pid, prof in pairs(ns.SkillData or {}) do
+    for spell, d in pairs(prof.recipes or {}) do
+      if d.name then
+        addCandidate({ pid = pid, profession = prof.name, spell = spell, name = d.name, product = d.out,
+          qty = d.qty or 1, reagents = d.r, skill = d[5] })
+      end
+    end
+  end
+  for pid, data in pairs(ns.RecipeData or {}) do
+    for recipeID, rec in pairs(data.recipes or {}) do
+      if rec[1] then
+        addCandidate({ pid = pid, profession = data.name, recipeID = recipeID, name = rec[1], product = rec[2],
+          qty = rec[3] or 1, reagents = rec[4] })
+      end
+    end
+  end
+end
+
+local function professionID(name)
+  for pid, prof in pairs(ns.SkillData or {}) do if prof.name == name then return pid end end
+  for pid, data in pairs(ns.RecipeData or {}) do if data.name == name then return pid end end
+end
+
+local teaches = {}   -- itemID -> result or false (not a recipe item / not found)
+
+-- ns.RecipeTeaches(itemID) -> { profession, pid, skill, product (nil for enchantments), qty,
+--   reagents = { itemID, count, ... }, spell, name, from = "watch"|"name" } or nil.
+function ns.RecipeTeaches(itemID)
+  if not itemID then return nil end
+  local known = teaches[itemID]
+  if known ~= nil then return known or nil end
+  local watch = ns.RecipeWatch and ns.RecipeWatch[itemID]
+  local name = ns.ItemNames and ns.ItemNames[itemID]
+  if not name and ns.ItemName then
+    name = ns.ItemName(itemID)
+    -- Not loaded yet ("Item 123"): ask again next time instead of remembering "no recipe".
+    if not watch and (not name or name:match("^Item %d+$")) then return nil end
+  end
+  local rest, professions = stripPrefix(name)
+  if not watch and not rest then teaches[itemID] = false return nil end
+  if not byName then buildIndex() end
+  local named = {}
+  for _, spelling in ipairs(rest and spellings(rest) or {}) do
+    for _, c in ipairs(byName[norm(spelling)] or {}) do table.insert(named, c) end
+  end
+  local pick
+  if watch then
+    -- The watch list names the product (or, for enchantments, the profession): it decides.
+    local list = watch.product and byProduct[watch.product] or named
+    for _, c in ipairs(list) do
+      if c.profession == watch.profession and (not pick or (c.skill or 0) < (pick.skill or 0)) then pick = c end
+    end
+    pick = pick or { profession = watch.profession, pid = professionID(watch.profession),
+      product = watch.product, qty = 1 }
+  else
+    pick = choose(named, professions, itemID)
+  end
+  local result = false
+  if pick then
+    result = { profession = pick.profession, pid = pick.pid, skill = pick.skill or (watch and watch.skill),
+      product = pick.product, qty = pick.qty or 1, reagents = pick.reagents, spell = pick.spell,
+      name = pick.name or rest, from = watch and "watch" or "name" }
+  end
+  teaches[itemID] = result
+  return result or nil
+end
+
+-- The character's state for a taught recipe: { rank, learned } from the own scan of that
+-- profession, nil without one (profession missing or its window never opened).
+local function ownState(t)
+  local prefix = ns.CharKey() .. ":"
+  for key, scan in pairs(ns.db and ns.db.recipes or {}) do
+    if key:sub(1, #prefix) == prefix and scan.professionID == t.pid then
+      local learned = false
+      for id, r in pairs(scan.recipes or {}) do
+        if r.learned and ((t.product and r.out == t.product)
+          or (not t.product and (id == t.spell or norm(r.name) == norm(t.name)))) then
+          learned = true
+          break
+        end
+      end
+      return { rank = scan.rank or 0, learned = learned }
+    end
+  end
+end
+
+-- Everything the tooltip and the detail window show for a recipe item, or nil:
+-- { teaches, own, cost (material per unit made, nil if a price is missing), missing (item
+--   without price), value / onAH (product sells net per unit), profit, product (ns.Item),
+--   recipeNow (the recipe item itself in the AH) }
+function ns.RecipeTeachInfo(itemID)
+  local t = ns.RecipeTeaches(itemID)
+  if not t then return nil end
+  local info = { teaches = t, own = ownState(t), recipeNow = ns.Item(itemID).now }
+  if t.reagents then
+    local cost, missing = ns.Item.MaterialCost(t.reagents)
+    info.cost, info.missing = cost and cost / (t.qty or 1), missing
+  end
+  if t.product then
+    info.product = ns.Item(t.product)
+    info.value, info.onAH = ns.Item.SellNet(info.product)
+    if info.cost then info.profit = info.value - info.cost end
+  end
+  return info
+end
+
+-- "schon gelernt", "du: Leder 150" (green when the skill is reached) or "du: kein Leder-Scan".
+function ns.RecipeOwnText(info)
+  local t, own = info.teaches, info.own
+  local prof = ns.ProfessionShort(t.profession)
+  if not own then return "|cffff6b6bdu: kein " .. prof .. "-Scan|r" end
+  if own.learned then return "|cff5fd38dschon gelernt|r" end
+  local reached = not t.skill or own.rank >= t.skill
+  return (reached and "|cff5fd38d" or "|cffffb547") .. "du: " .. prof .. " " .. own.rank .. "|r"
 end
 
 -- Crafting professions for the chooser, ranked by the cloud's rating (Data_Professions.lua):

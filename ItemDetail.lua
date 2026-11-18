@@ -7,7 +7,8 @@
 -- Shows why the offer is a sniper hit (only while it is one), the hourly price and quantity
 -- of the last 48 hours (ns.Item.History), the market figures (ns.Item), the price stair
 -- (the sniper's last search, else the own full scan via ns.Item.Listings) and the crafting
--- cost (ns.CraftInfo from Tooltip.lua). No own price logic here.
+-- cost (ns.CraftInfo from Tooltip.lua); for recipe items what the recipe teaches
+-- (ns.RecipeTeachInfo from Crafting.lua). No own price logic here.
 -- Opened while the auction house is open, it searches the item right away (ns.AHSearch,
 -- one search a second, through the sniper while it runs): "suche …", then the price stair
 -- and "AH jetzt" of that search ("Preistreppe (gerade gesucht)").
@@ -423,6 +424,45 @@ render = function()
         Detail.Days(h.perDay), h.perDaySource or ""))
     end
     line("Treffer seit", ago(h.firstSeen or time()))
+  end
+
+  -- 1b. Recipe items: what the recipe teaches, what making it costs and brings (Crafting.lua).
+  local teach = ns.RecipeTeachInfo and ns.RecipeTeachInfo(itemID)
+  if teach then
+    local t = teach.teaches
+    local function m(c) return money(math.floor(c + 0.5)) end
+    section("Rezept lehrt")
+    if t.product then
+      line("Ergibt", (ns.ItemName(t.product) or ("#" .. t.product))
+        .. (t.qty > 1 and string.format("  ×%g", t.qty) or ""))
+    else
+      line("Ergibt", (t.name or "?") .. "  " .. Style.MUTED .. "Verzauberung (kein Item)|r")
+    end
+    line("Beruf", t.profession .. (t.skill and (" ab " .. t.skill) or ""))
+    line("Dein Charakter", ns.RecipeOwnText(teach))
+    local missing = teach.missing and (ORANGE .. "kein Preis: " .. (ns.ItemName(teach.missing) or "?") .. "|r")
+    line(t.product and "Herstellkosten / Stück" or "Material", teach.cost and m(teach.cost) or missing or "–")
+    if t.product then
+      line("Verkauf netto / Stück", m(teach.value) .. (teach.onAH and "" or ("  " .. Style.MUTED .. "Händler|r")))
+      if teach.profit then
+        line("Gewinn / Stück", (teach.profit >= 0 and (GREEN .. "+") or "|cffff6b6b-") .. m(math.abs(teach.profit)) .. "|r")
+      end
+      local p = teach.product
+      local demand = ns.Item.DemandText(p)
+      if demand and p.certain and p.certain >= 1 then
+        demand = demand .. "  ·  mind. " .. count(p.certain) .. " / Tag verkauft"
+      end
+      line("Nachfrage (Produkt)", demand or "–")
+    end
+    line("Rezept selbst im AH", teach.recipeNow and money(teach.recipeNow) or (Style.MUTED .. "nicht im AH|r"))
+    local list = t.reagents or {}
+    if #list > 0 then line(Style.MUTED .. "Material je Herstellung|r", "") end
+    for i = 1, #list, 2 do
+      local id, n = list[i], list[i + 1] or 1
+      local unit = ns.Item.BuyCost(ns.Item(id))
+      line(string.format("  %g× %s", n, ns.ItemName(id) or ("#" .. id)),
+        unit and (m(unit * n) .. "  " .. Style.MUTED .. "à " .. m(unit) .. "|r") or (ORANGE .. "kein Preis|r"))
+    end
   end
 
   -- 2. History of the last 48 hours

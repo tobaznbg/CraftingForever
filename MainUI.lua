@@ -61,7 +61,8 @@ local DURATIONS = { [1] = 12 * 3600, [2] = 24 * 3600, [3] = 48 * 3600 }
 
 local TOOLTIP_LINES = {
   { "price", "Preis" }, { "range", "Preisspanne" }, { "trend", "Trend" },
-  { "demand", "Nachfrage" }, { "crafting", "Crafting" }, { "advice", "Empfehlung" }, { "vendor", "Händlerpreis" },
+  { "demand", "Nachfrage" }, { "crafting", "Crafting" }, { "recipe", "Rezept lehrt (bei Rezept-Items)" },
+  { "advice", "Empfehlung" }, { "vendor", "Händlerpreis" },
   { "hint", "Hinweis „Alt+Klick: Details“" },
 }
 

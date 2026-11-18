@@ -51,13 +51,8 @@ end
 
 -- Material cost per unit of one recipe (merchant, else cheapest offer), nil if a price is missing.
 local function recipeCost(rec)
-  local cost, list = 0, rec[4] or {}
-  for i = 1, #list, 2 do
-    local unit = ns.Item.BuyCost(ns.Item(list[i]))
-    if not unit then return nil end
-    cost = cost + unit * list[i + 1]
-  end
-  return cost / (rec[3] or 1)
+  local cost = ns.Item.MaterialCost(rec[4])
+  return cost and cost / (rec[3] or 1)
 end
 
 -- Best recipe for the item: a learned one first, then the cheapest. Cached briefly
@@ -132,6 +127,31 @@ local function addLines(tooltip, itemID)
     tooltip:AddDoubleLine("    Gewinn", (profit >= 0 and "|cff5fd38d" or "|cffff6b6b-")
       .. ns.FormatMoney(math.floor(math.abs(profit) + 0.5)) .. "|r", 0.7, 0.7, 0.7, 1, 1, 1)
     tooltip:AddDoubleLine("    Rezept", craft.prof .. " · " .. craft.source, 0.7, 0.7, 0.7, 1, 1, 1)
+  end
+  -- Recipe items: what the recipe teaches and what making its product brings (Crafting.lua).
+  local teach = on("recipe") and ns.RecipeTeachInfo and ns.RecipeTeachInfo(itemID)
+  if teach then
+    local t = teach.teaches
+    local function m(c) return ns.FormatMoney(math.floor(c + 0.5), true) end
+    local what = t.product and ((ns.ItemName(t.product) or ("#" .. t.product))
+      .. (t.qty > 1 and string.format(" x%g", t.qty) or "")) or (t.name or "?")
+    local need = ns.ProfessionShort(t.profession) .. (t.skill and (" " .. t.skill) or "")
+    tooltip:AddLine(" ")
+    tooltip:AddLine(C .. "Rezept lehrt: " .. what .. " (" .. need .. ") · " .. ns.RecipeOwnText(teach), 1, 1, 1)
+    local cost = teach.cost and m(teach.cost)
+      or ("|cffffb547?|r" .. (teach.missing and (" (kein Preis: " .. (ns.ItemName(teach.missing) or "?") .. ")") or ""))
+    local parts
+    if t.product then
+      parts = { "Herstellung " .. cost, "bringt " .. m(teach.value) .. (teach.onAH and "" or " (Händler)") }
+      if teach.profit then
+        table.insert(parts, "Gewinn " .. (teach.profit >= 0 and "|cff5fd38d+" or "|cffff6b6b-") .. m(math.abs(teach.profit)) .. "|r")
+      end
+      local demand = ns.Item.DemandText(teach.product)
+      if demand then table.insert(parts, "Nachfrage " .. demand) end
+    else
+      parts = { "Material " .. cost, "Verzauberung (kein Item)" }
+    end
+    tooltip:AddLine(C .. "  " .. table.concat(parts, " · "), 0.8, 0.8, 0.8)
   end
   -- Gap between the auction house block and recommendation / merchant price.
   if on("advice") or on("vendor") then tooltip:AddLine(" ") end
