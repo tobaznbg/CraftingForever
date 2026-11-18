@@ -103,6 +103,11 @@ local function addLines(tooltip, itemID)
   if medians then
     tooltip:AddDoubleLine(C .. "Median", (medians:gsub("^Median ", "")), 0.7, 0.7, 0.7, 1, 1, 1)
   end
+  -- What guild members really sold it for (their ledgers, without names; ns.Item).
+  local sold = on("guildSales") and ns.Item.GuildSaleText(item, true)
+  if sold then
+    tooltip:AddDoubleLine(C .. "Gilde verkauft", sold, 0.7, 0.7, 0.7, 1, 1, 1)
+  end
   local trend = on("trend") and ns.Item.TrendText(item)
   if trend then
     local up, down = item.direction == 1, item.direction == -1

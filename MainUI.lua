@@ -60,7 +60,7 @@ local KINDS = { buy = "Kauf", post = "Eingestellt", sale = "Verkauf", expired = 
 local DURATIONS = { [1] = 12 * 3600, [2] = 24 * 3600, [3] = 48 * 3600 }
 
 local TOOLTIP_LINES = {
-  { "price", "Preis" }, { "range", "Mediane" }, { "trend", "Trend" },
+  { "price", "Preis" }, { "range", "Mediane" }, { "guildSales", "Gilde verkauft (echte Verkäufe)" }, { "trend", "Trend" },
   { "demand", "Nachfrage" }, { "crafting", "Crafting" }, { "recipe", "Rezept lehrt (bei Rezept-Items)" },
   { "advice", "Empfehlung" }, { "vendor", "Händlerpreis" },
   { "hint", "Hinweis „Alt+Klick: Details“" },

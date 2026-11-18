@@ -494,6 +494,10 @@ render = function()
   line("Median heute", item.medToday and money(item.medToday) or "–")
   line("Median gestern", item.medYesterday and money(item.medYesterday) or "–")
   line("Median 7 Tage", item.med7 and money(item.med7) or "–")
+  -- Real sales of guild members (their ledgers, without names; ns.Item). Shown only.
+  local g = item.guildSale
+  line("Gilde verkauft", g and (money(g.median) .. "  " .. Style.MUTED .. string.format(
+    "Median aus %d Verkäufen, %s Stück, %d Tage|r", g.sales, count(g.units), g.days)) or "–")
   line("Trend", ns.Item.TrendText(item) or "–")
   local demand = ns.Item.DemandText(item)
   if demand and item.certain and item.certain >= 1 then

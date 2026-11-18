@@ -25,6 +25,10 @@
 --   trend      PPO of the daily prices, EMA 3 days / EMA 14 days - 1 (cloud)
 --   direction  1 rising, -1 falling, 0 sideways (EMA 3 / 7 / 14 in order or not)
 --   vendorSell what a merchant pays, vendorBuy what a merchant charges (nil if unknown)
+--   guildSale  what guild members really sold it for: { median, sales, units, days } -
+--              median unit price (before the cut) over the last days, from the members'
+--              ledgers without names (m4d, Data_GuildSales.lua; only from 3 sales on), nil
+--              without. Shown only (Item.GuildSaleText); not part of R or any formula yet.
 -- }
 -- Derived (the only formulas for these):
 --   Item.SellNet(e)  selling one unit: the lower of (cheapest offer - 1 copper) and R,
@@ -74,6 +78,19 @@ local function epoch(iso)
   return epochCache[iso] or nil
 end
 
+-- Guild sales prices from the data addon (M4CompanionData.GuildSales, kept current by the
+-- companion app): { updated, days, houses = { [house] = { [itemID] = { median, sales, units } } } }.
+-- Looked up per call: the data addon loads after this one.
+local function guildSale(itemID)
+  local live = rawget(_G, "M4CompanionData")
+  local gs = type(live) == "table" and live.GuildSales
+  if type(gs) ~= "table" then return nil end
+  local items = type(gs.houses) == "table" and gs.houses[HOUSE] or gs.items
+  local row = type(items) == "table" and items[itemID]
+  if type(row) ~= "table" or type(row[1]) ~= "number" or row[1] <= 0 then return nil end
+  return { median = row[1], sales = row[2] or 0, units = row[3] or 0, days = gs.days or 7 }
+end
+
 local function clientVendorSell(itemID)
   local getInfo = (C_Item and C_Item.GetItemInfo) or GetItemInfo
   local price = getInfo and select(11, getInfo(itemID))
@@ -120,6 +137,7 @@ function Item.Get(itemID)
   local vs = clientVendorSell(itemID)
   e.vendorSell = vs and vs > 0 and vs or nil
   e.vendorBuy = (ns.db and ns.db.vendorBuy and ns.db.vendorBuy[itemID]) or VENDOR_ESTIMATE[itemID]
+  e.guildSale = guildSale(itemID)
   return e
 end
 
@@ -240,6 +258,15 @@ function Item.MedianText(e, short)
   if e.med7 then table.insert(parts, "7 Tage " .. fmt(e.med7, short)) end
   if #parts == 0 then return nil end
   return "Median " .. table.concat(parts, " · ")
+end
+
+-- "15g 20s (23×, 7 Tage)": what guild members sold it for (median unit price, number of
+-- sales, days); nil without. short = copper left out (tooltips).
+function Item.GuildSaleText(e, short)
+  local g = e and e.guildSale
+  if not g then return nil end
+  local fmt = ns.FormatMoney or function(c) return tostring(c) end
+  return string.format("%s (%d\195\151, %d Tage)", fmt(g.median, short), g.sales, g.days)
 end
 
 function Item.SellNet(e)
