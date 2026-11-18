@@ -185,7 +185,7 @@ local function build(page, width, height)
   -- Watched recipes (Data_RecipeWatch.lua): own category on top of the watch list.
   table.insert(updates, toggle(settings, -216, "Rezepte beobachten",
     function() return S().recipeWatch end, function() set("recipeWatch", not S().recipeWatch) end))
-  table.insert(updates, stepper(settings, -242, "Rezepte kaufen bis (vom üblichen Preis)",
+  table.insert(updates, stepper(settings, -242, "Rezepte kaufen bis (vom Median gestern)",
     function() return string.format("%d %%", math.floor(S().recipeMax * 100 + 0.5)) end,
     function() set("recipeMax", math.max(0.5, S().recipeMax - 0.05)) end,
     function() set("recipeMax", math.min(2, S().recipeMax + 0.05)) end))
@@ -255,8 +255,8 @@ local function build(page, width, height)
   watchInfo:SetPoint("TOPRIGHT", -10, -9)
   watchInfo:SetTextColor(unpack(Style.C.muted))
   -- Column heads at the same right-aligned offsets as the list's cells (itemList).
-  local WATCH_COLS = { 0, 80, 80, 70, 95 }
-  local WATCH_HEADS = { "", "Ø Preis", "Vorauswahl", "Nachfrage", "Trend" }
+  local WATCH_COLS = { 0, 95, 80, 70, 95 }
+  local WATCH_HEADS = { "", "Median gestern", "Vorauswahl", "Nachfrage", "Trend" }
   do
     local x = 0
     for c = #WATCH_COLS, 2, -1 do
@@ -293,9 +293,9 @@ local function build(page, width, height)
     local candidates = Sniper and Sniper.WatchCandidates and Sniper.WatchCandidates() or {}
     local entries = {}
     for _, c in ipairs(candidates) do
-      local limit = c.avg * set.maxShare
+      local limit = c.ref * set.maxShare
       if set.maxPrice > 0 then limit = math.min(limit, set.maxPrice) end
-      table.insert(entries, { ns.ItemName(c.itemID) or ("#" .. c.itemID), money(c.avg),
+      table.insert(entries, { ns.ItemName(c.itemID) or ("#" .. c.itemID), money(c.ref),
         money(limit), demandLabel(c.demand), trendText(c.itemID), itemID = c.itemID })
     end
     local recipes = Sniper and Sniper.RecipeItems and Sniper.RecipeItems() or {}
@@ -305,8 +305,9 @@ local function build(page, width, height)
       if not known[itemID] then
         local r = ns.RecipeWatch[itemID]
         local limit = Sniper.RecipeLimit(itemID)
+        local usual = Sniper.RecipeUsual(itemID)
         table.insert(entries, { ORANGE .. "Rezept|r  " .. (ns.ItemName(itemID) or ("#" .. itemID)),
-          r.usual and money(r.usual) or (MUTED .. "–|r"), limit and money(limit) or (MUTED .. "jedes|r"),
+          usual and money(usual) or (MUTED .. "–|r"), limit and money(limit) or (MUTED .. "jedes|r"),
           r.skill and ("Skill " .. r.skill) or "", trendText(itemID), itemID = itemID })
       end
     end

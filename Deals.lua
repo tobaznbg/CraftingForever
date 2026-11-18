@@ -1,7 +1,8 @@
 -- Deals: rules for "far below its usual price", used by the sniper (live searches). Market data comes from ns.Item.
 --   house price  = unit price at which a quarter of the listed quantity is reached
 --                  (a few cheap outliers don't move it; a flooded market does)
---   reference    = the lower of the house price and the average (ns.Item)
+--   reference    = the lower of the house price and R (ns.Item: median of yesterday, else
+--                  of 7 days, else of today; German calendar days)
 -- An offer is a deal at or below maxShare of the reference, for items with demand
 -- >= minDemand (ns.Item), when at least minProfit remains after the cut (Deals.Settings).
 local ADDON, ns = ...
@@ -12,7 +13,7 @@ ns.Deals = Deals
 -- Settings of the sniper, adjustable in the main window (ns.db.settings.sniper).
 Deals.DEFAULTS = {
   maxShare = 0.6,       -- offer at most 60 % of the reference
-  maxPrice = 0,         -- maximum unit price and maximum usual price (Ø) on the watch list; 0 means no limit
+  maxPrice = 0,         -- maximum unit price and maximum R (median of yesterday) on the watch list; 0 means no limit
   minProfit = 2000,     -- 20 silver per item line after the 5 % cut
   minDemand = 2,        -- ns.Item demand (cloud scale) for a hit
   watchMax = 150,       -- items on the watch list
@@ -20,7 +21,7 @@ Deals.DEFAULTS = {
   sellDays = 2,         -- price stair: what is bought must sell within this many days
   minGap = 0.15,        -- price stair: every bought level at least 15 % below the net resale price
   recipeWatch = true,   -- watch the tradeable recipes of ns.RecipeWatch as well (own category)
-  recipeMax = 0.7,      -- recipe hit: offer at most this share of its usual price (most are listed near it)
+  recipeMax = 0.7,      -- recipe hit: offer at most this share of its R (median of yesterday; most are listed near it)
   fallLimit = 0.10,     -- leave out items whose 3-day average is at least this far below the 14-day
                         -- one (Deals.Falling); 0 = keep falling items, -1 = only rising items. Buying into a falling market
                         -- means reselling below today's price.
@@ -73,17 +74,14 @@ local function housePrice(listings, share)
   end
 end
 
--- Reference value and a short source text, or nil. Sources: "AH-Preis" (house price of the
--- current offers), "gestern" (yesterday's daily price), "Ø 14 Tage" (ns.Item average).
+-- Reference value and a short source text, or nil: the lower of R (ns.Item: median of
+-- yesterday, else of 7 days, else of today; label "Median gestern" etc.) and the house price
+-- of the current offers ("AH-Preis"). Same R as everywhere (selling, recipes, cloud).
 function Deals.Reference(itemID, house)
   local e = ns.Item(itemID)
-  local avg, label = e.avg, "Ø 14 Tage"
-  -- While our own history is short, the average leans on the TSM start value, which can be
-  -- far above this realm (Untoter Motor: 16g average, 4g real). Buying never trusts more
-  -- than yesterday's real daily price here.
-  if e.yesterday and (not avg or e.yesterday < avg) then avg, label = e.yesterday, "gestern" end
-  if house and (not avg or house < avg) then return house, "AH-Preis" end
-  if avg then return avg, label end
+  local ref, label = e.ref, ns.Item.RefLabel(e)
+  if house and (not ref or house < ref) then return house, "AH-Preis" end
+  if ref then return ref, label end
   return nil
 end
 
@@ -104,12 +102,12 @@ Deals.CUT = CUT
 --   2. a real middle field: the foreign units in [P, P * 1.25] are at least MIDFIELD and at
 --      least as many as the units bought. Otherwise the cheap units ARE the market and the
 --      few above them are just overpriced offers (Bauplan: Thoriumpatronen, 20 cheap, 4 above)
---   3. resale never above cap (ns.Item average, else the reference)
+--   3. resale never above cap (R of ns.Item, else the reference)
 --   4. every bought level pays off on its own: unit <= resale * (1 - CUT) * (1 - minGap)
 --   5. every bought unit stays at or below the optional maxPrice setting
 -- The P with the highest profit N * resale * (1 - CUT) - C wins.
 -- listings = { { unit, count, own }... }. Returns nil or
---   { level = P, sellAt = resale, sellSource = "Mittelfeld" | "Ø-Obergrenze", buyUpTo, units,
+--   { level = P, sellAt = resale, sellSource = "Mittelfeld" | "Obergrenze", buyUpTo, units,
 --     cost, profit, best, auctions = bought listings (cheapest first) }.
 Deals.MIDFIELD, Deals.MIDFIELD_SPAN = 3, 1.25
 function Deals.Staircase(listings, cap, perDay, set)
@@ -147,7 +145,7 @@ function Deals.Staircase(listings, cap, perDay, set)
         if not best or profit > best.profit then
           local bought = {}
           for j = 1, i - 1 do table.insert(bought, foreign[j]) end
-          best = { level = P, sellAt = resale, sellSource = resale < cap and "Mittelfeld" or "Ø-Obergrenze",
+          best = { level = P, sellAt = resale, sellSource = resale < cap and "Mittelfeld" or "Obergrenze",
             buyUpTo = foreign[i - 1].unit, units = units, cost = cost, profit = profit, best = foreign[1].unit,
             auctions = bought }
         end

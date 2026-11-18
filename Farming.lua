@@ -71,7 +71,7 @@ function Farming.Evaluate()
     for _, entry in ipairs(group.items) do
       local itemID = entry[1]
       local m = ns.Item(itemID)
-      if not (m.now or m.avg) then m = nil end
+      if not (m.now or m.ref) then m = nil end
       local ok, reason = access(group, entry, level)
       local row = { itemID = itemID, market = m, reachable = ok, access = reason }
       if m then

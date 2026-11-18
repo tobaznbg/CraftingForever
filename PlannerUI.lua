@@ -347,7 +347,7 @@ local function showPatterns()
         local reasons = {}
         if vendor > price then table.insert(reasons, GREEN .. "unter Händlerpreis|r") end
         if usual and price <= usual * CHEAP_SHARE then
-          table.insert(reasons, GREEN .. string.format("%d %% unter üblich|r", 100 - math.floor(price / usual * 100)))
+          table.insert(reasons, GREEN .. string.format("%d %% unter Median gestern|r", 100 - math.floor(price / usual * 100)))
         end
         if safePayback and safePayback <= PAYBACK_MAX then table.insert(reasons, GREEN .. "sicher schnell bezahlt|r") end
         if potentialPayback and potentialPayback <= PAYBACK_MAX then table.insert(reasons, "AH schnell bezahlt") end
@@ -366,9 +366,9 @@ local function showPatterns()
     return (a.potentialPayback or math.huge) < (b.potentialPayback or math.huge)
   end)
 
-  columns = { { 175 }, { 30, "RIGHT" }, { 65, "RIGHT" }, { 65, "RIGHT" }, { 50, "RIGHT" }, { 60, "RIGHT" }, { 140 } }
+  columns = { { 160 }, { 30, "RIGHT" }, { 65, "RIGHT" }, { 85, "RIGHT" }, { 50, "RIGHT" }, { 60, "RIGHT" }, { 135 } }
   addText(GREY .. "Bezahlt nach = so viele Herstellungen, bis das Muster wieder drin ist.|r")
-  addCells(GOLD .. "Muster|r", GOLD .. "ab|r", GOLD .. "AH|r", GOLD .. "üblich|r",
+  addCells(GOLD .. "Muster|r", GOLD .. "ab|r", GOLD .. "AH|r", GOLD .. "Median gestern|r",
     GOLD .. "SICHER|r", GOLD .. "POTENZIAL|r", GOLD .. "Schnäppchen weil|r")
   for _, offer in ipairs(offers) do
     local name = offer.deal and (GREEN .. offer.name .. "|r") or offer.name
@@ -398,11 +398,11 @@ local function showFarming()
     ownT and ("eigener Scan " .. date("%d.%m. %H:%M", ownT)) or ("Sammler " .. (updated or "?")),
     hours >= minHours and string.format("Sammler, %d Stunden", hours)
       or string.format("noch zu wenig Daten (%d von %d Stunden)", hours, minHours)))
-  columns = { { 190 }, { 75, "RIGHT" }, { 75, "RIGHT" }, { 55, "RIGHT" }, { 60, "RIGHT" }, { 95 }, { 130 } }
+  columns = { { 170 }, { 75, "RIGHT" }, { 75, "RIGHT" }, { 85, "RIGHT" }, { 60, "RIGHT" }, { 95 }, { 120 } }
   for _, group in ipairs(ns.Farming.Evaluate()) do
     addBlank()
     addText(GOLD .. group.label .. "|r")
-    addCells(GOLD .. "Item|r", GOLD .. "Erlös/Stück|r", GOLD .. "AH jetzt|r", GOLD .. "Ø|r",
+    addCells(GOLD .. "Item|r", GOLD .. "Erlös/Stück|r", GOLD .. "AH jetzt|r", GOLD .. "Median gestern|r",
       GOLD .. "Nachfrage|r", GOLD .. "Signal|r", GOLD .. "Zugang|r")
     for _, row in ipairs(group.rows) do
       local m = row.market
@@ -412,7 +412,7 @@ local function showFarming()
       addItemCells(row.itemID, withIcon(row.itemID, name),
         m and money(row.value) or GREY .. "–|r",
         m and m.now and money(m.now) or GREY .. "–|r",
-        m and m.avg and money(m.avg) or "",
+        m and m.ref and money(m.ref) or "",
         m and ns.Item.DemandText(m) or GREY .. "?|r",
         color .. row.signal .. "|r",
         (row.reachable and GREEN or GREY) .. row.access .. "|r")

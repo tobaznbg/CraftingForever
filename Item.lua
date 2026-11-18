@@ -9,22 +9,28 @@
 --   cheapest   the single cheapest offer right now (also from single item searches); only
 --              for views about single offers (sniper, merchant flips)
 --   offers, quantity   auctions / units listed at that time (internal, not shown)
---   min, avg, max      lowest / average / highest hourly cheapest offer of the last
---                      two weeks (collector; at the start blended with TSM start values)
+--   medToday, medTodayHours  median of the hourly cheapest offers today (Berlin calendar
+--                      day, 0:00-23:59 German time) so far, and the hours behind it (internal,
+--                      not shown)
+--   medYesterday       the same median over the whole previous Berlin day
+--   med7, med7Days     the same median over today plus the 6 full days before, days behind it
+--   ref, refSource     R, THE reference price everywhere (selling, sniper, recipes, views):
+--                      medYesterday, else med7, else medToday; refSource "yesterday" /
+--                      "week" / "today" (Item.RefLabel). Same rule as the cloud (price_ref).
 --   demand     relative demand from the cloud (scale: TSM's real EU sales per day; our own
 --              estimate calibrated to it). Shown as a level, not as units: Item.DemandText
 --   certain    units certainly bought per day (partial purchases of commodities, a lower
 --              bound; nil for items that are not commodities)
---   yesterday  daily price of the previous day (cloud); change = now / yesterday - 1
+--   change     now / medYesterday - 1 ("zu Median gestern")
 --   trend      PPO of the daily prices, EMA 3 days / EMA 14 days - 1 (cloud)
 --   direction  1 rising, -1 falling, 0 sideways (EMA 3 / 7 / 14 in order or not)
 --   vendorSell what a merchant pays, vendorBuy what a merchant charges (nil if unknown)
 -- }
 -- Derived (the only formulas for these):
---   Item.SellNet(e)  selling one unit: the lower of (cheapest offer - 1 copper) and the
---                    average, minus the 5 % cut; a merchant if he pays more (same rule as
---                    the cloud's ahprofessions)
---   Item.BuyCost(e)  buying one unit: merchant, else cheapest offer, else the average
+--   Item.SellNet(e)  selling one unit: the lower of (cheapest offer - 1 copper) and R,
+--                    minus the 5 % cut; a merchant if he pays more (same rule as the
+--                    cloud's ahprofessions)
+--   Item.BuyCost(e)  buying one unit: merchant, else cheapest offer, else R
 --   Item.MaterialCost(list)  buying a reagent list { itemID, count, ... } via BuyCost
 --   Item.Value(e)    what one unit is worth to the player (= SellNet)
 -- Producers report live observations with Item.Observe (single item searches).
@@ -102,12 +108,15 @@ function Item.Get(itemID)
     if not o.now then e.now = nil end
   end
   if row then
-    e.min, e.avg, e.max = row[11], row[12], row[13]
     e.demand, e.certain = row[18], row[19]
-    e.yesterday, e.trend, e.direction = row[15], row[16], row[17]
+    e.trend, e.direction = row[16], row[17]
+    e.medToday, e.medTodayHours, e.medYesterday, e.med7, e.med7Days = row[20], row[21], row[22], row[23], row[24]
+    -- A collector file from before the medians (fields 20-24 missing): its daily price of
+    -- the previous UTC day (field 15, the same median, other day boundary) stands in.
+    if row[21] == nil and row[24] == nil and row[15] then e.medYesterday = row[15] end
   end
-  -- Same formula as the cloud (ahmetrics change24), with the newest price we have.
-  if e.now and e.yesterday and e.yesterday > 0 then e.change = e.now / e.yesterday - 1 end
+  e.ref, e.refSource = Item.Reference(e)
+  if e.now and e.medYesterday and e.medYesterday > 0 then e.change = e.now / e.medYesterday - 1 end
   local vs = clientVendorSell(itemID)
   e.vendorSell = vs and vs > 0 and vs or nil
   e.vendorBuy = (ns.db and ns.db.vendorBuy and ns.db.vendorBuy[itemID]) or VENDOR_ESTIMATE[itemID]
@@ -198,11 +207,46 @@ function Item.Observe(itemID, cheapest, t)
   observed[itemID] = { now = cheapest, t = t or (time and time()) or 0 }
 end
 
+-- R and its source from the medians of an item table (see the head of this file).
+function Item.Reference(e)
+  if e.medYesterday and e.medYesterday > 0 then return e.medYesterday, "yesterday" end
+  if e.med7 and e.med7 > 0 then return e.med7, "week" end
+  if e.medToday and e.medToday > 0 then return e.medToday, "today" end
+  return nil, nil
+end
+
+Item.REF_LABELS = { yesterday = "Median gestern", week = "Median 7 Tage", today = "Median heute" }
+
+-- "Median gestern" etc.: what R of the item is; nil without R.
+function Item.RefLabel(e)
+  return e.refSource and Item.REF_LABELS[e.refSource] or nil
+end
+
+-- "-10 % zu Median gestern" (price against R), nil without R.
+function Item.RefCompare(price, e)
+  if not price or not e.ref or e.ref <= 0 then return nil end
+  local d = price / e.ref - 1
+  local pct = math.floor(math.abs(d) * 100 + 0.5) * (d < 0 and -1 or 1)
+  return string.format("%+d %% zu %s", pct, Item.RefLabel(e))
+end
+
+-- "Median heute 15g · gestern 23g · 7 Tage 23g": the three medians, the ones we have; nil
+-- without any. short = copper left out (tooltips).
+function Item.MedianText(e, short)
+  local fmt = ns.FormatMoney or function(c) return tostring(c) end
+  local parts = {}
+  if e.medToday then table.insert(parts, "heute " .. fmt(e.medToday, short)) end
+  if e.medYesterday then table.insert(parts, "gestern " .. fmt(e.medYesterday, short)) end
+  if e.med7 then table.insert(parts, "7 Tage " .. fmt(e.med7, short)) end
+  if #parts == 0 then return nil end
+  return "Median " .. table.concat(parts, " · ")
+end
+
 function Item.SellNet(e)
-  -- Sustained price: undercut the cheapest offer, but never above the 14-day average
-  -- (one seller listing far above the usual price does not make it sellable there).
-  local base = e.now and (e.now - 1) or e.avg
-  if base and e.avg then base = math.min(base, e.avg) end
+  -- Sustained price: undercut the cheapest offer, but never above R (median of yesterday,
+  -- see Item.Reference): one seller listing far above it does not make it sellable there.
+  local base = e.now and (e.now - 1) or e.ref
+  if base and e.ref then base = math.min(base, e.ref) end
   local ah = base and base > 0 and math.floor(base * (1 - CUT)) or 0
   local vendor = e.vendorSell or 0
   if ah > 0 and ah >= vendor then return ah, true end
@@ -211,7 +255,7 @@ end
 
 function Item.BuyCost(e)
   if e.vendorBuy then return e.vendorBuy, true end
-  return e.now or e.avg, false
+  return e.now or e.ref, false
 end
 
 -- Copper for a reagent list { itemID, count, ... } (recipe format), each unit via BuyCost.
@@ -227,10 +271,10 @@ function Item.MaterialCost(list)
   return cost
 end
 
--- The current price is far from the average (more than 50 % above or below): a single
--- offer that may not be the market. Views mark such prices as "unsicher".
+-- The current price is far from R (more than 50 % above or below): a single offer that
+-- may not be the market. Views mark such prices as "unsicher".
 function Item.Unsure(e)
-  return e.now ~= nil and e.avg ~= nil and e.avg > 0 and (e.now > e.avg * 1.5 or e.now < e.avg * 0.5)
+  return e.now ~= nil and e.ref ~= nil and e.ref > 0 and (e.now > e.ref * 1.5 or e.now < e.ref * 0.5)
 end
 
 function Item.Value(e)

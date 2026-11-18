@@ -71,7 +71,7 @@ function Inventory.Advise(itemID, entry)
   local item = ns.Item(itemID)
   local vendor = item.vendorSell or 0
   local net, viaAH = ns.Item.SellNet(item)
-  local ah = (item.now or item.avg) and viaAH and net or nil
+  local ah = (item.now or item.ref) and viaAH and net or nil
   local classID, equipLoc, subclassID = itemClass(itemID)
 
   if entry.q == 0 then return "Händler", "grau", vendor, vendor end

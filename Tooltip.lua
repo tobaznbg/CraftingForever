@@ -91,17 +91,17 @@ local function addLines(tooltip, itemID)
   if not on("price") then
     -- no price line
   elseif item.now then
-    local change = item.change and string.format("  (%+d %% zu gestern)",
-      (math.floor(math.abs(item.change) * 100 + 0.5) * (item.change < 0 and -1 or 1))) or ""
+    local cmp = ns.Item.RefCompare(item.now, item)
     local unsure = ns.Item.Unsure(item)
-    tooltip:AddDoubleLine(C .. "AH jetzt", ns.FormatMoney(item.now) .. change .. (unsure and "  unsicher" or ""),
-      1, 1, 1, 1, unsure and 0.71 or 1, unsure and 0.28 or 1)
+    tooltip:AddDoubleLine(C .. "AH jetzt", ns.FormatMoney(item.now) .. (cmp and ("  (" .. cmp .. ")") or "")
+      .. (unsure and "  unsicher" or ""), 1, 1, 1, 1, unsure and 0.71 or 1, unsure and 0.28 or 1)
   else
     tooltip:AddLine(C .. "nicht im AH", 0.7, 0.7, 0.7)
   end
-  if on("range") and item.min and item.max then
-    tooltip:AddDoubleLine(C .. "Preisspanne", ns.FormatMoney(item.min) .. " – " .. ns.FormatMoney(item.max)
-      .. "  (Ø " .. ns.FormatMoney(item.avg) .. ")", 0.7, 0.7, 0.7, 1, 1, 1)
+  -- The three medians of the hourly cheapest offers (German calendar days, ns.Item).
+  local medians = on("range") and ns.Item.MedianText(item, true)
+  if medians then
+    tooltip:AddDoubleLine(C .. "Median", (medians:gsub("^Median ", "")), 0.7, 0.7, 0.7, 1, 1, 1)
   end
   local trend = on("trend") and ns.Item.TrendText(item)
   if trend then

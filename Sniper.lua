@@ -15,7 +15,7 @@
 -- Every hit and purchase is logged in db.sniper, so the yield can be measured.
 -- Recipes (ns.RecipeWatch, Data_RecipeWatch.lua): the tradeable recipes worth having are
 -- watched in their own category on top of the watch list (not counted against watchMax).
--- A recipe hit is an offer at or below its usual price * recipeMax (no usual price known:
+-- A recipe hit is an offer at or below its R (Sniper.RecipeUsual) * recipeMax (no R known:
 -- every offer); it is marked "Rezept" in the list and plays its own sound.
 local ADDON, ns = ...
 
@@ -84,9 +84,9 @@ local function keyOf(itemKey)
   return table.concat({ itemKey.itemID, itemKey.itemSuffix or 0, itemKey.battlePetSpeciesID or 0 }, ":")
 end
 
--- Usual price of this item in our auction house (ns.Item average).
+-- Reference price of this item in our auction house (ns.Item R, median of yesterday).
 local function houseValue(itemID)
-  return ns.Item(itemID).avg
+  return ns.Item(itemID).ref
 end
 
 -- Same item variant as the reference prices (random suffixes and pets differ in value).
@@ -99,7 +99,7 @@ local function ready()
 end
 
 -- Watch list candidates from the items of our own auction house (ns.Item), best first:
--- { { itemID, score, avg, demand }... } limited to watchMax (Deals.Settings). Also used
+-- { { itemID, score, ref, demand }... } limited to watchMax (Deals.Settings). Also used
 -- by the main window to show what the sniper watches.
 function Sniper.WatchCandidates()
   local house = ns.AHData and ns.AHData[113]
@@ -109,16 +109,16 @@ function Sniper.WatchCandidates()
   local discount = 1 - set.maxShare - ns.Deals.CUT
   for itemID in pairs(house.items) do
     local item = ns.Item(itemID)
-    local avg, demand = ns.Deals.Reference(itemID, nil), item.demand
-    local candidateLimit = avg and avg * set.maxShare
+    local ref, demand = ns.Deals.Reference(itemID, nil), item.demand
+    local candidateLimit = ref and ref * set.maxShare
     if candidateLimit and set.maxPrice > 0 then candidateLimit = math.min(candidateLimit, set.maxPrice) end
-    -- Maximalpreis also limits the watch list: no items whose usual price is above it.
-    local tooExpensive = avg and set.maxPrice > 0 and avg > set.maxPrice
+    -- Maximalpreis also limits the watch list: no items whose R is above it.
+    local tooExpensive = ref and set.maxPrice > 0 and ref > set.maxPrice
     local falling = ns.Deals.Falling(itemID)
-    if avg and not tooExpensive and not falling and demand and demand >= set.watchMinDemand and candidateLimit <= money then
+    if ref and not tooExpensive and not falling and demand and demand >= set.watchMinDemand and candidateLimit <= money then
       local stack = math.max(1, math.min(20, (item.quantity or 1) / math.max(1, item.offers or 1)))
-      if discount * avg * stack >= set.minProfit then
-        table.insert(list, { itemID = itemID, score = avg * math.min(demand, 20), avg = avg, demand = demand })
+      if discount * ref * stack >= set.minProfit then
+        table.insert(list, { itemID = itemID, score = ref * math.min(demand, 20), ref = ref, demand = demand })
       end
     end
   end
@@ -134,17 +134,20 @@ function Sniper.RecipeInfo(itemID)
   return r
 end
 
--- Usual price of a watched recipe: the list's value, else our own house average (ns.Item);
--- never above yesterday's daily price (prices fall since the launch, older values run high).
+-- Comparison price of a watched recipe: R of the recipe item (ns.Item: median of yesterday,
+-- else of 7 days, else of today), else the list's value. Returns price, label ("Median
+-- gestern", ..., "Listenwert") and a short label for narrow cells ("gestern", "7 Tage",
+-- "heute", "Liste"); nil without any. Same rule as the cloud (ahnotify.recipes_at).
+local SHORT = { yesterday = "gestern", week = "7 Tage", today = "heute" }
 function Sniper.RecipeUsual(itemID)
-  local r = ns.RecipeWatch and ns.RecipeWatch[itemID]
   local e = ns.Item(itemID)
-  local usual = r and r.usual or e.avg
-  if e.yesterday and (not usual or e.yesterday < usual) then usual = e.yesterday end
-  return usual
+  if e.ref then return e.ref, ns.Item.RefLabel(e), SHORT[e.refSource] end
+  local r = ns.RecipeWatch and ns.RecipeWatch[itemID]
+  if r and r.usual then return r.usual, "Listenwert", "Liste" end
+  return nil
 end
 
--- Highest price a recipe hit may cost (nil = every offer, no usual price and no global cap).
+-- Highest price a recipe hit may cost (nil = every offer, no R and no global cap).
 function Sniper.RecipeLimit(itemID)
   local usual = Sniper.RecipeUsual(itemID)
   local set = ns.Deals.Settings()
@@ -320,10 +323,10 @@ local function priceLevels(listings)
 end
 
 -- Recipe hit: the foreign offers at or below the recipe limit, cheapest first. profit =
--- what stays below the usual price (0 without one); sellAt = the usual price.
+-- what stays below R (Sniper.RecipeUsual, 0 without one); sellAt = R.
 local function recipeHit(c, listings, commodity)
   local limit = Sniper.RecipeLimit(c.itemID)
-  local usual = Sniper.RecipeUsual(c.itemID)
+  local usual, usualLabel, usualShort = Sniper.RecipeUsual(c.itemID)
   local buy = {}
   for _, l in ipairs(listings) do
     if not l.own and l.unit and l.unit > 0 and (not limit or l.unit <= limit) then table.insert(buy, l) end
@@ -336,7 +339,8 @@ local function recipeHit(c, listings, commodity)
   local info = ns.RecipeWatch and ns.RecipeWatch[c.itemID] or {}
   return { key = c.key, itemKey = c.itemKey, itemID = c.itemID, commodity = commodity, recipe = true,
     profession = info.profession, skill = info.skill, product = info.product, usual = usual,
-    ref = usual or best, cap = usual, level = best, sellAt = usual or best, sellSource = "üblicher Preis",
+    usualLabel = usualLabel, usualShort = usualShort,
+    ref = usual or best, cap = usual, level = best, sellAt = usual or best, sellSource = usualLabel or "Angebot",
     buyUpTo = limit or best, limit = limit or best, units = units, cost = cost,
     profit = usual and math.max(0, usual - best) or 0, best = best, auctions = buy }
 end
@@ -365,7 +369,7 @@ local function evaluate(c, listings, commodity)
   end
   -- Price stair (Deals.Staircase): what to buy, where to sell it again.
   local item = ns.Item(c.itemID)
-  local cap = item.avg or ref
+  local cap, capLabel = item.ref or ref, item.ref and ns.Item.RefLabel(item) or source
   -- The demand figure is on TSM's EU-wide scale, not units on this realm: without counted
   -- sales assume at most one unit a day.
   local perDay, perDaySource = item.demand and math.min(item.demand, 1), "vorsichtig geschätzt"
@@ -375,7 +379,7 @@ local function evaluate(c, listings, commodity)
   local stair = ns.Deals.Staircase(listings, cap, perDay, set)
   if not stair or stair.profit < ns.Deals.MinProfit() then return nil end
   local hit = { key = c.key, itemKey = c.itemKey, itemID = c.itemID, commodity = commodity, ref = ref,
-    source = source, cap = cap, level = stair.level, sellAt = stair.sellAt, sellSource = stair.sellSource,
+    source = source, cap = cap, capLabel = capLabel, level = stair.level, sellAt = stair.sellAt, sellSource = stair.sellSource,
     buyUpTo = stair.buyUpTo, limit = stair.buyUpTo, units = stair.units, cost = stair.cost,
     profit = stair.profit, best = stair.best, auctions = stair.auctions,
     perDay = perDay, perDaySource = perDaySource, days = perDay and perDay > 0 and stair.units / perDay or nil }

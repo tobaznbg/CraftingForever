@@ -97,21 +97,21 @@ local function askPrice(e)
   if l.price then
     -- Our own auction already leads: match it instead of undercutting ourselves.
     ask = l.own and l.price or math.max(1, l.price - 1)
-  elseif item.avg then
-    ask = item.avg
+  elseif item.ref then
+    ask = item.ref
   else
     return nil, "kein Angebot – Preis selbst setzen"
   end
   if ask * (1 - ns.Item.CUT) <= vendor then return nil, "unter Händlerpreis" end
-  -- Lowest sensible price: what it costs to make (own learned recipe) or the average,
-  -- whichever is higher. Below it, better wait than join the undercutting.
-  local floor = math.max(ns.CraftingCost and ns.CraftingCost(e.itemID) or 0, item.avg or 0)
+  -- Lowest sensible price: what it costs to make (own learned recipe) or R (median of
+  -- yesterday, ns.Item), whichever is higher. Below it, better wait than join the undercutting.
+  local floor = math.max(ns.CraftingCost and ns.CraftingCost(e.itemID) or 0, item.ref or 0)
   if floor > 0 and ask < floor then
     return ask, "unter Mindestpreis " .. money(floor) .. " – besser liegen lassen", true
   end
   local warn
-  if item.avg and ask < item.avg * CRASH_SHARE then
-    warn = string.format("%d %% unter Ø", math.floor((1 - ask / item.avg) * 100))
+  if item.ref and ask < item.ref * CRASH_SHARE then
+    warn = string.format("%d %% unter %s", math.floor((1 - ask / item.ref) * 100), ns.Item.RefLabel(item))
   end
   return ask, warn
 end
@@ -152,7 +152,7 @@ local function sniperTooltip(self)
     GameTooltip:AddLine(" ")
     GameTooltip:AddLine(string.format("Rezept (%s %s)  ·  %dx ab %s", h.profession or "?", tostring(h.skill or "?"),
       h.units, money(h.best)), 1, 0.71, 0.28)
-    GameTooltip:AddLine("Üblicher Preis " .. (h.usual and money(h.usual) or "unbekannt"), 1, 0.71, 0.28)
+    GameTooltip:AddLine((h.usualLabel or "Median gestern") .. " " .. (h.usual and money(h.usual) or "unbekannt"), 1, 0.71, 0.28)
     if h.best > GetMoney() then GameTooltip:AddLine("Gold reicht nicht.", 1, 0.71, 0.28) end
   elseif h then
     GameTooltip:AddLine(" ")
@@ -252,7 +252,7 @@ end
 local function sniperCells(e)
   local price, checked
   if e.price == false and not e.hit then price = MUTED .. "nicht im Angebot|r"
-  elseif e.hit and e.hit.recipe then price = e.hit.usual and (MUTED .. "üblich " .. money(e.hit.usual) .. "|r") or (MUTED .. "–|r")
+  elseif e.hit and e.hit.recipe then price = e.hit.usual and (MUTED .. (e.hit.usualShort or "gestern") .. " " .. money(e.hit.usual) .. "|r") or (MUTED .. "–|r")
   elseif e.hit then price = GREEN .. money(e.hit.sellAt) .. "|r"
   elseif e.price then price = money(e.price)
   else price = MUTED .. "–|r" end
@@ -717,7 +717,7 @@ function Selling.Refresh()
     local action = ns.Inventory.Advise(e.itemID, e)
     if action == "AH" then
       local item = ns.Item(e.itemID)
-      e.value = item.now or item.avg or 0
+      e.value = item.now or item.ref or 0
       table.insert(entries, e)
     end
   end

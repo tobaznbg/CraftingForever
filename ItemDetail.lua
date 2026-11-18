@@ -410,14 +410,17 @@ render = function()
     line("Rezept für", (h.profession or "?") .. (h.skill and h.skill > 0 and (" " .. h.skill) or ""))
     if h.product and h.product > 0 then line("Ergibt", ns.ItemName(h.product) or ("#" .. h.product)) end
     line("Kaufen", string.format("%dx ab %s  (bis %s)", h.units, money(h.best), money(h.buyUpTo)))
-    line("Üblicher Preis", h.usual and money(h.usual) or "unbekannt")
-    if h.usual and h.best < h.usual then line("Unter üblich", GREEN .. money(h.usual - h.best) .. "|r") end
+    line(h.usualLabel or "Median gestern", h.usual and money(h.usual) or "unbekannt")
+    if h.usual and h.best < h.usual then
+      line("Darunter", GREEN .. money(h.usual - h.best) .. "|r  " .. Style.MUTED
+        .. string.format("(%d %% zu %s)", math.floor((h.best / h.usual - 1) * 100 + 0.5), h.usualLabel or "Median gestern") .. "|r")
+    end
     line("Treffer seit", ago(h.firstSeen or time()))
   elseif h then
     section("Warum Treffer")
     line("Kaufen", string.format("%dx bis %s  (zus. %s)", h.units, money(h.buyUpTo), money(h.cost)))
     line("Einstellen zu", money(h.sellAt) .. "  " .. Style.MUTED .. (h.sellSource or "") .. "|r")
-    line("Obergrenze (Ø)", h.cap and money(h.cap) or "–")
+    line("Obergrenze (" .. (h.capLabel or "Median gestern") .. ")", h.cap and money(h.cap) or "–")
     line("Erwarteter Gewinn", GREEN .. "+" .. money(h.profit) .. "|r  " .. Style.MUTED .. "nach 5 % Gebühr|r")
     if h.days then
       line("Verkauft in", "~" .. Detail.Days(h.days) .. " Tagen  " .. Style.MUTED .. string.format("(%s / Tag, %s)|r",
@@ -484,12 +487,13 @@ render = function()
   elseif fresh and fresh.state == "searching" then
     line("AH jetzt", (item.now and (money(item.now) .. "  ") or "") .. Style.ACCENT .. "suche …|r")
   else
-    line("AH jetzt", item.now and money(item.now) or (Style.MUTED .. "nicht im AH|r"))
+    local cmp = ns.Item.RefCompare(item.now, item)
+    line("AH jetzt", item.now and (money(item.now) .. (cmp and ("  " .. Style.MUTED .. cmp .. "|r") or ""))
+      or (Style.MUTED .. "nicht im AH|r"))
   end
-  line("Gestern (Tagespreis)", item.yesterday and money(item.yesterday) or "–")
-  if item.min and item.max then
-    line("Spanne 14 Tage", money(item.min) .. " – " .. money(item.max) .. (item.avg and ("  (Ø " .. money(item.avg) .. ")") or ""))
-  end
+  line("Median heute", item.medToday and money(item.medToday) or "–")
+  line("Median gestern", item.medYesterday and money(item.medYesterday) or "–")
+  line("Median 7 Tage", item.med7 and money(item.med7) or "–")
   line("Trend", ns.Item.TrendText(item) or "–")
   local demand = ns.Item.DemandText(item)
   if demand and item.certain and item.certain >= 1 then

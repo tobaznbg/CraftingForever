@@ -107,9 +107,9 @@ function Patterns.ForScan(scan)
   return list
 end
 
--- Usual price: the average cheapest offer of the last two weeks (ns.Item), or nil.
+-- Reference price R (ns.Item: median of yesterday, else 7 days, else today), or nil.
 function Patterns.UsualPrice(itemID)
-  return ns.Item(itemID).avg
+  return ns.Item(itemID).ref
 end
 
 ns.OnReady(function()
