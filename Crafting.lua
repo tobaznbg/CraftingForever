@@ -1462,6 +1462,16 @@ local function slotItem(slot)
   return reagent and reagent.itemID, s and s.quantityRequired
 end
 
+-- The "Im AH zeigen" buttons of the profession window: enabled while the auction house is open.
+local ahButtons = {}
+local function updateAHButtons(open)
+  for _, b in ipairs(ahButtons) do b:SetEnabled(open) end
+end
+if ns.On then
+  ns.On("AUCTION_HOUSE_SHOW", function() updateAHButtons(true) end)
+  ns.On("AUCTION_HOUSE_CLOSED", function() updateAHButtons(false) end)
+end
+
 local function updateForm(form)
   local info = rawget(form, "currentRecipeInfo")
   if (type(info) ~= "table") and form.GetRecipeInfo then
@@ -1585,6 +1595,47 @@ local function updateForm(form)
     form.m4Shop:ClearAllPoints()
     form.m4Shop:SetPoint("TOPRIGHT", gewinn, "BOTTOMRIGHT", 0, -10)
     form.m4Shop:SetShown(values ~= nil and e and e.out ~= nil)
+  end
+  -- "Im AH zeigen" under it: the product in the auction house's own search (Deals.Search), to
+  -- see the offers and buy as usual; greyed out while the auction house is closed
+  if not form.m4ShowAH then
+    local ok, b = pcall(CreateFrame, "Button", nil, form, "UIPanelButtonTemplate")
+    if ok and b then
+      b:SetSize(110, 20)
+      b:SetText("Im AH zeigen")
+      b:SetMotionScriptsWhileDisabled(true) -- the tooltip says why it is grey
+      b:SetScript("OnClick", function(self)
+        if self.m4Item and ns.Deals and ns.AHSearch and ns.AHSearch.IsOpen() then
+          ns.Safe(ns.Deals.Search, self.m4Item)
+        end
+      end)
+      b:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText("Im Auktionshaus zeigen")
+        if self:IsEnabled() then
+          GameTooltip:AddLine("Sucht " .. (self.m4Item and ns.ItemName(self.m4Item) or "das Produkt")
+            .. " im Auktionshaus: Angebote ansehen und wie gewohnt kaufen.", 1, 1, 1, true)
+        else
+          GameTooltip:AddLine("Erst das Auktionshaus öffnen.", 1, 0.42, 0.42, true)
+        end
+        GameTooltip:Show()
+      end)
+      b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+      form.m4ShowAH = b
+      ahButtons[#ahButtons + 1] = b
+    end
+  end
+  if form.m4ShowAH then
+    local b = form.m4ShowAH
+    b.m4Item = e and e.out
+    b:ClearAllPoints()
+    if form.m4Shop then
+      b:SetPoint("TOPRIGHT", form.m4Shop, "BOTTOMRIGHT", 0, -4)
+    else
+      b:SetPoint("TOPRIGHT", form.m4Rows[3].value, "BOTTOMRIGHT", 0, -10)
+    end
+    b:SetShown(values ~= nil and e and e.out ~= nil)
+    b:SetEnabled(ns.AHSearch and ns.AHSearch.IsOpen() or false)
   end
 end
 
