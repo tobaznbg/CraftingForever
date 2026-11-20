@@ -94,10 +94,7 @@ local function attach(frame)
   end
   -- Price and item change while the frame is open: a light check five times a second.
   local elapsed, lastKey = 0, nil
-  frame:HookScript("OnUpdate", function(self, dt)
-    elapsed = elapsed + (dt or 0)
-    if elapsed < 0.2 then return end
-    elapsed = 0
+  local function tick(self)
     local id, price = itemOf(self), unitPriceOf(self)
     local key = tostring(id) .. ":" .. tostring(price)
     if key == lastKey then return end
@@ -105,6 +102,13 @@ local function attach(frame)
     local ok, text = pcall(SellInfo.Text, id, price)
     fs:SetText(ok and text or "")
     if ns.db then ns.db.sellInfoLast = { id = id, price = price, ok = ok, text = ok and text or tostring(text), t = time() } end
+  end
+  -- The timer runs on the own layer (a child: shown exactly while the sell frame is shown).
+  holder:SetScript("OnUpdate", function(_, dt)
+    elapsed = elapsed + (dt or 0)
+    if elapsed < 0.2 then return end
+    elapsed = 0
+    ns.Safe(tick, frame)
   end)
   frame:HookScript("OnHide", function() lastKey = nil; fs:SetText("") end)
 end
