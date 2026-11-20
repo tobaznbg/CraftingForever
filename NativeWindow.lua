@@ -340,18 +340,56 @@ function NW.Split(page, opts)
     view:SetElementExtentCalculator(function(_, data) return data.header and 25 or 20 end)
     ScrollUtil.InitScrollBoxListWithScrollBar(box, bar, view)
   end
-  function split.SetEntries(entries)
-    if type(box) == "table" and box.SetDataProvider and CreateDataProvider then
-      box:SetDataProvider(CreateDataProvider(entries or {}))
+  -- The search box filters the entries by name (a header stays when one of its entries does).
+  local all, query = {}, ""
+  local function filtered()
+    if query == "" then return all end
+    local out, header = {}, nil
+    for _, e in ipairs(all) do
+      if e.header then
+        header = e
+      elseif (e.name or ""):lower():find(query, 1, true) then
+        if header then out[#out + 1] = header; header = nil end
+        out[#out + 1] = e
+      end
     end
-    for _, e in ipairs(entries or {}) do
-      if not e.header then
-        split.selected = e
-        if opts.onSelect then ns.Safe(opts.onSelect, e, card) end
+    return out
+  end
+  local function show(keepSelection)
+    local list = filtered()
+    if type(box) == "table" and box.SetDataProvider and CreateDataProvider then
+      box:SetDataProvider(CreateDataProvider(list), ScrollBoxConstants and ScrollBoxConstants.RetainScrollPosition)
+    end
+    local still = false
+    for _, e in ipairs(list) do
+      if keepSelection and split.selected and e.key and e.key == split.selected.key then
+        split.selected, still = e, true
         break
       end
     end
+    if not still then
+      split.selected = nil
+      for _, e in ipairs(list) do
+        if not e.header then split.selected = e break end
+      end
+    end
+    if opts.onSelect then ns.Safe(opts.onSelect, split.selected, card) end
   end
+  function split.SetEntries(entries)
+    all = entries or {}
+    show(true)
+  end
+  local search = rawget(list, "SearchBox")
+  if type(search) == "table" and search.HookScript then
+    search:HookScript("OnTextChanged", function(edit)
+      query = (edit:GetText() or ""):lower()
+      show(true)
+    end)
+  end
+  local filter = rawget(list, "FilterDropdown") or rawget(list, "FilterButton")
+  if type(filter) == "table" and filter.Hide then filter:Hide() end
+  split.empty = card:CreateFontString(nil, "OVERLAY", "GameFontDisable")
+  split.empty:SetPoint("CENTER")
   if opts.entries then split.SetEntries(opts.entries) end
   return split
 end

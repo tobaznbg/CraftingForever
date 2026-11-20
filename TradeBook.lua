@@ -1,7 +1,7 @@
 -- TradeBook: the ledger ("Handelsbuch") in Blizzard's own look (ns.NativeWindow): side tabs
 -- Übersicht / Handelsbuch / Bestand / Auktionen. Opens on the overview, period "Alles".
 -- Opened with the tab "Handelsbuch" under the auction house, the minimap button or /m4 buch.
--- Overview with the real figures (ns.Profit, ns.MyAuctions, ns.Ledger); the other tabs still examples.
+-- All pages with the real figures (ns.Profit, ns.MyAuctions, ns.Ledger).
 local ADDON, ns = ...
 
 local TradeBook = {}
@@ -14,55 +14,6 @@ local PERIODS = { { key = "today", label = "Heute" }, { key = "week", label = "7
 local window
 local period = "all"
 
-
-local DUMMY = {
-  { header = "Lederverarbeitung" },
-  { name = "Stiefel des Nachtschleichers", icon = "Interface\\Icons\\INV_Boots_08" },
-  { name = "Tückische Lederstulpen", icon = "Interface\\Icons\\INV_Gauntlets_19" },
-  { name = "Hose des Nachtschleichers", icon = "Interface\\Icons\\INV_Pants_07" },
-  { header = "Handel" },
-  { name = "Abgefangene Kiste: Blühende Kräuter", icon = "Interface\\Icons\\INV_Crate_01" },
-  { name = "Muster: Robe der Leere", icon = "Interface\\Icons\\INV_Scroll_03" },
-  { header = "Beute" },
-  { name = "Zornprankengürtel des arkanen Zorns", icon = "Interface\\Icons\\INV_Belt_03" },
-  { name = "Leichtes Leder", icon = "Interface\\Icons\\INV_Misc_LeatherScrap_03" },
-}
-
--- The card of a list entry: icon and name like the recipe header, four figures.
-local function cardDetail(entry, card)
-  if not card.m4 then
-    local d = {}
-    d.Icon = card:CreateTexture(nil, "ARTWORK")
-    d.Icon:SetSize(44, 44)
-    d.Icon:SetPoint("TOPLEFT", 22, -22)
-    local okMask, mask = pcall(card.CreateMaskTexture, card)
-    if okMask and mask then
-      mask:SetTexture("Interface\\CharacterFrame\\TempPortraitAlphaMask", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
-      mask:SetAllPoints(d.Icon)
-      d.Icon:AddMaskTexture(mask)
-    end
-    local ring = card:CreateTexture(nil, "OVERLAY")
-    ring:SetSize(60, 60)
-    ring:SetPoint("CENTER", d.Icon, "CENTER", 0, 0)
-    ring:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
-    ring:SetTexCoord(0, 0.6, 0, 0.6)
-    d.Name = card:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
-    d.Name:SetPoint("LEFT", d.Icon, "RIGHT", 14, 6)
-    d.Name:SetPoint("RIGHT", card, "RIGHT", -20, 0)
-    d.Name:SetJustifyH("LEFT")
-    local head = card:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    head:SetPoint("TOPLEFT", d.Icon, "BOTTOMLEFT", 0, -20)
-    head:SetText("Kennzahlen:")
-    d.Figures = ns.NativeWindow.Figures(card, head, { "Umsatz", "Einkauf", "Gebühren", "Gewinn" })
-    card.m4 = d
-  end
-  local d = card.m4
-  d.Icon:SetTexture(entry.icon)
-  d.Name:SetText(entry.name)
-  local v = d.Figures.values
-  v[1]:SetText("12g 40s"); v[2]:SetText("7g 15s"); v[3]:SetText("62s"); v[4]:SetText("|cff5fd38d+4g 63s|r")
-  d.Figures.SetWidth(math.max(100, (card:GetWidth() or 400) - 46))
-end
 
 -- Overview, built from Blizzard's "Berufe" overview parts: on top two cards side by side
 -- (profit and loss with the period choice, stock), below running auctions and recent trades.
@@ -311,16 +262,206 @@ local function buildOverview(page, w)
   page.Refresh()
 end
 
+-- Sub pages: Blizzard's recipe list left, the card right ---------------------------------------
+
+-- Card head (icon in a ring, name) and figure rows, built once per card for its labels.
+local function cardFrame(card, labels)
+  if card.m4 then return card.m4 end
+  local d = {}
+  d.Icon = card:CreateTexture(nil, "ARTWORK")
+  d.Icon:SetSize(44, 44)
+  d.Icon:SetPoint("TOPLEFT", 22, -22)
+  local okMask, mask = pcall(card.CreateMaskTexture, card)
+  if okMask and mask then
+    mask:SetTexture("Interface\\CharacterFrame\\TempPortraitAlphaMask", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+    mask:SetAllPoints(d.Icon)
+    d.Icon:AddMaskTexture(mask)
+  end
+  local ring = card:CreateTexture(nil, "OVERLAY")
+  ring:SetSize(60, 60)
+  ring:SetPoint("CENTER", d.Icon, "CENTER", 0, 0)
+  ring:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
+  ring:SetTexCoord(0, 0.6, 0, 0.6)
+  d.Ring = ring
+  d.Name = card:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
+  d.Name:SetPoint("LEFT", d.Icon, "RIGHT", 14, 6)
+  d.Name:SetPoint("RIGHT", card, "RIGHT", -20, 0)
+  d.Name:SetJustifyH("LEFT")
+  d.Sub = card:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+  d.Sub:SetPoint("TOPLEFT", d.Name, "BOTTOMLEFT", 0, -3)
+  d.Head = card:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+  d.Head:SetPoint("TOPLEFT", d.Icon, "BOTTOMLEFT", 0, -20)
+  d.Head:SetText("Kennzahlen:")
+  d.Figures = ns.NativeWindow.Figures(card, d.Head, labels)
+  d.Figures.SetWidth(math.max(100, (card:GetWidth() or 340) - 46))
+  card:HookScript("OnSizeChanged", function(c) d.Figures.SetWidth(math.max(100, (c:GetWidth() or 340) - 46)) end)
+  card.m4 = d
+  return d
+end
+
+local function showCard(card, d, entry, values, sub)
+  local parts = { d.Icon, d.Ring, d.Name, d.Sub, d.Head }
+  for _, p in ipairs(parts) do p:SetShown(entry ~= nil) end
+  for i, v in ipairs(d.Figures.values) do
+    v:SetShown(entry ~= nil)
+    d.Figures.labels[i]:SetShown(entry ~= nil)
+  end
+  if d.Figures.line then d.Figures.line:SetShown(entry ~= nil) end
+  if not entry then return end
+  d.Icon:SetTexture(entry.icon)
+  d.Name:SetText(entry.name)
+  d.Sub:SetText(sub or "")
+  for i, v in ipairs(d.Figures.values) do v:SetText(values[i] or "–") end
+end
+
+local function shortGroup(name)
+  if ns.Profit and name == ns.Profit.TRADE then return "Handel" end
+  if ns.Profit and name == ns.Profit.FARMED then return "Beute" end
+  return name
+end
+
+-- "Handelsbuch": every item of the period by area (professions, trade, loot), its figures and
+-- its trades.
+local function buildLedger(page)
+  local NW = ns.NativeWindow
+  local eventsSet
+  local LABELS = { "Hergestellt / gekauft", "Verkauft", "Ø Verkaufspreis", "Umsatz", "Einkauf", "Gebühren", "Gewinn" }
+  local split = NW.Split(page, { onSelect = function(entry, card)
+    local d = cardFrame(card, LABELS)
+    if not eventsSet then
+      eventsSet = scrollTable(card, { { "Wann · Art", 20, "LEFT", 160 }, { "Menge", 225, "RIGHT" }, { "Betrag", 300, "RIGHT" } }, -250)
+    end
+    local r = entry and entry.row
+    showCard(card, d, entry, r and {
+      string.format("%d / %d", r.crafted or 0, r.bought or 0), tostring(r.sold or 0),
+      r.avgPrice and money(r.avgPrice) or "–", money(r.revenue), money(r.materials), money(r.fees), signed(r.profit),
+    }, entry and shortGroup(entry.row.prof))
+    local rows = {}
+    for _, e in ipairs(entry and ns.Profit.ItemEvents(entry.itemID, since()) or {}) do
+      local amount = ""
+      if e.k == "buy" then amount = RED .. "-" .. money(e.c) .. "|r"
+      elseif e.k == "sale" then amount = GREEN .. "+" .. money((e.c or 0) - (e.cut or 0)) .. "|r"
+      elseif e.k == "vendor" then amount = GREEN .. "+" .. money(e.c) .. "|r"
+      elseif (e.k == "expired" or e.k == "cancelled") and e.lost then amount = RED .. "-" .. money(e.lost) .. "|r"
+      elseif e.k == "post" and e.p then amount = MUTED .. money(e.p * (e.u or 1)) .. "|r" end
+      rows[#rows + 1] = { MUTED .. date("%d.%m. %H:%M", e.t or 0) .. "|r  " .. (KINDS[e.k] or tostring(e.k)),
+        tostring(e.u or 1), amount }
+    end
+    eventsSet(rows)
+  end })
+  function page.Refresh()
+    local report = ns.Profit and ns.Profit.Report and ns.Profit.Report(since()) or { groups = {}, items = {} }
+    local entries = {}
+    for _, g in ipairs(report.groups) do
+      entries[#entries + 1] = { header = shortGroup(g.name) .. "  " .. signed(g.profit) }
+      for _, r in ipairs(report.items[g.name] or {}) do
+        entries[#entries + 1] = { key = g.name .. ":" .. r.itemId, itemID = r.itemId, icon = iconOf(r.itemId),
+          name = r.name or ns.ItemName(r.itemId) or ("#" .. r.itemId), row = r }
+      end
+    end
+    split.SetEntries(entries)
+  end
+end
+
+-- "Bestand": what the character holds by source, with cost and what selling would bring.
+local function buildStock(page)
+  local NW = ns.NativeWindow
+  local LABELS = { "Stück", "Einkauf / Stk.", "Einkauf", "Erlös / Stk.", "Erlös", "Buchgewinn" }
+  local split = NW.Split(page, { onSelect = function(entry, card)
+    local d = cardFrame(card, LABELS)
+    local s = entry and entry.row
+    showCard(card, d, entry, s and {
+      tostring(s.units), money(s.unitCost), money(s.cost), s.sellUnit and money(s.sellUnit) or "–",
+      s.sell and money(s.sell) or "–",
+      s.gain and (signed(s.gain) .. (s.gainPct and string.format("  (%+d %%)", math.floor(s.gainPct * 100 + 0.5)) or "")) or "–",
+    }, s and s.source)
+  end })
+  function page.Refresh()
+    local report = ns.Profit and ns.Profit.Report and ns.Profit.Report(nil) or { stock = {} }
+    local groups, order = {}, {}
+    for _, s in ipairs(report.stock or {}) do
+      local key = s.source or "?"
+      if not groups[key] then groups[key] = {}; order[#order + 1] = key end
+      table.insert(groups[key], s)
+    end
+    local entries = {}
+    for _, key in ipairs(order) do
+      entries[#entries + 1] = { header = key:sub(1, 1):upper() .. key:sub(2) }
+      for _, s in ipairs(groups[key]) do
+        entries[#entries + 1] = { key = key .. ":" .. s.itemId, itemID = s.itemId, icon = iconOf(s.itemId),
+          name = s.name or ns.ItemName(s.itemId) or ("#" .. s.itemId), row = s }
+      end
+    end
+    split.SetEntries(entries)
+  end
+end
+
+-- "Auktionen": the running auctions by status (undercut first), price, cheapest other offer,
+-- cost and profit.
+local function buildAuctions(page)
+  local NW = ns.NativeWindow
+  local LABELS = { "Stück", "Mein Preis", "Billigst fremd", "Restzeit", "Einkauf / Stk.", "Gewinn" }
+  local split = NW.Split(page, { onSelect = function(entry, card)
+    local d = cardFrame(card, LABELS)
+    local r = entry and entry.row
+    local profit
+    if r and r.unit then
+      local cost, source = ns.Profit.UnitCost(r.itemID)
+      if cost then profit = signed(math.floor((r.unit * 0.95 - cost) * (r.quantity or 1))) .. (source == "Beute" and (MUTED .. "  Beute|r") or "") end
+    end
+    local cost = r and ns.Profit.UnitCost(r.itemID)
+    showCard(card, d, entry, r and {
+      tostring(r.quantity or 1), r.unit and money(r.unit) or "–", r.foreign and money(r.foreign) or "–",
+      r.timeLeft and string.format("%d h", math.ceil(r.timeLeft / 3600)) or "–",
+      cost and money(cost) or "–", profit or "–",
+    }, entry and entry.status)
+  end })
+  function page.Refresh()
+    local My = ns.MyAuctions
+    local buckets = { under = {}, best = {}, other = {} }
+    for _, r in ipairs(My and My.Rows and My.Rows() or {}) do
+      if (r.active or 0) > 0 then
+        local status = r.status == "best" and "bester Preis" or (r.status == "under" and ("unterboten um " .. money(r.diff)))
+          or (r.status == "alone" and "allein im AH") or "nicht geprüft"
+        local b = r.status == "under" and "under" or (r.status == "best" and "best" or "other")
+        table.insert(buckets[b], { key = "a:" .. r.itemID, itemID = r.itemID, icon = iconOf(r.itemID),
+          name = ns.ItemName(r.itemID) or ("#" .. r.itemID), row = r, status = status })
+      end
+    end
+    if #buckets.under + #buckets.best + #buckets.other == 0 then
+      local key = ns.CharKey and ns.CharKey()
+      local saved = key and ns.db and ns.db.owned and ns.db.owned[key]
+      for _, a in ipairs(saved and saved.list or {}) do
+        if not a.s then
+          table.insert(buckets.other, { key = "s:" .. tostring(a.id), itemID = a.i, icon = iconOf(a.i),
+            name = ns.ItemName(a.i) or ("#" .. tostring(a.i)), status = "nicht geprüft (Auktionshaus öffnen)",
+            row = { itemID = a.i, unit = a.u, quantity = a.q, timeLeft = a.tl } })
+        end
+      end
+    end
+    local entries = {}
+    for _, def in ipairs({ { "under", "Unterboten" }, { "best", "Bester Preis" }, { "other", "Sonstige" } }) do
+      if #buckets[def[1]] > 0 then
+        entries[#entries + 1] = { header = def[2] .. "  " .. MUTED .. "(" .. #buckets[def[1]] .. ")|r" }
+        for _, e in ipairs(buckets[def[1]]) do entries[#entries + 1] = e end
+      end
+    end
+    split.SetEntries(entries)
+  end
+end
+
+local function refreshPage(page) if page.Refresh then page.Refresh() end end
+
 local function create()
   window = ns.NativeWindow.New({ name = NAME, title = "Handelsbuch", icon = ICON })
   window:AddTab({ key = "overview", title = "Übersicht", icon = "Interface\\Icons\\INV_Misc_Coin_02", overview = true,
     build = buildOverview, onShow = function(page) if page.Refresh then page.Refresh() end end })
   window:AddTab({ key = "ledger", title = "Handelsbuch", icon = "Interface\\Icons\\INV_Misc_Note_01",
-    build = function(page) ns.NativeWindow.Split(page, { entries = DUMMY, onSelect = cardDetail }) end })
+    build = buildLedger, onShow = refreshPage })
   window:AddTab({ key = "stock", title = "Bestand", icon = "Interface\\Icons\\INV_Box_02",
-    build = function(page) ns.NativeWindow.Split(page, { entries = DUMMY, onSelect = cardDetail }) end })
+    build = buildStock, onShow = refreshPage })
   window:AddTab({ key = "auctions", title = "Auktionen", icon = "Interface\\Icons\\INV_Hammer_15",
-    build = function(page) ns.NativeWindow.Split(page, { entries = DUMMY, onSelect = cardDetail }) end })
+    build = buildAuctions, onShow = refreshPage })
 end
 
 function TradeBook.Show()
