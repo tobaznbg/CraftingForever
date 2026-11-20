@@ -305,24 +305,15 @@ local function onLootClosed()
 end
 
 -- First and last name as the player frame shows it ("Lokm Bank"; Forever gives characters a
--- last name). UnitName only answers the first name. The candidates go to db.nameProbe once, to
--- see which source this client fills (removed later).
+-- last name). UnitName and UnitFullName only answer the first name; GetUnitName and the player
+-- frame's text carry both (probed 20 Nov 2026).
 local function fullName()
   local short = UnitName("player")
-  local cands = {}
+  local cands = { GetUnitName and GetUnitName("player", true) }
   local pn = rawget(_G, "PlayerName")
-  if type(pn) == "table" and pn.GetText then cands.frame = pn:GetText() end
-  local pf = rawget(_G, "PlayerFrame")
-  local fn = type(pf) == "table" and rawget(pf, "name")
-  if type(fn) == "table" and fn.GetText then cands.frameName = fn:GetText() end
-  if UnitPVPName then cands.pvp = UnitPVPName("player") end
-  if GetUnitName then cands.unit = GetUnitName("player", true) end
-  if UnitFullName then cands.full = UnitFullName("player") end
-  ns.db.nameProbe = ns.db.nameProbe or {}
-  ns.db.nameProbe[ns.CharKey()] = cands
-  for _, k in ipairs({ "frame", "frameName", "unit", "full" }) do
-    local v = cands[k]
-    if type(v) == "string" and short and v ~= short and v:sub(1, #short + 1) == short .. " " then return v end
+  if type(pn) == "table" and pn.GetText then cands[#cands + 1] = pn:GetText() end
+  for _, v in ipairs(cands) do
+    if type(v) == "string" and short and v:sub(1, #short + 1) == short .. " " then return v end
   end
   return nil
 end
@@ -333,6 +324,7 @@ Tracker.FullName = fullName
 local function snapshotCharacter(atLogout)
   local db = ns.db
   local prev = db.chars[ns.CharKey()]
+  db.nameProbe = nil -- leftover of the name probe (20 Nov 2026)
   local className, classFile = UnitClass("player")
   local info = {
     updated = time(),
