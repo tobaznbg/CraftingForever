@@ -669,14 +669,6 @@ end
 -- at the auction house right now. nil when the sources do not know the recipe.
 local KIND = { vendor = "Händler", limited = "Händler (begrenzter Vorrat)", rep = "Ruf-Händler", favor = "Händlergunst",
   cond = "Händler (mit Bedingung)", unknown = "Händler (NPC unbekannt)" }
--- "vor 35 min" / "vor 3 h" / "vor 2 Tagen".
-local function ago(t)
-  local d = math.max(0, time() - (t or 0))
-  if d < 3600 then return string.format("vor %d min", math.floor(d / 60 + 0.5)) end
-  if d < 172800 then return string.format("vor %d h", math.floor(d / 3600 + 0.5)) end
-  return string.format("vor %d Tagen", math.floor(d / 86400 + 0.5))
-end
-
 -- A place on the map: a waypoint (Blizzard's map pin, tracked) where the client offers it, the
 -- world map opened on the zone; else zone and coordinates in the chat.
 -- loc = { name, zone, x, y } (x, y in percent).
@@ -755,14 +747,13 @@ local function sourceLines(pid, spell)
   end
   if entry.q then add("Quest: " .. entry.q) end
   if entry.item then
-    -- the recipe item at the auction house: cheapest offer, how many, and how old that is
+    -- the recipe item at the auction house: cheapest offer and how many
     local it = ns.Item(entry.item)
-    local when = it.dataT and ("|cff999999 · Stand " .. ago(it.dataT) .. "|r") or ""
     if it.now then
       local n = it.offers or it.quantity
-      add("Rezept im AH: " .. money(it.now) .. (n and string.format("|cff999999 · %d %s|r", n, n == 1 and "Angebot" or "Angebote") or "") .. when)
+      add("Rezept im AH: " .. money(it.now) .. (n and string.format("|cff999999 · %d %s|r", n, n == 1 and "Angebot" or "Angebote") or ""))
     else
-      add("|cff999999Rezept handelbar, gerade nicht im AH|r" .. when)
+      add("|cff999999Rezept handelbar, gerade nicht im AH|r")
     end
   elseif entry.bop then
     add("|cff999999Rezept nicht handelbar (seelengebunden)|r")
