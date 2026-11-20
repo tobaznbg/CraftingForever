@@ -917,6 +917,12 @@ render = function()
         demand = demand .. "  ·  mind. " .. count(p.certain) .. " / Tag verkauft"
       end
       line("Nachfrage (Produkt)", demand or "–")
+      local pt = ns.Item.TrendText(p)
+      if pt and p.trend then
+        if p.trend <= -0.03 then pt = "|cffff6b6b" .. pt .. "|r"
+        elseif p.trend >= 0.03 then pt = GREEN .. pt .. "|r" end
+      end
+      line("Trend (Produkt)", pt or "–")
     end
   end
 
