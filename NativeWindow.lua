@@ -301,6 +301,27 @@ function NW.Split(page, opts)
   split.card = card
 
   local box, bar = rawget(list, "ScrollBox"), rawget(list, "ScrollBar")
+  -- opts.footer = height: room under the list for a summary (split.footer); the scroll box ends above it
+  if opts.footer and type(box) == "table" then
+    box:ClearAllPoints()
+    box:SetPoint("TOPLEFT", list, "TOPLEFT", 8, -35)
+    box:SetPoint("BOTTOMRIGHT", list, "BOTTOMRIGHT", -20, opts.footer)
+    if type(bar) == "table" then
+      bar:ClearAllPoints()
+      bar:SetPoint("TOPLEFT", box, "TOPRIGHT", 0, 0)
+      bar:SetPoint("BOTTOMLEFT", box, "BOTTOMRIGHT", 0, 0)
+    end
+    local footer = CreateFrame("Frame", nil, list)
+    footer:SetPoint("BOTTOMLEFT", list, "BOTTOMLEFT", 8, 6)
+    footer:SetPoint("BOTTOMRIGHT", list, "BOTTOMRIGHT", -8, 6)
+    footer:SetHeight(opts.footer - 8)
+    local rule = footer:CreateTexture(nil, "ARTWORK")
+    rule:SetColorTexture(1, 0.82, 0, 0.25)
+    rule:SetHeight(1)
+    rule:SetPoint("TOPLEFT", 4, 0)
+    rule:SetPoint("TOPRIGHT", -4, 0)
+    split.footer = footer
+  end
   if type(box) == "table" and CreateScrollBoxListLinearView and ScrollUtil and CreateDataProvider then
     local view = CreateScrollBoxListLinearView()
     view:SetElementFactory(function(factory, data)
@@ -344,12 +365,20 @@ function NW.Split(page, opts)
           button:SetScript("OnEnter", function(b)
             local h = rawget(b, "HighlightOverlay")
             if type(h) == "table" then h:Show() end
+            if data.itemID then
+              GameTooltip:SetOwner(b, "ANCHOR_RIGHT")
+              GameTooltip:SetItemByID(data.itemID)
+              GameTooltip:Show()
+            end
           end)
           button:SetScript("OnLeave", function(b)
             local h = rawget(b, "HighlightOverlay")
             if type(h) == "table" then h:Hide() end
+            GameTooltip:Hide()
           end)
           button:SetScript("OnClick", function()
+            -- Alt+click: the item's market data window, like everywhere
+            if data.itemID and ns.ItemDetail and ns.ItemDetail.AltClick(data.itemID) then return end
             split.selected = data
             box:ForEachFrame(function(other)
               local o = rawget(other, "SelectedOverlay")

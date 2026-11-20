@@ -75,19 +75,8 @@ Profit.TRADE, Profit.FARMED = TRADE, FARMED
 
 -- Gathered goods count for their gathering profession, not as loot: leather, hides and scales
 -- for skinning, ore, stone and gems for mining, herbs for herbalism (ns.Gathering).
--- Made with a profession's tool rather than a recipe (no craft in the ledger): its profession.
-local TOOL_PRODUCTS = {
-  [15409] = "Lederverarbeitung", -- Raffiniertes Tiefsteinsalz (Salzstreuer, Lederverarbeitung 250)
-}
--- What one unit of a tool product takes (its cost, when that was bought): { itemID, count }.
-local TOOL_INPUTS = {
-  [15409] = { 8150, 1 }, -- 1 Tiefsteinsalz
-}
-Profit.TOOL_PRODUCTS = TOOL_PRODUCTS
-
 local gatherOf
 local function farmGroup(itemID)
-  if TOOL_PRODUCTS[itemID] then return TOOL_PRODUCTS[itemID] end
   if not gatherOf then
     gatherOf = {}
     for _, g in ipairs(ns.Gathering or {}) do
@@ -267,20 +256,6 @@ local function replay(since)
       if manual then
         -- Bought before the ledger ran, cost entered by hand: a trade at that cost.
         book(rest, TRADE, manual * rest, manual * rest)
-      elseif TOOL_PRODUCTS[id] and rest > 0 then
-        -- made with a profession's tool: counts as made by that profession; the input costs
-        -- what was paid for it (bought pool), looted input nothing
-        local input = TOOL_INPUTS[id]
-        local cost = 0
-        if input then
-          local _, v = take(bought[input[1]], rest * input[2])
-          cost = v or 0
-        end
-        if inPeriod then
-          local f = figures(id, TOOL_PRODUCTS[id])
-          f.crafted = f.crafted + rest
-        end
-        book(rest, TOOL_PRODUCTS[id], cost, cost)
       else
         local maker = ns.CraftedBy and ns.CraftedBy(id)
         if maker and not profOf[id] then profOf[id] = maker end

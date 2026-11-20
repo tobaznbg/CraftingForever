@@ -243,6 +243,10 @@ ns.On("MAIL_INBOX_UPDATE", function() ns.Safe(scanInbox) end)
 --      Without such a cast (no scan of that profession yet) the line alone counts as a craft
 --      only when the item is a product in ns.RecipeData; reagents then come from there.
 --      Conjured food and other created items are no recipe products and stay out.
+--   3. Made with a profession's tool (an item whose tooltip says "Benötigt <Beruf> (n)", e.g.
+--      the salt shaker): the loot line within TOOL_WINDOW of using that item counts as a craft
+--      of that profession; the reagents are what left the bags meanwhile (bag counts before
+--      the use against after the next bag update).
 --   Repeated casts of the same recipe within MERGE seconds go into one event (x casts),
 --   so batch crafting does not push older trades out of the ledger.
 
@@ -322,6 +326,62 @@ local function onCast(spellID)
   state = { e = e, t = now, open = 1, q = q, loot = 0 }
 end
 
+-- Profession tools ------------------------------------------------------------------------
+local TOOL_WINDOW = 10
+local PROFESSIONS = { ["Lederverarbeitung"] = true, ["Schneiderei"] = true, ["Schmiedekunst"] = true,
+  ["Alchemie"] = true, ["Alchimie"] = true, ["Ingenieurskunst"] = true, ["Verzauberkunst"] = true,
+  ["Kochkunst"] = true, ["Erste Hilfe"] = true, ["Bergbau"] = true, ["Kürschnerei"] = true,
+  ["Kräuterkunde"] = true, ["Angeln"] = true }
+local lastUse   -- { itemID, t, before = bag counts }
+local pendingTool -- a tool craft waiting for the bags to show what was used up
+
+local function bagCounts()
+  local counts = {}
+  local info = C_Container and C_Container.GetContainerItemInfo
+  local slots = (C_Container and C_Container.GetContainerNumSlots) or GetContainerNumSlots
+  if not (info and slots and ns.CarriedBags) then return counts end
+  for _, bag in ipairs(ns.CarriedBags()) do
+    for slot = 1, (slots(bag) or 0) do
+      local it = info(bag, slot)
+      if it and it.itemID then counts[it.itemID] = (counts[it.itemID] or 0) + (it.stackCount or 1) end
+    end
+  end
+  return counts
+end
+
+-- The profession an item asks for ("Benötigt Lederverarbeitung (250)"), nil if none.
+local function toolProfession(itemID)
+  local get = C_TooltipInfo and C_TooltipInfo.GetItemByID
+  if not (itemID and get) then return nil end
+  local ok, data = pcall(get, itemID)
+  for _, line in ipairs(ok and data and data.lines or {}) do
+    local name = type(line.leftText) == "string" and line.leftText:match("^Benötigt (.-) %(%d+%)")
+    if name and PROFESSIONS[name] then return name end
+  end
+end
+
+function Ledger.OnItemUse(bag, slot)
+  local info = C_Container and C_Container.GetContainerItemInfo and C_Container.GetContainerItemInfo(bag, slot)
+  if not (info and info.itemID) then return end
+  lastUse = { itemID = info.itemID, t = time(), before = bagCounts() }
+end
+
+local function finishToolCraft()
+  local p = pendingTool
+  pendingTool = nil
+  if not p then return end
+  local after = bagCounts()
+  local reagents = {}
+  for id, n in pairs(p.before) do
+    local gone = n - (after[id] or 0)
+    if gone > 0 and id ~= p.itemID and id ~= p.tool then table.insert(reagents, { i = id, n = gone }) end
+  end
+  local e = { k = "craft", i = p.itemID, u = p.count, x = 1, src = "tool", prof = p.prof }
+  addReagents(e, reagents)
+  add(e)
+end
+ns.On("BAG_UPDATE_DELAYED", function() if pendingTool then ns.Safe(finishToolCraft) end end)
+
 local function onCreated(itemID, count)
   local now = time()
   local s = state
@@ -331,7 +391,17 @@ local function onCreated(itemID, count)
     return
   end
   local shipped = shippedRecipe(itemID)
-  if not shipped then return end
+  if not shipped then
+    -- made with a profession's tool used just before
+    local use = lastUse
+    local prof = use and now - use.t <= TOOL_WINDOW and toolProfession(use.itemID)
+    if prof then
+      pendingTool = { itemID = itemID, count = count, prof = prof, tool = use.itemID, before = use.before }
+      lastUse = nil
+      if C_Timer then C_Timer.After(2, function() if pendingTool then ns.Safe(finishToolCraft) end end) end
+    end
+    return
+  end
   if s and s.e.i == itemID and s.e.src == "loot" and now - s.t <= MERGE then
     s.e.x, s.e.u = (s.e.x or 1) + 1, s.e.u + count
     addReagents(s.e, shipped.r)
@@ -474,7 +544,10 @@ if hooksecurefunc then
     hooksecurefunc("BuyMerchantItem", function(index, quantity) ns.Safe(Ledger.OnMerchantBuy, index, quantity) end)
   end
   if C_Container and C_Container.UseContainerItem then
-    hooksecurefunc(C_Container, "UseContainerItem", function(bag, slot) ns.Safe(Ledger.OnContainerUse, bag, slot) end)
+    hooksecurefunc(C_Container, "UseContainerItem", function(bag, slot)
+      ns.Safe(Ledger.OnContainerUse, bag, slot)
+      ns.Safe(Ledger.OnItemUse, bag, slot)
+    end)
   elseif UseContainerItem then
     hooksecurefunc("UseContainerItem", function(bag, slot) ns.Safe(Ledger.OnContainerUse, bag, slot) end)
   end
@@ -497,6 +570,25 @@ function Ledger.Recent(n)
   for i = #events, math.max(1, #events - n + 1), -1 do table.insert(out, events[i]) end
   return out
 end
+
+-- One-time data fix (20 Nov 2026): Raffiniertes Tiefsteinsalz posted before the tool crafts were
+-- recognised was made with the salt shaker (Lederverarbeitung): a craft just before its first
+-- post. Same time on every PC, so the sync keeps one copy.
+ns.OnReady(function()
+  local b = book()
+  if b.toolFix1 then return end
+  b.toolFix1 = true
+  local events, crafted, firstPost = b.events, false, nil
+  for _, e in ipairs(events) do
+    if e.i == 15409 and e.k == "craft" then crafted = true end
+    if e.i == 15409 and e.k == "post" and not firstPost then firstPost = e end
+  end
+  if crafted or not firstPost then return end
+  local e = { t = (firstPost.t or time()) - 60, k = "craft", i = 15409, n = nameOf(15409), u = 1, x = 1,
+    src = "tool", prof = "Lederverarbeitung", r = { { i = 8150, n = 1 } } }
+  table.insert(events, e)
+  table.sort(events, function(x, y) return (x.t or 0) < (y.t or 0) end)
+end)
 
 -- One-time import of purchases the sniper logged before the ledger existed (16 Nov 2026).
 -- Those were item purchases of one auction each (the sniper then miscounted the units).

@@ -497,13 +497,14 @@ local function buildLedger(page)
     local rows = {}
     for _, r in ipairs(entry.items) do
       local value = entry.isLoot and money(r.revenue) or signed(r.profit)
-      rows[#rows + 1] = { icon = iconOf(r.itemId), r.name or ns.ItemName(r.itemId) or "?", tostring(r.sold or 0), value,
-        onClick = function() showItem(r, true) end }
+      rows[#rows + 1] = { itemID = r.itemId, icon = iconOf(r.itemId), r.name or ns.ItemName(r.itemId) or "?",
+        tostring(r.sold or 0), value, onClick = function() showItem(r, true) end }
     end
     area.SetItems(rows)
   end
 
   local split = NW.Split(page, {
+    footer = 104,
     onSelect = function(entry, c)
       layers(c)
       if entry and entry.areaEntry then showArea(entry)
@@ -523,9 +524,27 @@ local function buildLedger(page)
     end,
   })
 
+  -- Balance under the areas: all areas of the period together.
+  local balance
+  if split.footer then
+    local title = split.footer:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    title:SetPoint("TOPLEFT", 6, -8)
+    title:SetText("Bilanz")
+    balance = NW.Figures(split.footer, title, { "Einkauf / Material", "Erlöse", "Gebühren", "Gewinn" }, { gap = 6, step = 15 })
+    balance.SetWidth(math.max(100, (split.footer:GetWidth() or 280) - 14))
+    split.footer:HookScript("OnSizeChanged", function(f) balance.SetWidth(math.max(100, (f:GetWidth() or 280) - 14)) end)
+  end
+
   function page.Refresh()
     local P = ns.Profit
     local report = P and P.Report and P.Report(since()) or { groups = {}, items = {} }
+    if balance then
+      local t = report.totals or {}
+      balance.values[1]:SetText(money(t.materials))
+      balance.values[2]:SetText(money(t.revenue))
+      balance.values[3]:SetText(money(t.fees))
+      balance.values[4]:SetText(signed(t.profit))
+    end
     local ordered = {}
     for _, g in ipairs(report.groups) do if g.name == P.TRADE then ordered[#ordered + 1] = g end end
     for _, g in ipairs(report.groups) do if g.name == P.FARMED then ordered[#ordered + 1] = g end end
