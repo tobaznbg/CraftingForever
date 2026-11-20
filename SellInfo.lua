@@ -305,6 +305,18 @@ local TEXT_TEMPLATE = "AuctionHouseTableCellTextTemplate"
 local OWN_WIDTH = 92
 SellInfo.columns = false -- true once the own columns are in the table
 
+-- Our columns sort by nothing: no arrow, no click (Blizzard's header would sort by the price).
+local function plainHeader(col, text)
+  local header = col:GetHeaderFrame()
+  header:SetText(text)
+  if header.EnableMouse then header:EnableMouse(false) end
+  local arrow = rawget(header, "Arrow")
+  if type(arrow) == "table" and arrow.Hide then
+    arrow:Hide()
+    hooksecurefunc(arrow, "Show", function(self) self:Hide() end)
+  end
+end
+
 local function silentColumn(col)
   -- the caller names the replaced column "Gebotspreis": that text is ignored, ours stays
   return setmetatable({ GetHeaderFrame = function()
@@ -346,11 +358,10 @@ local function wrapLayout(original)
             if type(args[k]) == "number" and args[k] > 60 then args[k] = OWN_WIDTH break end -- the width
           end
           args[i] = TEXT_TEMPLATE
-          if i > 1 and type(args[i - 1]) == "number" then args[i - 1] = nil end -- not sortable
           local cost = method(tableBuilder, unpack(args, 1, n))
           local profit = method(tableBuilder, unpack(args, 1, n))
-          cost:GetHeaderFrame():SetText("Einkauf")
-          profit:GetHeaderFrame():SetText("Gewinn")
+          plainHeader(cost, "Einkauf")
+          plainHeader(profit, "Gewinn")
           replaced = true
           return silentColumn(cost)
         end
@@ -373,7 +384,7 @@ local function wrapLayout(original)
     trace("replaced", replaced)
     trace("calls", table.concat(calls, ","))
     trace("columns", table.concat(seen, " | "))
-    if not ok then original(tableBuilder) end -- Blizzard's table as it was
+    -- (on an error the layout stays as far as it got: running it again would add columns twice)
     SellInfo.columns = ok and replaced
   end
   wrapped[fn] = true
@@ -571,8 +582,6 @@ local function wrapBrowseLayout(original, list)
         for i = 1, n do
           if type(args[i]) == "string" then
             args[i] = TEXT_TEMPLATE
-            -- no sorting by these columns: the sort order before the template goes
-            if i > 1 and type(args[i - 1]) == "number" then args[i - 1] = nil end
           end
         end
         local widthSet = false
@@ -584,8 +593,8 @@ local function wrapBrowseLayout(original, list)
         end
         local pct = method(tableBuilder, unpack(args, 1, n))
         local demand = method(tableBuilder, unpack(args, 1, n))
-        pct:GetHeaderFrame():SetText("± MW")
-        demand:GetHeaderFrame():SetText("Nachfr.")
+        plainHeader(pct, "± MW")
+        plainHeader(demand, "Nachfr.")
         count = count + 2
         cols.pct, cols.demand = count - 1, count
       end
@@ -601,9 +610,9 @@ local function wrapBrowseLayout(original, list)
     end })
     local ok, err = pcall(original, proxy)
     if not ok then
-      trace("browseError", tostring(err))
+      trace("browseError", tostring(err)) -- the layout stays as far as it got (never twice)
       list.m4Cols = nil
-      return original(tableBuilder)
+      return
     end
     list.m4Cols = added and cols or nil
   end
