@@ -359,12 +359,38 @@ local function describe(f, depth, out, prefix)
   end
 end
 
-function TradeBook.ProbeBook()
+-- The shown window whose title is "Berufe" (whatever its name in this client).
+local function findBook()
   local book = rawget(_G, "ProfessionsBookFrame")
-  if type(book) ~= "table" or not ns.db or not book:IsShown() then return end
+  if type(book) == "table" and book:IsShown() then return book end
+  if not EnumerateFrames then return nil end
+  local f = EnumerateFrames()
+  while f do
+    if f:IsShown() and f.GetParent and f:GetParent() == UIParent then
+      local container = rawget(f, "TitleContainer")
+      local title = rawget(f, "TitleText") or (type(container) == "table" and rawget(container, "TitleText"))
+      if type(title) == "table" and title.GetText and title:GetText() == "Berufe" then return f end
+    end
+    f = EnumerateFrames(f)
+  end
+end
+
+function TradeBook.ProbeBook()
+  local book = findBook()
+  if type(book) ~= "table" or not ns.db then return false end
   local out = {}
   describe(book, 4, out, "")
-  ns.db.tradeBookProbe2 = { t = time(), lines = out }
+  ns.db.tradeBookProbe2 = { t = time(), name = tostring(book:GetName()), lines = out }
+  return true
+end
+
+-- look for it every 2 s until found once (probe only)
+if C_Timer and C_Timer.NewTicker then
+  local ticker
+  ticker = C_Timer.NewTicker(2, function()
+    local ok, found = pcall(TradeBook.ProbeBook)
+    if ok and found and ticker then ticker:Cancel() end
+  end)
 end
 
 -- The professions book ("Berufe", K) loads on demand: hook its OnShow once it exists.
