@@ -461,6 +461,7 @@ end)
 -- own profession scan (ns.db.recipes) and ns.Item (BuyCost, SellNet) - no own price logic.
 
 local GOLD_COIN = "Interface\\MoneyFrame\\UI-GoldIcon"
+local RIGHT_EDGE = 24 -- prices and summary values end this far from the form's right edge
 
 -- Economics of one recipe (spell id) of the character's scans; nil without a product or price.
 function ns.RecipeEconomics(recipeID)
@@ -518,7 +519,12 @@ local function updateList(list)
     local coin = row.m4Coin
     if e and e.profit then
       coin:ClearAllPoints()
-      coin:SetPoint("LEFT", label, "LEFT", math.min((label:GetStringWidth() or 0) + 4, (label:GetWidth() or 200) - 2), 0)
+      local ups = rawget(row, "SkillUps")
+      if type(ups) == "table" and ups.IsShown and ups:IsShown() then
+        coin:SetPoint("RIGHT", ups, "LEFT", -2, 0)
+      else
+        coin:SetPoint("RIGHT", label, "LEFT", -4, 0) -- where the skill-up arrow sits
+      end
       if e.profit > 0 and e.onAH then
         coin:SetDesaturated(false); coin:SetVertexColor(1, 1, 1)
       else
@@ -567,9 +573,19 @@ local function updateForm(form)
   for _, slot in ipairs(slots) do
     local itemID, need = slotItem(slot)
     if not slot.m4Price then
-      slot.m4Price = slot:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-      slot.m4Price:SetPoint("TOPRIGHT", slot, "TOPRIGHT", -2, -2)
+      slot.m4Price = form:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
       slot.m4Price:SetJustifyH("RIGHT")
+      local nameFS = rawget(slot, "Name") or (type(rawget(slot, "Button")) == "table" and rawget(slot.Button, "Name"))
+      if type(nameFS) == "table" and nameFS.GetFontObject and nameFS:GetFontObject() then
+        slot.m4Price:SetFontObject(nameFS:GetFontObject())
+      end
+    end
+    -- right column of the form, on the height of the slot
+    do
+      local _, fy = form:GetCenter()
+      local _, sy = slot:GetCenter()
+      slot.m4Price:ClearAllPoints()
+      if fy and sy then slot.m4Price:SetPoint("RIGHT", form, "RIGHT", -RIGHT_EDGE, sy - fy) end
     end
     local r = e and e.reagents and itemID and e.reagents[itemID]
     if itemID and r and r.unit then
@@ -584,22 +600,36 @@ local function updateForm(form)
       if b and (not lowest or b < lowest:GetBottom()) then lowest = slot end
     end
   end
-  if not form.m4Summary then
-    form.m4Summary = form:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    form.m4Summary:SetJustifyH("LEFT")
+  -- Summary: three rows like Blizzard's (gold label left, value right in the price column).
+  if not form.m4Rows then
+    form.m4Rows = {}
+    for i, text in ipairs({ "Herstellkosten", "Erlös", "Gewinn" }) do
+      local l = form:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+      l:SetText(text)
+      local v = form:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+      v:SetJustifyH("RIGHT")
+      form.m4Rows[i] = { label = l, value = v }
+    end
   end
-  local sum = form.m4Summary
-  sum:ClearAllPoints()
-  if lowest then sum:SetPoint("TOPLEFT", lowest, "BOTTOMLEFT", 0, -10) else sum:SetPoint("BOTTOMLEFT", form, "BOTTOMLEFT", 20, 60) end
+  local values
   if e and e.cost and e.value then
     local p = e.profit
-    sum:SetText("|cffffd100Herstellkosten|r  " .. fmt(e.cost)
-      .. "\n|cffffd100Erlös|r  " .. fmt(e.value) .. (e.onAH and "" or "|cff999999 (Händler)|r")
-      .. "\n|cffffd100Gewinn|r  " .. (p >= 0 and ("|cff5fd38d+" .. fmt(p)) or ("|cffff6b6b-" .. fmt(-p))) .. "|r")
-  elseif e then
-    sum:SetText("|cff999999Für ein Material fehlt der Preis.|r")
-  else
-    sum:SetText("")
+    values = { fmt(e.cost), fmt(e.value) .. (e.onAH and "" or "|cff999999 Händler|r"),
+      p >= 0 and ("|cff5fd38d+" .. fmt(p) .. "|r") or ("|cffff6b6b-" .. fmt(-p) .. "|r") }
+  end
+  for i, row in ipairs(form.m4Rows) do
+    row.label:ClearAllPoints()
+    row.value:ClearAllPoints()
+    if lowest then
+      row.label:SetPoint("TOPLEFT", lowest, "BOTTOMLEFT", 0, -12 - (i - 1) * 14)
+    else
+      row.label:SetPoint("BOTTOMLEFT", form, "BOTTOMLEFT", 20, 60 - (i - 1) * 14)
+    end
+    local _, fy = form:GetCenter()
+    local _, ly = row.label:GetCenter()
+    if fy and ly then row.value:SetPoint("RIGHT", form, "RIGHT", -RIGHT_EDGE, ly - fy) end
+    row.label:SetShown(values ~= nil)
+    row.value:SetText(values and values[i] or "")
   end
 end
 
