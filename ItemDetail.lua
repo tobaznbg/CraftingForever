@@ -668,7 +668,7 @@ render = function()
   local Style = ns.Style
   local getIcon = (C_Item and C_Item.GetItemIconByID) or GetItemIcon
   frame.icon:SetTexture(getIcon and getIcon(itemID) or nil)
-  local name = ns.ItemName(itemID) or ("#" .. itemID)
+  local name = liveName or ns.ItemName(itemID) or ("#" .. itemID)
   if skin == "blizzard" then
     local getQuality = C_Item and C_Item.GetItemQualityByID
     local q = getQuality and getQuality(itemID)
@@ -1037,6 +1037,24 @@ end
 --   opts.anchor  dock right of this frame instead of the current AH panel
 --   opts.origin  "sniper" when opened from the sniper list
 -- Searches the item now when the auction house is open (ns.AHSearch); the answer re-renders.
+-- Full auction house key of an item link with a random suffix ("… des Bären"): the plain item
+-- id would find only the variant without suffix. nil for links without one.
+local function keyFromLink(link)
+  if type(link) ~= "string" then return nil end
+  local id, suffix = link:match("item:(%d+):[^:]*:[^:]*:[^:]*:[^:]*:[^:]*:(%-?%d+)")
+  id, suffix = tonumber(id), tonumber(suffix)
+  if not (id and suffix and suffix ~= 0) then return nil end
+  local api = C_AuctionHouse
+  if not (api and api.MakeItemKey) then return nil end
+  local level = GetDetailedItemLevelInfo and GetDetailedItemLevelInfo(link) or 0
+  local ok, key = pcall(api.MakeItemKey, id, level or 0, suffix)
+  return ok and key or nil
+end
+Detail.KeyFromLink = keyFromLink
+
+local liveKey -- full item key for the live search (suffix items), nil for plain items
+local liveName -- the variant's name ("Zornprankengürtel des arkanen Zorns"), nil: the item's
+
 local function searchLive(id)
   local AHSearch = ns.AHSearch
   if not (AHSearch and AHSearch.IsOpen and AHSearch.IsOpen()) then live = nil; return end
@@ -1047,7 +1065,7 @@ local function searchLive(id)
     if live ~= my then return end
     my.state, my.offers, my.t = offers and "done" or "failed", offers, time()
     render()
-  end, true)
+  end, true, liveKey)
   if not accepted and live == my then live = nil end
 end
 
@@ -1057,6 +1075,14 @@ function Detail.Show(item, opts)
   opts = opts or {}
   if not frame then create() end
   itemID, origin = id, opts.origin
+  liveKey = opts.itemKey or keyFromLink(item)
+  liveName = nil
+  if type(item) == "string" then liveName = item:match("|h%[(.-)%]|h") end
+  if not liveName and liveKey and C_AuctionHouse and C_AuctionHouse.GetItemKeyInfo then
+    local ok, info = pcall(C_AuctionHouse.GetItemKeyInfo, liveKey)
+    liveName = ok and info and info.itemName or nil
+  end
+  if live and live.itemID == id then live = nil end -- a new variant searches again
   skin = opts.skin or "blizzard" -- the native look everywhere (the own look stays selectable)
   applySkin()
   place(opts.anchor)
@@ -1146,11 +1172,11 @@ end
 -- Blizzard's auction house lists): a post hook, the original keeps running untouched.
 -- Both paths below can see the same click: open once.
 local lastID, lastAt = nil, 0
-local function openOnce(id)
+local function openOnce(id, link)
   local now = GetTime and GetTime() or 0
   if id == lastID and now - lastAt < 0.5 then return end
   lastID, lastAt = id, now
-  ns.Safe(Detail.Show, id)
+  ns.Safe(Detail.Show, link or id) -- the link keeps a random suffix
 end
 
 if hooksecurefunc and HandleModifiedItemClick then
@@ -1159,7 +1185,7 @@ if hooksecurefunc and HandleModifiedItemClick then
     local button = GetMouseButtonClicked and GetMouseButtonClicked()
     if button and button ~= "LeftButton" then return end
     local id = toID(link)
-    if id then openOnce(id) end
+    if id then openOnce(id, link) end
   end)
 end
 
@@ -1204,7 +1230,8 @@ if CreateFrame then
     watcher:SetScript("OnEvent", function(_, _, button)
       if button ~= "LeftButton" or not Detail.IsAltClick() then return end
       local id = Detail.TooltipItem()
-      if id then openOnce(id) end
+      local _, link = GameTooltip and GameTooltip.GetItem and GameTooltip:GetItem()
+      if id then openOnce(id, toID(link) == id and link or nil) end
     end)
   end
 end

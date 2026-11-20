@@ -142,7 +142,8 @@ local function finish(itemID, listings)
 end
 
 local function send(e)
-  local itemKey = api.MakeItemKey and api.MakeItemKey(e.itemID)
+  -- a full item key (random suffix such as "des Bären", item level) when the caller has one
+  local itemKey = e.itemKey or (api.MakeItemKey and api.MakeItemKey(e.itemID))
   if not (itemKey and api.SendSearchQuery) then return deliver(e.itemID, nil) end
   current, e.state, e.since = e, "searching", now()
   lastSent = now()
@@ -198,11 +199,13 @@ end
 -- Queues a search for the item. callback(offers, itemID, t) as described at the top; the same
 -- callback function is not added twice for one item. front: ahead of the queued items (a
 -- click on one item beats a list check). Returns false when the auction house is closed.
-function AHSearch.Request(itemID, callback, front)
+-- itemKey (optional): the full key of a variant (random suffix); else the plain item.
+function AHSearch.Request(itemID, callback, front, itemKey)
   if not itemID or not AHSearch.IsOpen() then return false end
   local e = entries[itemID]
+  if e and itemKey and e.state == "queued" then e.itemKey = itemKey end
   if not e then
-    e = { itemID = itemID, callbacks = {}, state = "queued", since = now(), front = front }
+    e = { itemID = itemID, callbacks = {}, state = "queued", since = now(), front = front, itemKey = itemKey }
     entries[itemID] = e
     if front then table.insert(queue, 1, itemID) else table.insert(queue, itemID) end
   elseif front and e.state == "queued" then

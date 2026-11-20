@@ -102,7 +102,7 @@ end
 -- The detail window of the item in the sell slot (nil: none), native look, docked at the AH.
 local DETAIL_ORIGIN = "ahsell"
 local opened -- item the window was opened for: closed with × it stays closed for that item
-local function syncDetail(id)
+local function syncDetail(id, itemKey)
   local Detail = ns.ItemDetail
   if not Detail then return end
   local mine = Detail.Origin and Detail.Origin() == DETAIL_ORIGIN
@@ -110,7 +110,7 @@ local function syncDetail(id)
     if mine and Detail.ItemID() == id then return end
     if id == opened and not Detail.IsShown() then return end -- closed by the player
     opened = id
-    Detail.Show(id, { anchor = AuctionHouseFrame, origin = DETAIL_ORIGIN, skin = "blizzard" })
+    Detail.Show(id, { anchor = AuctionHouseFrame, origin = DETAIL_ORIGIN, skin = "blizzard", itemKey = itemKey })
   else
     opened = nil
     if mine then Detail.Hide() end
@@ -187,7 +187,13 @@ local function attach(frame)
     end
     placeButton()
     sellingPanel(false)
-    syncDetail(id)
+    -- the full key of the item in the slot (a random suffix such as "des arkanen Zorns")
+    local key
+    if id and frame.m4Location and C_AuctionHouse and C_AuctionHouse.GetItemKeyFromItem then
+      local ok, k = pcall(C_AuctionHouse.GetItemKeyFromItem, frame.m4Location)
+      key = ok and k or nil
+    end
+    syncDetail(id, key)
   end
   holder:SetScript("OnUpdate", function(_, dt)
     elapsed = elapsed + (dt or 0)
