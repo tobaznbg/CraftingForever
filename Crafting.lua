@@ -600,6 +600,10 @@ end
 
 local function levelOK(e, lo, hi)
   if not lo then return true end
+  if e.gather then
+    -- creatures: their level range overlaps; nodes have no level (always kept)
+    return not e.lo or (e.lo <= hi and e.hi >= lo)
+  end
   local lv = useLevel(e.itemID)
   return lv ~= nil and lv > 0 and lv >= lo and lv <= hi
 end
@@ -620,9 +624,111 @@ local function category(cat)
   return known
 end
 
+-- Gathering professions: their gathered materials instead of recipes (Data_Gathering.lua),
+-- same rules - value = what a unit brings at the auction house after the cut (no material
+-- cost), coins and demand as for recipes, "gelernt" = can gather it now. Grouped by the rank
+-- of the skill it needs; the card shows the best farm spots instead of reagents.
+local GATHER = {
+  [393] = { source = "Kürschnerei", icon = "Interface\\Icons\\INV_Misc_Pelt_Wolf_01" },
+  [186] = { source = "Bergbau", icon = "Interface\\Icons\\Trade_Mining" },
+  [182] = { source = "Kräuterkunde", icon = "Interface\\Icons\\Trade_Herbalism" },
+}
+local RANKS = { { 225, "Fachmann (225–300)" }, { 150, "Experte (150–224)" }, { 75, "Geselle (75–149)" }, { 0, "Lehrling (1–74)" } }
+
+local function gatherGroup(pid)
+  local g = GATHER[pid]
+  if not g then return nil end
+  for _, group in ipairs(ns.Gathering or {}) do
+    if group.source == g.source then return group end
+  end
+  return nil
+end
+
+local function gatherRows(pid)
+  local group = gatherGroup(pid)
+  if not group then return {} end
+  local F = ns.Farming
+  local skill = F and F.ProfessionSkill and F.ProfessionSkill(group.source) or 0
+  local list = {}
+  for _, entry in ipairs(group.items) do
+    local id = entry[1]
+    local it = ns.Item(id)
+    local value, onAH = ns.Item.SellNet(it)
+    local need, lo, hi = entry[2], nil, nil
+    if group.kind == "mob" then lo, hi = entry[2], entry[3]; need = F.SkinSkill(lo) end
+    list[#list + 1] = { gather = true, kind = group.kind, itemID = id, recipe = ns.ItemName(id) or ("#" .. id),
+      need = need, lo = lo, hi = hi, value = value or 0, onAH = onAH, profit = value or 0, cost = 0, produced = 1,
+      demand = it.demand or 0, nowPrice = it.now, unsure = ns.Item.Unsure(it), reagents = {},
+      learned = (skill or 0) >= need, pid = pid }
+  end
+  return list
+end
+
+local function rankOf(need)
+  for _, r in ipairs(RANKS) do if (need or 0) >= r[1] then return r[2], r[1] end end
+  return RANKS[#RANKS][2], 0
+end
+
+-- Best farm spots of a gathered item, up to `max`: { text, right, loc, grey }.
+--   mob (skinning)  the creatures of Data_FarmSpots that yield it when skinned, the ones you can
+--                   reach (level + 3) and skin first, then by the share of skins that bring it
+--   skill (nodes)   the node's main zone and its densest spawn spot (Data_SpotCoords)
+local function farmSpots(e, max)
+  local F, C = ns.Farming, ns.SpotCoords
+  local out = {}
+  if e.kind == "mob" then
+    local level = UnitLevel and UnitLevel("player") or 60
+    local skill = F.ProfessionSkill("Kürschnerei")
+    local found = {}
+    for _, spot in ipairs(ns.FarmSpots or {}) do
+      local npcID, name, lo, hi, zones, skinText = spot[1], spot[2], spot[3], spot[4], spot[5], spot[6]
+      if skinText ~= "" then
+        for _, d in ipairs(F.ParseDrops(skinText)) do
+          if d[1] == e.itemID then
+            local reach = level + 3 >= lo and skill ~= nil and skill >= F.SkinSkill(hi)
+            local zoneID = tonumber(tostring(zones):match("(%d+)"))
+            local c = C and C.npc and C.npc[npcID]
+            found[#found + 1] = { name = name, lo = lo, hi = hi, per = d[2] * d[3], reach = reach,
+              zone = zoneID and F.ZoneName(zoneID) or "?", c = c }
+          end
+        end
+      end
+    end
+    table.sort(found, function(a, b)
+      if a.reach ~= b.reach then return a.reach end
+      if a.per ~= b.per then return a.per > b.per end
+      return a.lo < b.lo
+    end)
+    for i = 1, math.min(max, #found) do
+      local f = found[i]
+      local loc = f.c and { name = f.name, zone = F.ZoneName(f.c[1]), x = f.c[2], y = f.c[3] } or nil
+      out[#out + 1] = { text = string.format("%s (Stufe %d–%d) · %s", f.name, f.lo, f.hi, loc and loc.zone or f.zone),
+        right = string.format("%d %%", math.floor(f.per * 100 + 0.5)), loc = loc, grey = not f.reach }
+    end
+  else
+    for _, n in ipairs(C and C.node and C.node[e.itemID] or {}) do
+      if #out >= max then break end
+      local zone = F.ZoneName(n[3])
+      out[#out + 1] = { text = string.format("%s · %s", n[2], zone), right = string.format("%d Fundorte", n[6]),
+        loc = { name = n[2], zone = zone, x = n[4], y = n[5] } }
+    end
+  end
+  return out
+end
+
 local function productEntries(pid)
   local key = filterKey()
-  local list = rows(key == "learned" and "learned" or "all", pid)
+  local gathering = GATHER[pid] ~= nil
+  local list
+  if gathering then
+    list = {}
+    for _, e in ipairs(gatherRows(pid)) do
+      if key ~= "learned" or e.learned then list[#list + 1] = e end
+      e.catName, e.catOrder = rankOf(e.need)
+    end
+  else
+    list = rows(key == "learned" and "learned" or "all", pid)
+  end
   local out = {}
   local function entry(e)
     return { key = tostring(e.spell or e.itemID), name = e.recipe, icon = itemIcon(e.itemID), itemID = e.itemID,
@@ -641,7 +747,7 @@ local function productEntries(pid)
   list = kept
   local groups, order = {}, {}
   for _, e in ipairs(list) do
-    local c = category(e.cat)
+    local c = e.catName and { n = e.catName, o = -e.catOrder } or category(e.cat)
     local name = c and c.n or "Weitere"
     local g = groups[name]
     if not g then
@@ -803,6 +909,7 @@ end
 -- shows the description, "Reagenzien:" with slots and prices, then the summary rows the
 -- profession window gets from this addon (Herstellkosten, Erlös, Nachfrage, line, Gewinn).
 local SUMMARY = { "Herstellkosten", "Erlös", "Nachfrage", "Gewinn" }
+local GATHER_SUMMARY = { "Preis jetzt", "Erlös (nach Gebühr)", "Nachfrage", "Wert pro Stück" }
 local function productCard(c)
   local v = ns.NativeWindow.CardHead(c)
   -- "Erlernen:" with one line per way to learn it (unlearned recipes), where Blizzard shows the
@@ -840,6 +947,38 @@ local function productCard(c)
   v.Head:SetText("Reagenzien:")
   v.reagents = {}
   for i = 1, MAX_REAGENTS do v.reagents[i] = reagentSlot(c) end
+  -- gathering: "Beste Farmspots:" instead of the reagents, a map button per spot
+  v.SpotHead = c:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+  v.SpotHead:SetText("Beste Farmspots:")
+  v.Spots = {}
+  for i = 1, 6 do
+    local row = {}
+    row.Text = c:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    row.Text:SetPoint("TOPLEFT", i == 1 and v.SpotHead or v.Spots[i - 1].Text, "BOTTOMLEFT", 0, i == 1 and -7 or -6)
+    row.Text:SetJustifyH("LEFT")
+    row.Text:SetWordWrap(false)
+    row.Right = c:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    row.Right:SetPoint("RIGHT", c, "RIGHT", -RIGHT_EDGE - 20, 0)
+    row.Right:SetPoint("TOP", row.Text, "TOP", 0, 0)
+    row.Right:SetJustifyH("RIGHT")
+    row.Text:SetPoint("RIGHT", row.Right, "LEFT", -8, 0)
+    local b = CreateFrame("Button", nil, c)
+    b:SetSize(16, 16)
+    b:SetPoint("RIGHT", c, "RIGHT", -RIGHT_EDGE + 2, 0)
+    b:SetPoint("TOP", row.Text, "TOP", 0, 3)
+    b:SetNormalTexture("Interface\\Icons\\INV_Misc_Map_01")
+    b:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
+    b:SetScript("OnEnter", function(self)
+      GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+      GameTooltip:SetText("Auf der Karte anzeigen")
+      if self.loc then GameTooltip:AddLine(string.format("%s, %s %.1f / %.1f", self.loc.name or "", self.loc.zone, self.loc.x, self.loc.y), 1, 1, 1) end
+      GameTooltip:Show()
+    end)
+    b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    b:SetScript("OnClick", function(self) ns.Safe(ns.ShowOnMap, self.loc) end)
+    row.Map = b
+    v.Spots[i] = row
+  end
   v.rows = {}
   for i, text in ipairs(SUMMARY) do
     local l = c:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
@@ -864,6 +1003,8 @@ local function showProduct(entry, c)
   for _, part in ipairs({ v.Icon, v.Ring, v.Name, v.Sub, v.Head, v.LearnHead, v.Line }) do part:SetShown(shown) end
   if not shown then
     for i, fs in ipairs(v.SourceLines) do fs:Hide(); v.MapButtons[i]:Hide() end
+    for _, row in ipairs(v.Spots) do row.Text:Hide(); row.Right:Hide(); row.Map:Hide() end
+    v.SpotHead:Hide()
   end
   for _, row in ipairs(v.rows) do row.label:SetShown(shown); row.value:SetShown(shown) end
   for _, r in ipairs(v.reagents) do r.Slot:Hide(); r.Name:Hide(); r.Price:Hide(); r.itemID = nil end
@@ -875,9 +1016,17 @@ local function showProduct(entry, c)
   v.itemID = e.itemID
   v.Name:SetText(qualityName(e.itemID, e.recipe)
     .. (e.produced > 1 and string.format("  |cff999999x%g|r", e.produced) or ""))
-  v.Sub:SetText(e.learned and "gelernt"
-    or ((e.tooHigh and "|cffff6b6b" or "|cffffb547") .. "nicht gelernt" .. (e.learn and (": " .. e.learn:gsub("^Quelle %? ", "")) or "") .. "|r"))
-  local src = not e.learned and sourceLines(e.pid, e.spell) or nil
+  if e.gather then
+    local need = e.kind == "mob" and string.format("Gegner Stufe %d–%d · Häuten ab Skill %d", e.lo, e.hi, e.need)
+      or string.format("ab Skill %d", e.need)
+    v.Sub:SetText((e.learned and "|cff5fd38d" or "|cffffb547") .. need .. "|r")
+  else
+    v.Sub:SetText(e.learned and "gelernt"
+      or ((e.tooHigh and "|cffff6b6b" or "|cffffb547") .. "nicht gelernt" .. (e.learn and (": " .. e.learn:gsub("^Quelle %? ", "")) or "") .. "|r"))
+  end
+  for _, row in ipairs(v.Spots) do row.Text:Hide(); row.Right:Hide(); row.Map:Hide() end
+  v.SpotHead:SetShown(e.gather == true)
+  local src = not e.learned and not e.gather and sourceLines(e.pid, e.spell) or nil
   local lastSource
   for i, fs in ipairs(v.SourceLines) do
     local line = src and src[i]
@@ -891,7 +1040,28 @@ local function showProduct(entry, c)
   v.LearnHead:SetShown(src ~= nil)
   v.Head:ClearAllPoints()
   v.Head:SetPoint("TOPLEFT", lastSource or v.Icon, "BOTTOMLEFT", 0, lastSource and -16 or -20)
+  v.Head:SetShown(not e.gather)
   local last = v.Head
+  if e.gather then
+    v.SpotHead:ClearAllPoints()
+    v.SpotHead:SetPoint("TOPLEFT", v.Icon, "BOTTOMLEFT", 0, -20)
+    last = v.SpotHead
+    local spots = farmSpots(e, #v.Spots)
+    for i, sp in ipairs(spots) do
+      local row = v.Spots[i]
+      row.Text:SetText((sp.grey and "|cff999999" or "") .. sp.text .. (sp.grey and "|r" or ""))
+      row.Right:SetText((sp.grey and "|cff999999" or "") .. sp.right .. (sp.grey and "|r" or ""))
+      row.Map.loc = sp.loc
+      row.Text:Show(); row.Right:Show(); row.Map:SetShown(sp.loc ~= nil)
+      last = row.Text
+    end
+    if #spots == 0 then
+      local row = v.Spots[1]
+      row.Text:SetText("|cff999999Keine Farmspots bekannt|r")
+      row.Text:Show()
+      last = row.Text
+    end
+  end
   for i, g in ipairs(e.reagents or {}) do
     local r = v.reagents[i]
     if not r then break end
@@ -915,7 +1085,14 @@ local function showProduct(entry, c)
     ns.Item.DemandText(e) or "–",
     signedMoney(e.profit),
   }
+  local labels = SUMMARY
+  if e.gather then
+    labels = GATHER_SUMMARY
+    values[1] = e.nowPrice and money(e.nowPrice) or "nicht im Angebot"
+    values[4] = money(e.value)
+  end
   for i, row in ipairs(v.rows) do
+    row.label:SetText(labels[i])
     row.label:ClearAllPoints()
     local gap = i == #v.rows and 7 or 0 -- room for the line before "Gewinn"
     row.label:SetPoint("TOPLEFT", last, "BOTTOMLEFT", 0, -14 - (i - 1) * 14 - gap)
@@ -930,6 +1107,8 @@ end
 local function refreshProducts()
   if not (productsWindow and productsSplit and productsPID) then return end
   local data = ns.RecipeData and ns.RecipeData[productsPID]
+  local g = GATHER[productsPID]
+  if g and gatherGroup(productsPID) then data = { name = g.source, icon = g.icon } end
   local title = "Alle Produkte" .. (data and (" – " .. data.name) or "")
   local f = productsWindow.frame
   if f.SetTitle then pcall(f.SetTitle, f, title) end

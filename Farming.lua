@@ -20,14 +20,19 @@ function Farming.SkinSkill(level)
   return math.max(1, (level - 10) * 10)
 end
 
+-- The character's skill in a profession: from its profession scan (the profession window, see
+-- Recipes.lua) - the character snapshot's list stays empty on Forever -, else the snapshot.
 local function professionSkill(name)
   if name == "" then return math.huge end
+  local scan = ns.db and ns.db.recipes and ns.db.recipes[ns.CharKey() .. ":" .. name]
+  if scan and scan.rank then return scan.rank end
   local char = ns.db and ns.db.chars and ns.db.chars[ns.CharKey()]
   for _, prof in ipairs(char and char.professions or {}) do
     if prof.name == name then return prof.rank or 0 end
   end
   return nil
 end
+Farming.ProfessionSkill = professionSkill
 
 -- Whether the player can gather the item now: ok, reason text.
 local function access(group, entry, level)
@@ -133,6 +138,8 @@ local function parseDrops(text)
   end
   return list
 end
+Farming.ParseDrops = parseDrops
+Farming.ZoneName = zoneName
 
 -- Revenue for one unit, cached per evaluation.
 local function unitRevenue(itemID, cache)
