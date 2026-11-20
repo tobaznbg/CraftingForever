@@ -1023,7 +1023,7 @@ end
 -- page; typing moves it up and the hits show below with their market figures (ns.Item). A
 -- click on a hit (or Enter: the first one) opens the full market data window (ns.ItemDetail)
 -- docked at the ledger. Accepts names, item ids and item links (Shift+click into the line).
-local SEARCH_ICON = "Interface\\Common\\UI-Searchbox-Icon"
+local SEARCH_TAB_ICON = "Interface\\Icons\\INV_Misc_Spyglass_03"
 local SEARCH_MAX = 200
 local searchPage -- the built page (TradeBook.ShowSearch fills its line)
 
@@ -1110,10 +1110,22 @@ local function buildSearch(page, w)
   local landing = CreateFrame("Frame", nil, page)
   landing:SetAllPoints(page)
   local glass = landing:CreateTexture(nil, "ARTWORK")
+  -- the tab's icon (64 px, sharp) in a round ring like the cards' heads; the search box's
+  -- 16 px magnifier glyph blurs when scaled up
   glass:SetSize(56, 56)
   glass:SetPoint("CENTER", page, "CENTER", 0, 110)
-  glass:SetTexture(SEARCH_ICON)
-  glass:SetVertexColor(1, 0.82, 0)
+  glass:SetTexture(SEARCH_TAB_ICON)
+  local okMask, mask = pcall(landing.CreateMaskTexture, landing)
+  if okMask and mask then
+    mask:SetTexture("Interface\\CharacterFrame\\TempPortraitAlphaMask", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+    mask:SetAllPoints(glass)
+    glass:AddMaskTexture(mask)
+  end
+  local ring = landing:CreateTexture(nil, "OVERLAY")
+  ring:SetSize(76, 76)
+  ring:SetPoint("CENTER", glass, "CENTER", 0, 0)
+  ring:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
+  ring:SetTexCoord(0, 0.6, 0, 0.6)
   local title = landing:CreateFontString(nil, "OVERLAY", "GameFontNormalHuge")
   title:SetPoint("TOP", glass, "BOTTOM", 0, -10)
   title:SetText("Marktdaten durchsuchen")
@@ -1128,10 +1140,14 @@ local function buildSearch(page, w)
 
   -- hits: a card under the line with the market figures per item
   local results = card(page, w, 5, -62, 664, 594 - 62 - 6, "Treffer")
+  -- the card art is stretched to the full page height, its top border grows with it: title,
+  -- count and table start lower than on the overview's short cards
+  results.Title:ClearAllPoints()
+  results.Title:SetPoint("TOPLEFT", 24, -30)
   local count = results:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-  count:SetPoint("TOPRIGHT", -24, -18)
-  local setRows = scrollTable(results, { { "Gegenstand", 20, "LEFT", 270 }, { "AH jetzt", 380, "RIGHT" },
-    { "Marktwert", 465, "RIGHT" }, { "Trend", 545, "RIGHT" }, { "Nachfrage", 612, "RIGHT" } }, -42)
+  count:SetPoint("RIGHT", results, "TOPRIGHT", -28, -37)
+  local setRows = scrollTable(results, { { "Gegenstand", 24, "LEFT", 270 }, { "AH jetzt", 380, "RIGHT" },
+    { "Marktwert", 465, "RIGHT" }, { "Trend", 545, "RIGHT" }, { "Nachfrage", 612, "RIGHT" } }, -56)
   results:Hide()
 
   local okBox, box = pcall(CreateFrame, "EditBox", nil, page, "SearchBoxTemplate")
@@ -1323,7 +1339,7 @@ local function create()
     build = buildAuctions, onShow = onTab("auctions", function(page) refreshPage(page); ns.Safe(TradeBook.CheckAuctions) end) })
   window:AddTab({ key = "gold", title = "Gold", icon = "Interface\\Icons\\INV_Misc_Coin_01",
     build = buildGold, onShow = onTab("gold") })
-  window:AddTab({ key = "search", title = "Marktsuche", icon = SEARCH_ICON, overview = true,
+  window:AddTab({ key = "search", title = "Marktsuche", icon = SEARCH_TAB_ICON, overview = true,
     build = buildSearch, onShow = onTab("search") })
 end
 
