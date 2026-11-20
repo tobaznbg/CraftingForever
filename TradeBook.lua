@@ -158,23 +158,20 @@ local function buildOverview(page, w)
   end
   local pnlSlot = NW.Slot(pnl, "Interface\\Icons\\INV_Misc_Coin_02", "Gewinn", "")
   pnlSlot:SetPoint("TOPLEFT", 16, -40)
-  local pnlBar = NW.Bar(pnl, CARD_W - 36, "Skillbar_Fill_Flipbook_Leatherworking")
-  pnlBar:SetPoint("TOPLEFT", 16, -90)
-  local pnlLine = pnl:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-  pnlLine:SetPoint("TOPLEFT", pnlBar, "BOTTOMLEFT", 2, -10)
-  pnlLine:SetWidth(CARD_W - 40)
-  pnlLine:SetJustifyH("LEFT")
+  local pnlFig = NW.Figures(pnl, pnlSlot, { "Umsatz", "Einkauf", "Gebühren" }, { line = false, gap = 8, step = 14 })
+  pnlFig.labels[1]:ClearAllPoints()
+  pnlFig.labels[1]:SetPoint("TOPLEFT", pnlSlot, "BOTTOMLEFT", 2, -8)
+  pnlFig.SetWidth(CARD_W - 40)
 
   -- 2. stock (right)
   local stock = card(page, w, 5 + CARD_W + 2, -41, CARD_W, TOP_H, "Bestand")
   local stockSlot = NW.Slot(stock, "Interface\\Icons\\INV_Box_02", "Buchgewinn", "|cff5fd38d+6g 74s|r")
   stockSlot:SetPoint("TOPLEFT", 16, -40)
-  local stockBar = NW.Bar(stock, CARD_W - 36, "Skillbar_Fill_Flipbook_Skinning")
-  stockBar:SetPoint("TOPLEFT", 16, -90)
-  stockBar.Set(4.02 / 10.76, "Einkauf 4g 02s  ·  Erlös 10g 76s")
-  local stockLine = stock:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-  stockLine:SetPoint("TOPLEFT", stockBar, "BOTTOMLEFT", 2, -10)
-  stockLine:SetText("7 Items  ·  11 Stück")
+  local stockFig = NW.Figures(stock, stockSlot, { "Einkauf", "Erlös", "Items" }, { line = false, gap = 8, step = 14 })
+  stockFig.labels[1]:ClearAllPoints()
+  stockFig.labels[1]:SetPoint("TOPLEFT", stockSlot, "BOTTOMLEFT", 2, -8)
+  stockFig.SetWidth(CARD_W - 40)
+  stockFig.values[1]:SetText("4g 02s"); stockFig.values[2]:SetText("10g 76s"); stockFig.values[3]:SetText("7 Items · 11 Stück")
 
   -- 3. running auctions (full width)
   local AH = 200
@@ -190,15 +187,55 @@ local function buildOverview(page, w)
     { icon = "Interface\\Icons\\INV_Crate_01", "Abgefangene Kiste: Blühende Kräuter", "1s 00c", "|cff999999allein im AH|r", "|cff9999992 h|r" },
   }, -42)
 
-  -- 4. recent trades (full width)
-  local tr = card(page, w, 5, -41 - TOP_H + 4 - AH + 4, 664, 594 - 41 - TOP_H - AH + 8 - 14, "Letzte Vorgänge")
-  cardTable(tr, { { "Item", 20, "LEFT", 290 }, { "Art", 400, "LEFT", 90 }, { "Menge", 520, "RIGHT" }, { "Betrag", 640, "RIGHT" } }, {
-    { icon = "Interface\\Icons\\INV_Boots_08", "Stiefel des Nachtschleichers", "Verkauf", "1", "|cff5fd38d+99s 75c|r" },
-    { icon = "Interface\\Icons\\INV_Misc_LeatherScrap_03", "Unverwüstliches Leder", "Kauf", "20", "|cffff6b6b-5g 64s|r" },
-    { icon = "Interface\\Icons\\INV_Gauntlets_19", "Tückische Lederstulpen", "Hergestellt", "4", "" },
-    { icon = "Interface\\Icons\\INV_Scroll_03", "Muster: Robe der Leere", "Abgelaufen", "1", "|cffff6b6b-45s|r" },
-    { icon = "Interface\\Icons\\INV_Belt_03", "Zornprankengürtel des arkanen Zorns", "Händler", "1", "|cff5fd38d+15s 20c|r" },
-  }, -42)
+  -- 4. recent trades (full width), scrollable like Blizzard's lists
+  local trTop = -41 - TOP_H + 4 - AH + 4
+  local tr = card(page, w, 5, trTop, 664, 594 + trTop - 10, "Letzte Vorgänge")
+  local TCOLS = { { "Item", 20, "LEFT", 290 }, { "Art", 400, "LEFT", 90 }, { "Menge", 520, "RIGHT" }, { "Betrag", 630, "RIGHT" } }
+  cardTable(tr, TCOLS, {}, -42)
+  local EXAMPLE_TRADES = {}
+  local kinds = {
+    { "Interface\\Icons\\INV_Boots_08", "Stiefel des Nachtschleichers", "Verkauf", "1", "|cff5fd38d+99s 75c|r" },
+    { "Interface\\Icons\\INV_Misc_LeatherScrap_03", "Unverwüstliches Leder", "Kauf", "20", "|cffff6b6b-5g 64s|r" },
+    { "Interface\\Icons\\INV_Gauntlets_19", "Tückische Lederstulpen", "Hergestellt", "4", "" },
+    { "Interface\\Icons\\INV_Scroll_03", "Muster: Robe der Leere", "Abgelaufen", "1", "|cffff6b6b-45s|r" },
+    { "Interface\\Icons\\INV_Belt_03", "Zornprankengürtel des arkanen Zorns", "Händler", "1", "|cff5fd38d+15s 20c|r" },
+  }
+  for i = 1, 20 do EXAMPLE_TRADES[i] = kinds[(i - 1) % #kinds + 1] end
+  local box = CreateFrame("Frame", nil, tr, "WowScrollBoxList")
+  local bar = CreateFrame("EventFrame", nil, tr, "MinimalScrollBar")
+  if box and bar and CreateScrollBoxListLinearView and ScrollUtil then
+    box:SetPoint("TOPLEFT", 16, -60)
+    box:SetPoint("BOTTOMRIGHT", -30, 14)
+    bar:SetPoint("TOPLEFT", box, "TOPRIGHT", 8, 0)
+    bar:SetPoint("BOTTOMLEFT", box, "BOTTOMRIGHT", 8, 0)
+    local view = CreateScrollBoxListLinearView()
+    view:SetElementExtent(20)
+    view:SetElementInitializer("BackdropTemplate", function(row, r)
+      if not row.m4 then
+        row.m4 = {}
+        row.m4.icon = row:CreateTexture(nil, "ARTWORK")
+        row.m4.icon:SetSize(16, 16)
+        row.m4.icon:SetPoint("LEFT", 4, 0)
+        for k, col in ipairs(TCOLS) do
+          local fs = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+          fs:SetWordWrap(false)
+          if col[3] == "LEFT" then
+            fs:SetPoint("LEFT", row, "LEFT", k == 1 and 26 or (col[2] - 16), 0)
+            fs:SetWidth(col[4] or 200)
+            fs:SetJustifyH("LEFT")
+          else
+            fs:SetPoint("RIGHT", row, "LEFT", col[2] - 16, 0)
+            fs:SetJustifyH("RIGHT")
+          end
+          row.m4[k] = fs
+        end
+      end
+      row.m4.icon:SetTexture(r[1])
+      for k = 1, #TCOLS do row.m4[k]:SetText(r[k + 1] or "") end
+    end)
+    ScrollUtil.InitScrollBoxListWithScrollBar(box, bar, view)
+    box:SetDataProvider(CreateDataProvider(EXAMPLE_TRADES))
+  end
 
   function page.Refresh()
     local label
@@ -207,9 +244,7 @@ local function buildOverview(page, w)
     if dd.GenerateMenu then pcall(dd.GenerateMenu, dd) end
     local e = EXAMPLE[period]
     pnlSlot.Sub:SetText(e.profit)
-    local share = ({ today = 0.37, week = 0.40, all = 0.35 })[period]
-    pnlBar.Set(share, string.format("Marge %d %%", math.floor(share * 100 + 0.5)))
-    pnlLine:SetText("Umsatz " .. e.revenue .. "  ·  Einkauf " .. e.cost .. "  ·  Gebühren " .. e.fees)
+    pnlFig.values[1]:SetText(e.revenue); pnlFig.values[2]:SetText(e.cost); pnlFig.values[3]:SetText(e.fees)
   end
   page.Refresh()
 end
