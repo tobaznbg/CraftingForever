@@ -559,6 +559,11 @@ function NW.Split(page, opts)
     show(true)
   end
   function split.Rebuild() show(true) end
+  -- selects the entry with that key (when it is in the list) and shows it
+  function split.Select(key)
+    split.selected = { key = key }
+    show(true)
+  end
   local search = rawget(list, "SearchBox")
   if type(search) == "table" and search.HookScript then
     search:HookScript("OnTextChanged", function(edit)

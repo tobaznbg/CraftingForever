@@ -48,6 +48,7 @@ AHTable.lua
 Invest.lua
 Trends.lua
 Crafting.lua
+ShoppingList.lua
 Vendor.lua
 BagMarks.lua
 Patterns.lua

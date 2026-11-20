@@ -1374,6 +1374,41 @@ local function updateForm(form)
     row.label:SetShown(values ~= nil)
     row.value:SetText(values and values[i] or "")
   end
+  -- "Einkaufsliste" under the profit: the recipe with the count of Blizzard's number box onto
+  -- the shopping list (ShoppingList.lua), which opens
+  if not form.m4Shop then
+    local ok, b = pcall(CreateFrame, "Button", nil, form, "UIPanelButtonTemplate")
+    if ok and b then
+      b:SetSize(110, 20)
+      b:SetText("Einkaufsliste")
+      b:SetScript("OnClick", function()
+        local rid = b.m4Recipe
+        if not (rid and ns.ShoppingList) then return end
+        local box = form.m4Page and rawget(form.m4Page, "CreateMultipleInputBox")
+        local n = 1
+        if type(box) == "table" and box.GetValue then
+          local okV, v = pcall(box.GetValue, box)
+          if okV and tonumber(v) and tonumber(v) > 0 then n = tonumber(v) end
+        end
+        if ns.ShoppingList.Add(rid, n) then ns.ShoppingList.Show(rid) end
+      end)
+      b:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText("Auf die Einkaufsliste")
+        GameTooltip:AddLine("So oft wie im Zahlenfeld unten (sonst 1×); was dein Haushalt hat, wird abgezogen.", 1, 1, 1, true)
+        GameTooltip:Show()
+      end)
+      b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+      form.m4Shop = b
+    end
+  end
+  if form.m4Shop then
+    local gewinn = form.m4Rows[3].value
+    form.m4Shop.m4Recipe = id
+    form.m4Shop:ClearAllPoints()
+    form.m4Shop:SetPoint("TOPRIGHT", gewinn, "BOTTOMRIGHT", 0, -10)
+    form.m4Shop:SetShown(values ~= nil and e and e.out ~= nil)
+  end
 end
 
 local function attachProfessions()
@@ -1384,6 +1419,7 @@ local function attachProfessions()
     return
   end
   local list, form = rawget(page, "RecipeList"), rawget(page, "SchematicForm")
+  if type(form) == "table" then form.m4Page = page end
   profTrace("frame", "list=" .. type(list) .. " form=" .. type(form))
   local layer = CreateFrame("Frame", nil, page)
   page.m4Info = layer
