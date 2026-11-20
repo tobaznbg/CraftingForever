@@ -565,8 +565,59 @@ function Ledger.Events()
   return book().events
 end
 
+-- Household: every character of this WoW account on the same realm and faction (one auction
+-- house). Faction from the character snapshot (Tracker.lua, db.chars); a character whose faction
+-- is not known yet (never logged in on this PC) is left out until it is.
+function Ledger.Household()
+  local me = ns.CharKey()
+  local realm = me:match("^[^-]+%-(.+)$")
+  local mine = ns.db.chars and ns.db.chars[me]
+  local faction = mine and mine.faction
+  local keys, seen = { me }, { [me] = true }
+  local function consider(key)
+    if seen[key] or type(key) ~= "string" then return end
+    seen[key] = true
+    local r = key:match("^[^-]+%-(.+)$")
+    local c = ns.db.chars and ns.db.chars[key]
+    if r == realm and faction and c and c.faction == faction then keys[#keys + 1] = key end
+  end
+  for key in pairs(ns.db.ledger or {}) do consider(key) end
+  for key in pairs(ns.db.chars or {}) do consider(key) end
+  table.sort(keys)
+  return keys
+end
+
+-- The household's events in time order (the profit report replays them together, so goods
+-- made by one character and sold by another carry their cost). Not copied: the events stay the
+-- stored ones; Ledger.CharOf(e) tells whose event it is. Rebuilt when a book grew.
+local merged, mergedKey, charOf = nil, nil, setmetatable({}, { __mode = "k" })
+function Ledger.HouseholdEvents()
+  local keys = Ledger.Household()
+  local sig = {}
+  for _, key in ipairs(keys) do
+    local b = ns.db.ledger and ns.db.ledger[key]
+    local events = b and b.events or {}
+    sig[#sig + 1] = key .. "=" .. #events .. ":" .. tostring(events[#events])
+  end
+  local k = table.concat(sig, ",")
+  if merged and k == mergedKey then return merged end
+  local out = {}
+  for _, key in ipairs(keys) do
+    local b = ns.db.ledger and ns.db.ledger[key]
+    for _, e in ipairs(b and b.events or {}) do
+      out[#out + 1] = e
+      charOf[e] = key
+    end
+  end
+  table.sort(out, function(x, y) return (x.t or 0) < (y.t or 0) end)
+  merged, mergedKey = out, k
+  return out
+end
+
+function Ledger.CharOf(e) return charOf[e] end
+
 function Ledger.Recent(n)
-  local events, out = book().events, {}
+  local events, out = Ledger.HouseholdEvents(), {}
   for i = #events, math.max(1, #events - n + 1), -1 do table.insert(out, events[i]) end
   return out
 end

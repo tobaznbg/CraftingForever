@@ -177,7 +177,7 @@ function Profit.ParseMoney(text)
 end
 
 local function replay(since)
-  local events = ns.Ledger and ns.Ledger.Events and ns.Ledger.Events() or {}
+  local events = ns.Ledger and (ns.Ledger.HouseholdEvents or ns.Ledger.Events) and (ns.Ledger.HouseholdEvents or ns.Ledger.Events)() or {}
   local bought, crafted = {}, {}
   local profOf = {}     -- itemID -> profession name (last craft)
   local depo = {}       -- itemID -> { u, dep } of posts with a known deposit
@@ -306,7 +306,7 @@ local NONE = { q = 0, v = 0 }
 local CACHE_TTL = 5
 local function clock() return (GetTime and GetTime()) or os.clock() end
 local function replayAll()
-  local events = ns.Ledger and ns.Ledger.Events and ns.Ledger.Events() or {}
+  local events = ns.Ledger and (ns.Ledger.HouseholdEvents or ns.Ledger.Events) and (ns.Ledger.HouseholdEvents or ns.Ledger.Events)() or {}
   local last = events[#events]
   local key = tostring(#events) .. ":" .. tostring(last)
   local now = clock()
@@ -401,17 +401,26 @@ end
 -- What the character really holds of an item: bags, bank (once seen) and own running
 -- auctions. nil when the bank was never opened (then nothing is capped).
 local function heldCounts()
-  local key = ns.CharKey and ns.CharKey()
-  local inv = key and ns.db and ns.db.inventory and ns.db.inventory[key]
-  if not (inv and inv.bagsT and inv.bankT) then return nil end
+  -- bags, bank (once seen) and running auctions of every character of the household; nil when a
+  -- character's bank was never opened (then nothing is capped)
+  local keys = ns.Ledger and ns.Ledger.Household and ns.Ledger.Household() or { ns.CharKey and ns.CharKey() }
   local held = {}
-  for _, part in ipairs({ inv.bags or {}, inv.bank or {} }) do
-    for id, entry in pairs(part) do held[id] = (held[id] or 0) + (entry.n or 0) end
+  for _, key in ipairs(keys) do
+    local inv = key and ns.db and ns.db.inventory and ns.db.inventory[key]
+    if inv then
+      if not (inv.bagsT and inv.bankT) then return nil end
+      for _, part in ipairs({ inv.bags or {}, inv.bank or {} }) do
+        for id, entry in pairs(part) do held[id] = (held[id] or 0) + (entry.n or 0) end
+      end
+    end
+    local owned = ns.db.owned and ns.db.owned[key]
+    for _, a in ipairs(owned and owned.list or {}) do
+      if a.i and not a.s then held[a.i] = (held[a.i] or 0) + (a.q or 1) end
+    end
   end
-  local owned = ns.db.owned and ns.db.owned[key]
-  for _, a in ipairs(owned and owned.list or {}) do
-    if a.i then held[a.i] = (held[a.i] or 0) + (a.q or 1) end
-  end
+  local me = ns.CharKey and ns.CharKey()
+  local inv = me and ns.db.inventory and ns.db.inventory[me]
+  if not (inv and inv.bagsT and inv.bankT) then return nil end
   return held
 end
 
@@ -543,7 +552,7 @@ end
 
 function Profit.ItemEvents(itemID, since)
   local _, _, _, _, _, lost = replayAll()
-  local events = ns.Ledger and ns.Ledger.Events and ns.Ledger.Events() or {}
+  local events = ns.Ledger and (ns.Ledger.HouseholdEvents or ns.Ledger.Events) and (ns.Ledger.HouseholdEvents or ns.Ledger.Events)() or {}
   local out = {}
   for i = #events, 1, -1 do
     local e = events[i]

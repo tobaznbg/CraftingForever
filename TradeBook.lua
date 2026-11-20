@@ -712,6 +712,27 @@ local function buildGrouped(page, spec)
   end
 end
 
+-- "bei Lok 3 · bei Lokbank 12": who of the household holds the item (bags, bank, auctions).
+local function heldBy(itemID)
+  local parts = {}
+  for _, key in ipairs(ns.Ledger and ns.Ledger.Household and ns.Ledger.Household() or {}) do
+    local n = 0
+    local inv = ns.db.inventory and ns.db.inventory[key]
+    for _, part in ipairs({ inv and inv.bags or {}, inv and inv.bank or {} }) do
+      local e = part[itemID]
+      if e then n = n + (e.n or 0) end
+    end
+    local owned = ns.db.owned and ns.db.owned[key]
+    for _, a in ipairs(owned and owned.list or {}) do
+      if a.i == itemID and not a.s then n = n + (a.q or 1) end
+    end
+    if n > 0 then parts[#parts + 1] = "bei " .. (key:match("^([^-]+)") or key) .. " " .. n end
+  end
+  return table.concat(parts, " · ")
+end
+
+local function charName(key) return key and key:match("^([^-]+)") or "?" end
+
 local function pctText(gain, cost)
   if not (gain and cost and cost > 0) then return "–" end
   return string.format("%+d %%", math.floor(gain / cost * 100 + 0.5))
@@ -735,7 +756,7 @@ local function collectStock()
     end
     local name = s.name or ns.ItemName(s.itemId) or ("#" .. s.itemId)
     g.items[#g.items + 1] = { key = key .. ":" .. s.itemId, itemID = s.itemId, icon = iconOf(s.itemId), name = name,
-      sub = key .. " · " .. (s.source or ""), gain = s.gain or -1e12,
+      sub = heldBy(s.itemId) ~= "" and heldBy(s.itemId) or (key .. " · " .. (s.source or "")), gain = s.gain or -1e12,
       cols = { name, tostring(s.units), s.gain and signed(s.gain) or "–" },
       values = { tostring(s.units), money(s.unitCost), money(s.cost), s.sellUnit and money(s.sellUnit) or "–",
         s.sell and money(s.sell) or "–", pctText(s.gain, s.cost), s.gain and signed(s.gain) or "–" } }
@@ -783,7 +804,7 @@ local function collectAuctions()
     local net = r.unit and math.floor(r.unit * 0.95 * qty) or 0
     local profit = cost and r.unit and math.floor((r.unit * 0.95 - cost) * qty) or nil
     local name = ns.ItemName(r.itemID) or ("#" .. tostring(r.itemID))
-    g.items[#g.items + 1] = { key = bucket .. ":" .. tostring(r.itemID), itemID = r.itemID, icon = iconOf(r.itemID),
+    g.items[#g.items + 1] = { key = bucket .. ":" .. tostring(r.itemID) .. ":" .. (#g.items + 1), itemID = r.itemID, icon = iconOf(r.itemID),
       name = name, sub = status, profit = profit or -1e12, worth = (r.unit or 0) * qty, under = bucket == "under",
       cols = { name, r.unit and money(r.unit) or "–", profit and signed(profit) or "–" },
       values = { tostring(qty), r.unit and money(r.unit) or "–", r.foreign and money(r.foreign) or "–", status,
@@ -803,9 +824,13 @@ local function collectAuctions()
       else add("other", r, r.status == "alone" and "allein im AH" or "nicht geprüft") end
     end
   end
-  if not any then
-    local key = ns.CharKey and ns.CharKey()
+  -- the other characters of the household: their stored auctions (and this one's without the AH)
+  local me = ns.CharKey and ns.CharKey()
+  local households = ns.Ledger and ns.Ledger.Household and ns.Ledger.Household() or { me }
+  for _, key in ipairs(households) do
+    if key ~= me or not any then
     local saved = key and ns.db and ns.db.owned and ns.db.owned[key]
+    local who = key ~= me and ("  " .. MUTED .. "· " .. charName(key) .. "|r") or ""
     -- the stored auctions with the result of their last check (time left counted down)
     local age = saved and saved.t and math.max(0, time() - saved.t) or 0
     local function ago(t)
@@ -816,12 +841,13 @@ local function collectAuctions()
       if not a.s then
         local r = { itemID = a.i, unit = a.u, quantity = a.q, foreign = a.f, diff = a.df,
           timeLeft = a.tl and math.max(0, a.tl - age) or nil }
-        local when = a.ck and ("  " .. MUTED .. "· geprüft " .. ago(a.ck) .. "|r") or ""
+        local when = (a.ck and ("  " .. MUTED .. "· geprüft " .. ago(a.ck) .. "|r") or "") .. who
         if a.st == "under" then add("under", r, RED .. "unterboten um " .. money(a.df) .. "|r" .. when)
         elseif a.st == "best" then add("best", r, GREEN .. "bester Preis|r" .. when)
         elseif a.st == "alone" then add("other", r, "allein im AH" .. when)
-        else add("other", r, "nicht geprüft (Auktionshaus öffnen)") end
+        else add("other", r, "nicht geprüft (Auktionshaus öffnen)" .. who) end
       end
+    end
     end
   end
   local out = {}
