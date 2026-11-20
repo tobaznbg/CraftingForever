@@ -15,7 +15,7 @@ local ADDON, ns = ...
 local Selling = {}
 ns.Selling = Selling
 
-local WIDTH, ROW = 360, 26
+local WIDTH, ROW = 410, 26
 local MAX_ROWS = 18
 local CRASH_SHARE = 0.7  -- warn when the live price is below 70 % of the usual one
 local DURATIONS = { { 1, "2 h" }, { 2, "8 h" }, { 3, "24 h" } }
@@ -37,7 +37,7 @@ local mineView, checkButton -- mode "Auktionen" (createMineView)
 local MINE_ROW = 44 -- name, status line, cost line
 local RED, ORANGE = "|cffff6b6b", "|cffffb547"
 -- Columns of the mode "Auktionen" right of the item: own price, cheapest of others, cancel button.
-local MINE_COLS = { { "Mein Preis", 64 }, { "Billigst fremd", 70 }, { "", 66 } }
+local MINE_COLS = { { "Einstand", 60 }, { "Mein Preis", 64 }, { "Billigst fremd", 70 }, { "", 66 } }
 
 local api = C_AuctionHouse or {}
 
@@ -419,17 +419,17 @@ function Selling.MineStatus(e)
   return text .. Selling.MineRoom(e)
 end
 
--- "Einstand 12s (gekauft) · Luft 3s": what one unit cost and how far the price can still
--- go down: undercutting the cheapest other offer by 1 copper, after the 5 % cut, minus the cost.
+-- "Einstand gekauft · Luft 3s · ab 13s ohne Verlust": where the cost (column "Einstand") comes
+-- from and how far the price can still go down: undercutting the cheapest other offer by 1 copper, after the 5 % cut, minus the cost.
 -- Always shown: without a known cost it says so (looted, or bought before the ledger ran).
 function Selling.MineRoom(e)
   -- (not "a and b and f()": that keeps only the first return value)
   local cost, source
   if ns.Profit and ns.Profit.UnitCost then cost, source = ns.Profit.UnitCost(e.itemID) end
   if not cost then
-    return "\n" .. "Einstand " .. MUTED .. "unbekannt – kein Kauf erfasst (Details: eintragen)|r"
+    return "\n" .. MUTED .. "Einstand unbekannt – kein Kauf erfasst (Details: eintragen)|r"
   end
-  local text = "\n" .. "Einstand " .. money(math.floor(cost + 0.5)) .. MUTED .. " (" .. source .. ")|r"
+  local text = "\n" .. MUTED .. "Einstand " .. source .. "|r"
   local target = e.foreign and (e.foreign - 1) or e.unit
   if target then
     local room = math.floor(target * (1 - 0.05) - cost)
@@ -475,8 +475,10 @@ refreshMine = function()
     local qty = e.active > 0 and e.quantity or (e.soldCount + e.expiredCount)
     r.name:SetText((ns.ItemName(e.itemID) or ("#" .. e.itemID)) .. MUTED .. "  " .. qty .. "x|r"
       .. (e.soldCount > 0 and e.active > 0 and (MUTED .. "  ·  " .. e.soldCount .. " verkauft|r") or ""))
-    r.cells[1]:SetText(e.unit and money(e.unit) or (MUTED .. "–|r"))
-    r.cells[2]:SetText(e.foreign and money(e.foreign) or (MUTED .. "–|r"))
+    local cost = ns.Profit and ns.Profit.UnitCost and ns.Profit.UnitCost(e.itemID)
+    r.cells[1]:SetText(cost and money(math.floor(cost + 0.5)) or (MUTED .. "–|r"))
+    r.cells[2]:SetText(e.unit and money(e.unit) or (MUTED .. "–|r"))
+    r.cells[3]:SetText(e.foreign and money(e.foreign) or (MUTED .. "–|r"))
     r.info:SetText(Selling.MineStatus(e))
     r.button:SetShown(e.active > 0 and My.CancelTarget(e) ~= nil)
     if e.status == "under" then
