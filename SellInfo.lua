@@ -109,6 +109,31 @@ local function attach(frame)
   frame:HookScript("OnHide", function() lastKey = nil; fs:SetText("") end)
 end
 
+-- Which frames of the auction house are shown (keys and names), recorded every 2 s while it is
+-- open: Forever's sell screen is not Blizzard's ItemSellFrame (its OnUpdate never ran).
+local function probeShown()
+  local ah = AuctionHouseFrame
+  if not (ah and ah:IsShown() and ns.db) then return end
+  local shown = {}
+  for key, v in pairs(ah) do
+    if type(v) == "table" and type(v.IsShown) == "function" and type(v.GetObjectType) == "function" then
+      local ok, vis = pcall(v.IsShown, v)
+      if ok and vis then
+        local name = v.GetName and v:GetName() or nil
+        shown[#shown + 1] = tostring(key) .. (name and ("=" .. name) or "")
+      end
+    end
+  end
+  table.sort(shown)
+  local list = ns.db.sellInfoShown or {}
+  ns.db.sellInfoShown = list
+  local line = table.concat(shown, ", ")
+  if list[#list] ~= line then
+    list[#list + 1] = line
+    while #list > 20 do table.remove(list, 1) end
+  end
+end
+
 local function attachAll()
   local ah = AuctionHouseFrame
   if not ah then return end
@@ -117,9 +142,15 @@ local function attachAll()
 end
 
 if ns.On then
+  ns.On("AUCTION_HOUSE_CLOSED", function()
+    if SellInfo.ticker then SellInfo.ticker:Cancel(); SellInfo.ticker = nil end
+  end)
   ns.On("AUCTION_HOUSE_SHOW", function()
     attachAll()
     -- The auction house UI loads on demand: its frames may only exist a moment later.
     if C_Timer then C_Timer.After(0.2, function() ns.Safe(attachAll) end) end
+    if C_Timer and C_Timer.NewTicker and not SellInfo.ticker then
+      SellInfo.ticker = C_Timer.NewTicker(2, function() ns.Safe(probeShown) end)
+    end
   end)
 end
