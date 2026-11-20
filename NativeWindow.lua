@@ -45,6 +45,7 @@ function NW.New(opts)
   local f = try("Frame", UIParent, "PortraitFrameTemplate", opts.name)
     or try("Frame", UIParent, "ButtonFrameTemplate", opts.name) or CreateFrame("Frame", opts.name, UIParent)
   self.frame = f
+  f.m4Native = true -- ItemDetail docks at it (Alt+click from inside: NW.AltClick)
   f:SetSize(opts.width or 673, opts.height or 594) -- the profession window's size
   f:SetToplevel(true)
   f:EnableMouse(true)
@@ -282,26 +283,41 @@ function NW.Panel(parent, title)
 end
 
 -- Left Blizzard's recipe list, right the recipe card.
--- 1 to 3 gold coins, slightly overlapping, the first at the anchor and the others to its left
--- (the profession window's coin, more of them the more a recipe pays: ns.CoinCount).
-local COIN = "Interface\\MoneyFrame\\UI-GoldIcon"
-function NW.Coins(parent)
+-- Alt+click on an item inside an own window: the market data window docks at that window.
+function NW.AltClick(itemID, region)
+  local f = region
+  while f and not rawget(f, "m4Native") and f.GetParent do f = f:GetParent() end
+  return ns.ItemDetail and ns.ItemDetail.AltClick(itemID, f and rawget(f, "m4Native") and f or nil) or false
+end
+
+-- 1 to 3 gold coins left of a row's name, slightly overlapping (the profession window's coin,
+-- more of them the more a recipe pays: ns.CoinCount). The name moves right by the extra coins,
+-- so the stack stays inside the row. Set(n, anchor): the coins sit left of anchor (default the
+-- name, e.g. the skill-up arrow when it shows); n = 0 hides them and puts the name back.
+local COIN, COIN_STEP = "Interface\\MoneyFrame\\UI-GoldIcon", 7
+function NW.Coins(parent, label)
   local st = { tex = {} }
   for i = 1, 3 do
-    local t = parent:CreateTexture(nil, "OVERLAY", nil, 4 - i) -- the first one on top
+    local t = parent:CreateTexture(nil, "OVERLAY", nil, 4 - i) -- the front coin on top
     t:SetSize(11, 11)
     t:SetTexture(COIN)
     t:Hide()
     st.tex[i] = t
   end
-  function st.Show(n, point, rel, relPoint, x, y)
+  local base -- the name's own left anchor, read once
+  function st.Set(n, anchor)
+    if type(label) == "table" and not base and label.GetPoint then
+      local p, rel, rp, x, y = label:GetPoint(1)
+      if p == "LEFT" or p == "TOPLEFT" or p == "BOTTOMLEFT" then base = { p, rel, rp, x or 0, y or 0 } end
+    end
+    if base then label:SetPoint(base[1], base[2], base[3], base[4] + math.max(0, n - 1) * COIN_STEP, base[5]) end
+    anchor = anchor or label
     for i, t in ipairs(st.tex) do
       t:ClearAllPoints()
-      t:SetPoint(point, rel, relPoint, x - (i - 1) * 4, y)
-      t:SetShown(i <= n)
+      if type(anchor) == "table" then t:SetPoint("RIGHT", anchor, "LEFT", -4 - (i - 1) * COIN_STEP, 0) end
+      t:SetShown(i <= n and type(anchor) == "table")
     end
   end
-  function st.Hide() for _, t in ipairs(st.tex) do t:Hide() end end
   return st
 end
 
@@ -346,7 +362,7 @@ function NW.CardHead(layer)
   end)
   b:SetScript("OnLeave", function() GameTooltip:Hide() end)
   b:SetScript("OnClick", function()
-    if d.itemID and ns.ItemDetail then ns.ItemDetail.AltClick(d.itemID) end
+    if d.itemID then NW.AltClick(d.itemID, layer) end
   end)
   return d
 end
@@ -445,13 +461,8 @@ function NW.Split(page, opts)
           end
           button.m4Marker:SetShown(data.marker == "down")
           -- data.coins = 1..3 (or marker "coin" = 1): gold coins left of the name, how much it pays
-          if not button.m4Coins then button.m4Coins = NW.Coins(button) end
-          local coins = data.coins or (data.marker == "coin" and 1) or 0
-          if type(label) == "table" and coins > 0 then
-            button.m4Coins.Show(coins, "RIGHT", label, "LEFT", -4, 0)
-          else
-            button.m4Coins.Hide()
-          end
+          if not button.m4Coins then button.m4Coins = NW.Coins(button, label) end
+          button.m4Coins.Set(data.coins or (data.marker == "coin" and 1) or 0)
           if type(label) == "table" and label.SetTextColor then
             -- the template's own color unless the entry brings one (buttons are recycled)
             if not button.m4LabelColor and label.GetTextColor then button.m4LabelColor = { label:GetTextColor() } end
@@ -489,7 +500,7 @@ function NW.Split(page, opts)
           end)
           button:SetScript("OnClick", function()
             -- Alt+click: the item's market data window, like everywhere
-            if data.itemID and ns.ItemDetail and ns.ItemDetail.AltClick(data.itemID) then return end
+            if data.itemID and NW.AltClick(data.itemID, button) then return end
             split.selected = data
             box:ForEachFrame(function(other)
               local o = rawget(other, "SelectedOverlay")

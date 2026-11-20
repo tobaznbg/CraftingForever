@@ -901,8 +901,13 @@ end
 place = function(anchor)
   anchor = anchor or dockAnchor()
   docked = anchor
+  -- a docked window closes with the window it docks at (own windows: hooked once)
+  if anchor and rawget(anchor, "m4Native") and not rawget(anchor, "m4DetailHook") then
+    anchor.m4DetailHook = true
+    anchor:HookScript("OnHide", function(f) if docked == f then Detail.Hide() end end)
+  end
   frame:ClearAllPoints()
-  if anchor and skin == "blizzard" and (anchor == AuctionHouseFrame
+  if anchor and skin == "blizzard" and (anchor == AuctionHouseFrame or rawget(anchor, "m4Native")
       or anchor == rawget(_G, "ProfessionsFrame") or anchor == rawget(_G, "TradeSkillFrame")) then
     -- right on the auction house frame's edge, same height: reads as part of it
     frame:SetPoint("TOPLEFT", anchor, "TOPRIGHT", -2, 0)
@@ -1130,10 +1135,12 @@ end
 
 -- For the addon's item tables: opens the detail on Alt+click and returns true; returns false
 -- otherwise, so the table keeps its normal click behaviour.
-function Detail.AltClick(item)
+-- Alt+click on an item: its detail. anchor: the window the click came from (it docks there
+-- instead of the auction house or profession window), e.g. a NativeWindow.
+function Detail.AltClick(item, anchor)
   local id = toID(item)
   if not id or not Detail.IsAltClick() then return false end
-  ns.Safe(Detail.Show, id)
+  ns.Safe(Detail.Show, id, anchor and { anchor = anchor } or nil)
   return true
 end
 
@@ -1255,7 +1262,7 @@ if ns.On then
     if docked and docked == pf then Detail.Hide() end
   end)
   ns.On("AUCTION_HOUSE_CLOSED", function()
-    if docked then Detail.Hide() end
+    if docked and not rawget(docked, "m4Native") then Detail.Hide() end -- own windows stay
   end)
   -- The name arrives from the server after the window opened.
   ns.On("GET_ITEM_INFO_RECEIVED", function(_, id)

@@ -674,7 +674,7 @@ local function reagentSlot(c)
     GameTooltip:Show()
   end)
   slot:SetScript("OnLeave", function() GameTooltip:Hide() end)
-  slot:SetScript("OnClick", function() if r.itemID and ns.ItemDetail then ns.ItemDetail.AltClick(r.itemID) end end)
+  slot:SetScript("OnClick", function(self) if r.itemID then ns.NativeWindow.AltClick(r.itemID, self) end end)
   return r
 end
 
@@ -877,23 +877,16 @@ local function updateList(list)
     local id = recipeIDOf(row)
     local label = rawget(row, "Label")
     if not (id and type(label) == "table") then
-      if row.m4Coins then row.m4Coins.Hide() end
+      if row.m4Coins then row.m4Coins.Set(0) end -- a category row: no coins, name in place
       return
     end
     n = n + 1
     local e = ns.RecipeEconomics(id)
-    if not row.m4Coins then row.m4Coins = ns.NativeWindow.Coins(row) end
+    if not row.m4Coins then row.m4Coins = ns.NativeWindow.Coins(row, label) end
     local coins = e and e.profit and e.onAH and ns.CoinCount(e.profit) or 0 -- only where it pays
-    if coins > 0 then
-      local ups = rawget(row, "SkillUps")
-      if type(ups) == "table" and ups.IsShown and ups:IsShown() then
-        row.m4Coins.Show(coins, "RIGHT", ups, "LEFT", -2, 0)
-      else
-        row.m4Coins.Show(coins, "RIGHT", label, "LEFT", -4, 0) -- where the skill-up arrow sits
-      end
-    else
-      row.m4Coins.Hide()
-    end
+    -- left of the skill-up arrow when it shows, else where it sits
+    local ups = rawget(row, "SkillUps")
+    row.m4Coins.Set(coins, type(ups) == "table" and ups.IsShown and ups:IsShown() and ups or nil)
   end)
   profTrace("listRows", n)
 end

@@ -120,7 +120,7 @@ local function scrollTable(c, cols, top)
       row:SetScript("OnLeave", function() GameTooltip:Hide() end)
       row:SetScript("OnMouseUp", function(self, button)
         if button ~= "LeftButton" then return end
-        if self.itemID and ns.ItemDetail and ns.ItemDetail.AltClick(self.itemID) then return end
+        if self.itemID and ns.NativeWindow.AltClick(self.itemID, self) then return end
         if self.onClick then ns.Safe(self.onClick) end
       end)
     end
@@ -265,7 +265,7 @@ local function iconButton(parent, d)
   end)
   b:SetScript("OnLeave", function() GameTooltip:Hide() end)
   b:SetScript("OnClick", function()
-    if d.itemID and ns.ItemDetail then ns.ItemDetail.AltClick(d.itemID) end
+    if d.itemID then ns.NativeWindow.AltClick(d.itemID, parent) end
   end)
   return b
 end
