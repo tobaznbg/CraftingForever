@@ -196,6 +196,37 @@ local function section(title)
   return s
 end
 
+-- A click area over lines (top, height on the body): sets the map waypoint of loc.
+local mapButtons, usedMap = {}, 0
+local function mapButton(top, height, loc)
+  usedMap = usedMap + 1
+  local b = mapButtons[usedMap]
+  if not b then
+    b = CreateFrame("Button", nil, body)
+    local hl = b:CreateTexture(nil, "HIGHLIGHT")
+    hl:SetAllPoints()
+    hl:SetColorTexture(1, 0.82, 0, 0.08)
+    b:SetScript("OnClick", function(self) if self.loc and ns.ShowOnMap then ns.Safe(ns.ShowOnMap, self.loc) end end)
+    b:SetScript("OnEnter", function(self)
+      GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+      GameTooltip:SetText("Auf der Karte zeigen")
+      if self.loc then
+        GameTooltip:AddLine(string.format("%s – %s %.1f, %.1f", self.loc.name or "", self.loc.zone or "?",
+          self.loc.x or 0, self.loc.y or 0), 1, 1, 1)
+      end
+      GameTooltip:Show()
+    end)
+    b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    mapButtons[usedMap] = b
+  end
+  b.loc = loc
+  b:ClearAllPoints()
+  b:SetPoint("TOPLEFT", body, "TOPLEFT", 0, -top + 2)
+  b:SetPoint("RIGHT", body, "RIGHT", 0, 0)
+  b:SetHeight(height)
+  b:Show()
+end
+
 -- Chart ------------------------------------------------------------------------------
 
 -- The two views of the history, both on a fixed axis ending now (same scale for every item,
@@ -678,7 +709,7 @@ render = function()
     if color and color.hex then name = color.hex .. name .. "|r" end
   end
   frame.name:SetText(name)
-  y, used, usedSections = 0, 0, 0
+  y, used, usedSections, usedMap = 0, 0, 0, 0
   local h = currentHit(itemID)
   local item = ns.Item(itemID)
 
@@ -830,6 +861,24 @@ render = function()
     if #levels > MAX then line(Style.MUTED .. string.format("+%d weitere Preisstufen", #levels - MAX) .. "|r", "") end
   end
 
+  -- 4b. Where it drops (ns.ItemDrops, Crafting.lua): creature, chance, level and zone; a click
+  -- on a creature with a known place sets the map waypoint.
+  local drops, dropCount = ns.ItemDrops and ns.ItemDrops(itemID, 4)
+  if drops then
+    section("Fundorte (Drop)")
+    for _, d in ipairs(drops) do
+      local top = y
+      line(d.text, d.right)
+      if d.sub ~= "" then
+        line(Style.MUTED .. "   " .. d.sub .. "|r", d.loc and (Style.ACCENT .. "Karte|r") or "")
+      end
+      if d.loc then mapButton(top, y - top, d.loc) end
+    end
+    if (dropCount or 0) > #drops then
+      line(Style.MUTED .. string.format("und %d weitere", dropCount - #drops) .. "|r", "")
+    end
+  end
+
   -- 5. Crafting (same recipe choice as the tooltip)
   local craft = ns.CraftInfo and ns.CraftInfo(itemID)
   if craft then
@@ -871,6 +920,7 @@ render = function()
 
   for i = used + 1, #lines do lines[i].label:Hide(); lines[i].value:Hide() end
   for i = usedSections + 1, #sections do sections[i].text:Hide(); sections[i].rule:Hide() end
+  for i = usedMap + 1, #mapButtons do mapButtons[i]:Hide() end
   body:SetSize(contentWidth(), math.max(1, y + 6))
   if scroll.UpdateBar then scroll.UpdateBar() end
 end

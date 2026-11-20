@@ -946,6 +946,94 @@ local function sourceLines(pid, spell)
   return #lines > 0 and lines or nil
 end
 
+-- Where an item drops, for any item (market search, item detail): the creatures of
+-- Data_FarmSpots that loot or skin it (wowhead's measured share of kills / skins) and, for a
+-- recipe item, the recipe sources' drops (dd / dw / dr). Built into one index on first use.
+--   ns.ItemDrops(itemID, max) -> { { text, sub, right, loc, chance }… } best first, or nil
+--   ns.HasDrops(itemID)       -> true when the index knows a drop
+local dropIndex -- itemID -> { candidates… }
+local function chanceText(share, skin)
+  if share >= 0.995 then return (string.format("%.1f", share):gsub("%.", ",")) .. (skin and " pro Häuten" or " pro Kill") end
+  if share >= 0.1 then return string.format("%d %%", math.floor(share * 100 + 0.5)) end
+  return (string.format("%.1f %%", share * 100):gsub("%.", ","))
+end
+local function buildDropIndex()
+  dropIndex = {}
+  local F, C = ns.Farming, ns.SpotCoords
+  local function put(id, c)
+    local list = dropIndex[id]
+    if not list then list = {}; dropIndex[id] = list end
+    list[#list + 1] = c
+  end
+  for _, spot in ipairs(ns.FarmSpots or {}) do
+    local npcID, name, lo, hi, zones, skinText, lootText = spot[1], spot[2], spot[3], spot[4], spot[5], spot[6], spot[7]
+    local zoneID = tonumber(tostring(zones or ""):match("(%d+)"))
+    for _, part in ipairs({ { lootText, false }, { skinText, true } }) do
+      if part[1] and part[1] ~= "" and F and F.ParseDrops then
+        for _, d in ipairs(F.ParseDrops(part[1])) do
+          put(d[1], { npc = npcID, name = name, lo = lo, hi = hi, zoneID = zoneID, share = d[2] * d[3], skin = part[2] })
+        end
+      end
+    end
+  end
+  for _, srcs in pairs(ns.RecipeSources or {}) do
+    for _, entry in pairs(srcs.recipes or {}) do
+      local id = entry.item
+      if id then
+        if entry.dd then
+          for _, d in ipairs(entry.dd) do
+            put(id, { npc = d[1], name = d[2], lo = d[4], hi = d[5], zoneID = d[3], share = d[6] / 1000 })
+          end
+        elseif entry.dw then
+          put(id, { world = string.format("Weltdrop, selten (%d Gegner, Stufe %d–%d)", entry.dw[1], entry.dw[2], entry.dw[3]), share = 0 })
+        elseif entry.d then
+          put(id, { world = entry.dr and table.concat(entry.dr, ", ") or "Zufälliger Weltdrop", share = 0 })
+        end
+      end
+    end
+  end
+end
+
+function ns.HasDrops(itemID)
+  if not dropIndex then buildDropIndex() end
+  return dropIndex[itemID] ~= nil
+end
+
+function ns.ItemDrops(itemID, max)
+  if not dropIndex then buildDropIndex() end
+  local list = dropIndex[itemID]
+  if not list then return nil end
+  local F, C = ns.Farming, ns.SpotCoords
+  local level = UnitLevel and UnitLevel("player") or 60
+  local sorted, seen = {}, {}
+  for _, c in ipairs(list) do
+    local key = c.world or (tostring(c.npc) .. (c.skin and "s" or ""))
+    if not seen[key] then seen[key] = true; sorted[#sorted + 1] = c end
+  end
+  -- reachable creatures (level + 3) first, then the best chance
+  table.sort(sorted, function(a, b)
+    local ra, rb = (a.lo or 0) <= level + 3, (b.lo or 0) <= level + 3
+    if ra ~= rb then return ra end
+    if a.share ~= b.share then return a.share > b.share end
+    return (a.lo or 0) < (b.lo or 0)
+  end)
+  local out = {}
+  for i = 1, math.min(max or 5, #sorted) do
+    local c = sorted[i]
+    if c.world then
+      out[#out + 1] = { text = c.world, sub = "", right = "", chance = 0 }
+    else
+      local spot = C and C.npc and C.npc[c.npc]
+      local zone = F and F.ZoneName and ((spot and F.ZoneName(spot[1])) or (c.zoneID and F.ZoneName(c.zoneID))) or "?"
+      local level = (c.lo and c.lo > 0) and ((c.lo == c.hi) and ("Stufe " .. c.lo) or string.format("Stufe %d–%d", c.lo, c.hi or c.lo)) or nil
+      out[#out + 1] = { text = c.name .. (c.skin and " (Kürschnerei)" or ""),
+        sub = (level and (level .. " · ") or "") .. zone, right = chanceText(c.share, c.skin), chance = c.share,
+        loc = spot and { name = c.name, zone = F.ZoneName(spot[1]), x = spot[2], y = spot[3] } or nil }
+    end
+  end
+  return out, #sorted
+end
+
 -- A reagent slot like the profession window's: Blizzard's slot template if the client has it,
 -- else an item button (icon in the slot frame); "0/20 Name" right of it, the price at the edge.
 local function reagentSlot(c)

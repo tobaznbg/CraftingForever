@@ -1018,6 +1018,213 @@ local function buildGold(page)
   end
 end
 
+-- "Marktsuche" (magnifier tab): one search line like a search engine over every item the addon
+-- knows (shipped names, collector data, own scans). Empty: the line sits in the middle of the
+-- page; typing moves it up and the hits show below with their market figures (ns.Item). A
+-- click on a hit (or Enter: the first one) opens the full market data window (ns.ItemDetail)
+-- docked at the ledger. Accepts names, item ids and item links (Shift+click into the line).
+local SEARCH_ICON = "Interface\\Common\\UI-Searchbox-Icon"
+local SEARCH_MAX = 200
+local searchPage -- the built page (TradeBook.ShowSearch fills its line)
+
+-- string.lower leaves UTF-8 umlauts alone: Ä Ö Ü by hand.
+local function lowerDE(s)
+  return (s or ""):lower():gsub("\195\132", "\195\164"):gsub("\195\150", "\195\182"):gsub("\195\156", "\195\188")
+end
+
+-- Every searchable item once: { id, name, low, data = has collector or scan data }.
+local function buildIndex()
+  local seen, list = {}, {}
+  local house = ns.AHData and ns.AHData[113]
+  local market = house and house.items or {}
+  local scanned = ns.Item and ns.Item.ScannedItems and ns.Item.ScannedItems() or {}
+  local current = ns.db and ns.db.ah and ns.db.ah.current or {}
+  local cached = C_Item and C_Item.GetItemNameByID
+  local function add(id)
+    if type(id) ~= "number" or seen[id] then return end
+    seen[id] = true
+    local name = (ns.ItemNames and ns.ItemNames[id]) or (cached and cached(id))
+    if not name then return end
+    list[#list + 1] = { id = id, name = name, low = lowerDE(name),
+      data = market[id] ~= nil or scanned[id] ~= nil or current[id] ~= nil }
+  end
+  for id in pairs(market) do add(id) end
+  for id in pairs(scanned) do add(id) end
+  for id in pairs(current) do add(id) end
+  for id in pairs(ns.ItemNames or {}) do add(id) end
+  local withData = 0
+  for _, x in ipairs(list) do if x.data then withData = withData + 1 end end
+  return list, withData
+end
+
+local function trendColored(e)
+  local text = ns.Item.TrendText(e)
+  if not text then return MUTED .. "–|r" end
+  if e.trend >= 0.03 then return GREEN .. text .. "|r" end
+  if e.trend <= -0.03 then return RED .. text .. "|r" end
+  return text
+end
+
+local function searchItems(index, query)
+  query = lowerDE(query):gsub("^%s+", ""):gsub("%s+$", "")
+  if query == "" then return {} end
+  local hits = {}
+  -- an item link or a bare item id: that item first
+  local linked = tonumber(query:match("item:(%d+)") or query:match("^#?(%d+)$") or "")
+  if linked then
+    hits[1] = { id = linked, name = ns.ItemName(linked), rank = -1, data = true }
+    if query:find("|h%[") then query = lowerDE(query:match("|h%[(.-)%]|h") or "") end
+  end
+  if query ~= "" and not query:match("^#?%d+$") then
+    local words = {}
+    for w in query:gmatch("%S+") do words[#words + 1] = w end
+    for _, x in ipairs(index) do
+      if x.id ~= linked then
+        local all = true
+        for _, w in ipairs(words) do
+          if not x.low:find(w, 1, true) then all = false break end
+        end
+        if all then
+          local rank = (x.low == query and 0) or (x.low:sub(1, #query) == query and 1)
+            or (x.low:find(" " .. words[1], 1, true) and 2) or 3
+          hits[#hits + 1] = { id = x.id, name = x.name, rank = rank, data = x.data }
+        end
+      end
+    end
+  end
+  table.sort(hits, function(a, b)
+    if a.rank ~= b.rank then return a.rank < b.rank end
+    if a.data ~= b.data then return a.data end
+    if #a.name ~= #b.name then return #a.name < #b.name end
+    return a.name < b.name
+  end)
+  return hits
+end
+
+local function buildSearch(page, w)
+  searchPage = page
+  local index, withData
+  local hits = {}
+
+  -- landing: magnifier, title, hint (shown while the line is empty)
+  local landing = CreateFrame("Frame", nil, page)
+  landing:SetAllPoints(page)
+  local glass = landing:CreateTexture(nil, "ARTWORK")
+  glass:SetSize(56, 56)
+  glass:SetPoint("CENTER", page, "CENTER", 0, 110)
+  glass:SetTexture(SEARCH_ICON)
+  glass:SetVertexColor(1, 0.82, 0)
+  local title = landing:CreateFontString(nil, "OVERLAY", "GameFontNormalHuge")
+  title:SetPoint("TOP", glass, "BOTTOM", 0, -10)
+  title:SetText("Marktdaten durchsuchen")
+  local hint = landing:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+  hint:SetPoint("TOP", title, "BOTTOM", 0, -64)
+  hint:SetWidth(460)
+  hint:SetText("Name (auch Teile davon, z. B. „leder dick“), Item-ID oder Item-Link (Shift+Klick).\n"
+    .. "Enter öffnet den ersten Treffer, ein Klick zeigt alle Marktdaten mit Preisverlauf\n"
+    .. "und – wo bekannt – wer das Item droppt (mit Wegpunkt auf der Karte).")
+  local stats = landing:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  stats:SetPoint("TOP", hint, "BOTTOM", 0, -14)
+
+  -- hits: a card under the line with the market figures per item
+  local results = card(page, w, 5, -62, 664, 594 - 62 - 6, "Treffer")
+  local count = results:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+  count:SetPoint("TOPRIGHT", -24, -18)
+  local setRows = scrollTable(results, { { "Gegenstand", 20, "LEFT", 270 }, { "AH jetzt", 380, "RIGHT" },
+    { "Marktwert", 465, "RIGHT" }, { "Trend", 545, "RIGHT" }, { "Nachfrage", 612, "RIGHT" } }, -42)
+  results:Hide()
+
+  local okBox, box = pcall(CreateFrame, "EditBox", nil, page, "SearchBoxTemplate")
+  if not okBox then
+    box = CreateFrame("EditBox", nil, page, "InputBoxTemplate")
+  end
+  box:SetAutoFocus(false)
+  box:SetHeight(28)
+  local instructions = rawget(box, "Instructions")
+  if type(instructions) == "table" then instructions:SetText("Gegenstand suchen …") end
+  page.Box = box
+
+  local function openDetail(id)
+    if id and ns.ItemDetail then ns.Safe(ns.ItemDetail.Show, id, { anchor = w.frame }) end
+  end
+
+  local function place(active)
+    box:ClearAllPoints()
+    if active then
+      box:SetWidth(380)
+      box:SetPoint("TOP", w.frame, "TOP", 0, -30)
+    else
+      box:SetWidth(440)
+      box:SetPoint("TOP", title, "BOTTOM", 0, -18)
+    end
+    landing:SetShown(not active)
+    results:SetShown(active)
+  end
+
+  local function run()
+    local text = box:GetText() or ""
+    if text:gsub("%s", "") == "" then
+      hits = {}
+      place(false)
+      return
+    end
+    if not index then index, withData = buildIndex() end
+    hits = searchItems(index, text)
+    place(true)
+    local rows = {}
+    for i = 1, math.min(SEARCH_MAX, #hits) do
+      local h = hits[i]
+      local e = ns.Item(h.id)
+      local ref = e.ref and money(e.ref) or (MUTED .. "–|r")
+      local now = e.now and money(e.now) or (MUTED .. (e.dataT and "nicht im AH" or "–") .. "|r")
+      local id = h.id
+      -- "· Drop" after the name: the detail window knows who drops it (ns.ItemDrops)
+      local drop = ns.HasDrops and ns.HasDrops(id) and ("  " .. MUTED .. "· Drop|r") or ""
+      rows[#rows + 1] = { itemID = id, icon = iconOf(id), h.name .. drop, now, ref, trendColored(e),
+        ns.Item.DemandText(e) or (MUTED .. "–|r"), onClick = function() openDetail(id) end }
+    end
+    setRows(rows)
+    count:SetText(#hits > SEARCH_MAX and string.format("%d Treffer (die ersten %d)", #hits, SEARCH_MAX)
+      or (#hits == 1 and "1 Treffer" or (#hits .. " Treffer")))
+  end
+
+  -- typing: search a moment after the last key (thousands of names per pass)
+  local token = 0
+  box:HookScript("OnTextChanged", function(_, user)
+    token = token + 1
+    local mine = token
+    if C_Timer and C_Timer.After then
+      C_Timer.After(0.15, function() if mine == token then ns.Safe(run) end end)
+    else
+      ns.Safe(run)
+    end
+  end)
+  box:HookScript("OnEnterPressed", function(self)
+    self:ClearFocus()
+    if hits[1] then openDetail(hits[1].id) end
+  end)
+  box:HookScript("OnEscapePressed", function(self) self:ClearFocus() end)
+
+  function page.Refresh()
+    index, withData = buildIndex() -- new scans, names the client has loaded since
+    stats:SetText(string.format("%s Gegenstände in der Datenbank  ·  %s davon mit Marktdaten",
+      BreakUpLargeNumbers and BreakUpLargeNumbers(#index) or #index,
+      BreakUpLargeNumbers and BreakUpLargeNumbers(withData) or withData))
+    run()
+  end
+  place(false)
+end
+
+-- Shift+click on an item while the search line has the focus: the link goes into the line.
+if hooksecurefunc and rawget(_G, "ChatEdit_InsertLink") then
+  hooksecurefunc("ChatEdit_InsertLink", function(link)
+    local box = searchPage and searchPage.Box
+    if box and box:IsVisible() and box:HasFocus() and type(link) == "string" then
+      box:SetText(link:match("|h%[(.-)%]|h") or link)
+    end
+  end)
+end
+
 local function refreshPage(page) if page.Refresh then page.Refresh() end end
 
 -- The window's choice row under the title: character (all or one) left, period right. The
@@ -1088,7 +1295,7 @@ local function buildChoices(w)
 end
 
 local function showChoices(key)
-  local withChar, withPeriod = key ~= "gold", key == "overview" or key == "ledger"
+  local withChar, withPeriod = key ~= "gold" and key ~= "search", key == "overview" or key == "ledger"
   choices.char:SetShown(withChar); choices.charLabel:SetShown(withChar)
   choices.period:SetShown(withPeriod); choices.periodLabel:SetShown(withPeriod)
   for _, d in pairs(choices) do if d.Update then d.Update() end end
@@ -1116,6 +1323,8 @@ local function create()
     build = buildAuctions, onShow = onTab("auctions", function(page) refreshPage(page); ns.Safe(TradeBook.CheckAuctions) end) })
   window:AddTab({ key = "gold", title = "Gold", icon = "Interface\\Icons\\INV_Misc_Coin_01",
     build = buildGold, onShow = onTab("gold") })
+  window:AddTab({ key = "search", title = "Marktsuche", icon = SEARCH_ICON, overview = true,
+    build = buildSearch, onShow = onTab("search") })
 end
 
 -- Right click on a trade / own use item: own use by hand, back to trade, or the automatic rule
@@ -1153,6 +1362,15 @@ function TradeBook.Show()
   if not window then create() end
   window:Show()
   window:SelectTab("overview")
+end
+
+-- The ledger on its market search; text (optional) goes into the search line.
+function TradeBook.ShowSearch(text)
+  TradeBook.Show()
+  window:SelectTab("search")
+  local box = searchPage and searchPage.Box
+  if not box then return end
+  if text and text ~= "" then box:SetText(text) else box:SetFocus() end
 end
 
 function TradeBook.Toggle()
