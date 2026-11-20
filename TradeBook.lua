@@ -1,7 +1,7 @@
 -- TradeBook: the ledger ("Handelsbuch") in Blizzard's own look (ns.NativeWindow): side tabs
 -- Übersicht / Handelsbuch / Bestand / Auktionen. Opens on the overview, period "Alles".
 -- Opened with the tab "Handelsbuch" under the auction house, the minimap button or /m4 buch.
--- Layout pilot: example figures, not the real ledger yet.
+-- Overview with the real figures (ns.Profit, ns.MyAuctions, ns.Ledger); the other tabs still examples.
 local ADDON, ns = ...
 
 local TradeBook = {}
@@ -14,12 +14,6 @@ local PERIODS = { { key = "today", label = "Heute" }, { key = "week", label = "7
 local window
 local period = "all"
 
--- Example figures per period (until the real ledger is wired in).
-local EXAMPLE = {
-  today = { revenue = "3g 12s", cost = "1g 80s", fees = "16s", profit = "|cff5fd38d+1g 16s|r", sales = "7 Verkäufe" },
-  week = { revenue = "41g 05s", cost = "22g 40s", fees = "2g 05s", profit = "|cff5fd38d+16g 60s|r", sales = "63 Verkäufe" },
-  all = { revenue = "96g 70s", cost = "58g 15s", fees = "4g 84s", profit = "|cff5fd38d+33g 71s|r", sales = "171 Verkäufe" },
-}
 
 local DUMMY = {
   { header = "Lederverarbeitung" },
@@ -87,8 +81,9 @@ local function card(page, w, x, y, width, height, title)
   return c
 end
 
--- A small table in a card: column heads, a gold rule, rows of icon + texts.
-local function cardTable(c, cols, rows, top)
+-- A table in a card: column heads, a gold rule and a scroll list of rows (Blizzard's scroll box
+-- and minimal scroll bar). Returns setRows(rows), rows = { { icon = …, itemID = …, text1, … } }.
+local function scrollTable(c, cols, top)
   for _, col in ipairs(cols) do
     local h = c:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     if col[3] == "LEFT" then h:SetPoint("TOPLEFT", col[2], top) else h:SetPoint("TOPRIGHT", c, "TOPLEFT", col[2], top) end
@@ -99,30 +94,135 @@ local function cardTable(c, cols, rows, top)
   rule:SetHeight(1)
   rule:SetPoint("TOPLEFT", 20, top - 14)
   rule:SetPoint("TOPRIGHT", -24, top - 14)
-  for i, r in ipairs(rows) do
-    local y = top - 20 - (i - 1) * 20
-    local x0 = 20
-    if r.icon then
-      local icon = c:CreateTexture(nil, "ARTWORK")
-      icon:SetSize(16, 16)
-      icon:SetPoint("TOPLEFT", 20, y)
-      icon:SetTexture(r.icon)
-      x0 = 42
-    end
-    for k, col in ipairs(cols) do
-      local fs = c:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-      fs:SetWordWrap(false)
-      if col[3] == "LEFT" then
-        fs:SetPoint("TOPLEFT", (k == 1 and x0 or col[2]), y - 2)
-        fs:SetWidth(col[4] or 200)
-        fs:SetJustifyH("LEFT")
-      else
-        fs:SetPoint("TOPRIGHT", c, "TOPLEFT", col[2], y - 2)
-        fs:SetJustifyH("RIGHT")
+  local empty = c:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+  empty:SetPoint("TOPLEFT", 22, top - 24)
+  local okB, box = pcall(CreateFrame, "Frame", nil, c, "WowScrollBoxList")
+  local okS, bar = pcall(CreateFrame, "EventFrame", nil, c, "MinimalScrollBar")
+  if not (okB and okS and CreateScrollBoxListLinearView and ScrollUtil) then
+    return function(rows) empty:SetText(#rows .. " Einträge") end
+  end
+  box:SetPoint("TOPLEFT", 16, top - 18)
+  box:SetPoint("BOTTOMRIGHT", -30, 14)
+  bar:SetPoint("TOPLEFT", box, "TOPRIGHT", 8, 0)
+  bar:SetPoint("BOTTOMLEFT", box, "BOTTOMRIGHT", 8, 0)
+  local view = CreateScrollBoxListLinearView()
+  view:SetElementExtent(20)
+  view:SetElementInitializer("BackdropTemplate", function(row, r)
+    if not row.m4 then
+      row.m4 = {}
+      row.m4.icon = row:CreateTexture(nil, "ARTWORK")
+      row.m4.icon:SetSize(16, 16)
+      row.m4.icon:SetPoint("LEFT", 4, 0)
+      for k, col in ipairs(cols) do
+        local fs = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        fs:SetWordWrap(false)
+        if col[3] == "LEFT" then
+          fs:SetPoint("LEFT", row, "LEFT", k == 1 and 26 or (col[2] - 16), 0)
+          fs:SetWidth(col[4] or 200)
+          fs:SetJustifyH("LEFT")
+        else
+          fs:SetPoint("RIGHT", row, "LEFT", col[2] - 16, 0)
+          fs:SetJustifyH("RIGHT")
+        end
+        row.m4[k] = fs
       end
-      fs:SetText(r[k] or "")
+      row:EnableMouse(true)
+      row:SetScript("OnEnter", function(self)
+        if not self.itemID then return end
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetItemByID(self.itemID)
+        GameTooltip:Show()
+      end)
+      row:SetScript("OnLeave", function() GameTooltip:Hide() end)
+      row:SetScript("OnMouseUp", function(self, button)
+        if button == "LeftButton" and self.itemID and ns.ItemDetail then ns.ItemDetail.AltClick(self.itemID) end
+      end)
+    end
+    row.itemID = r.itemID
+    row.m4.icon:SetTexture(r.icon)
+    for k = 1, #cols do row.m4[k]:SetText(r[k] or "") end
+  end)
+  ScrollUtil.InitScrollBoxListWithScrollBar(box, bar, view)
+  return function(rows)
+    empty:SetText(#rows == 0 and "Keine Einträge" or "")
+    box:SetDataProvider(CreateDataProvider(rows))
+  end
+end
+
+-- Real data ------------------------------------------------------------------------------------
+
+local GREEN, RED, MUTED = "|cff5fd38d", "|cffff6b6b", "|cff999999"
+local function money(c) return ns.FormatMoney(math.floor((c or 0) + 0.5), true) end
+local function signed(c)
+  c = math.floor((c or 0) + 0.5)
+  return c >= 0 and (GREEN .. "+" .. money(c) .. "|r") or (RED .. "-" .. money(-c) .. "|r")
+end
+local function iconOf(id)
+  local get = (C_Item and C_Item.GetItemIconByID) or GetItemIcon
+  return id and get and get(id) or nil
+end
+
+local function since()
+  if period == "today" then
+    local d = date("*t")
+    return time({ year = d.year, month = d.month, day = d.day, hour = 0 })
+  elseif period == "week" then
+    return time() - 7 * 86400
+  end
+  return nil
+end
+
+-- Running auctions: the last answer of this session (with the undercut check), else the copy
+-- stored for the companion app (not checked).
+local function auctionRows()
+  local out, under = {}, 0
+  local My = ns.MyAuctions
+  for _, r in ipairs(My and My.Rows and My.Rows() or {}) do
+    if (r.active or 0) > 0 then
+      local status
+      if r.status == "best" then status = GREEN .. "bester Preis|r"
+      elseif r.status == "under" then status = RED .. "unterboten " .. money(r.diff) .. "|r"; under = under + 1
+      elseif r.status == "alone" then status = MUTED .. "allein im AH|r"
+      elseif r.status == "bid" then status = MUTED .. "nur Gebot|r"
+      else status = MUTED .. "–|r" end
+      local left = r.timeLeft and string.format("%d h", math.ceil(r.timeLeft / 3600)) or "–"
+      out[#out + 1] = { itemID = r.itemID, icon = iconOf(r.itemID),
+        (ns.ItemName(r.itemID) or "") .. ((r.quantity or 1) > 1 and (MUTED .. "  " .. r.quantity .. "×|r") or ""),
+        r.unit and money(r.unit) or "–", status, MUTED .. left .. "|r" }
     end
   end
+  if #out == 0 then
+    local key = ns.CharKey and ns.CharKey()
+    local saved = key and ns.db and ns.db.owned and ns.db.owned[key]
+    for _, a in ipairs(saved and saved.list or {}) do
+      if not a.s then
+        out[#out + 1] = { itemID = a.i, icon = iconOf(a.i),
+          (ns.ItemName(a.i) or "") .. ((a.q or 1) > 1 and (MUTED .. "  " .. a.q .. "×|r") or ""),
+          a.u and money(a.u) or "–", MUTED .. "nicht geprüft|r",
+          MUTED .. (a.tl and string.format("%d h", math.ceil(a.tl / 3600)) or "–") .. "|r" }
+      end
+    end
+  end
+  return out, under
+end
+
+local KINDS = { buy = "Kauf", sale = "Verkauf", vendor = "Händler", post = "Eingestellt", expired = "Abgelaufen",
+  cancelled = "Abgebrochen", craft = "Hergestellt" }
+
+local function tradeRows()
+  local out = {}
+  for _, e in ipairs(ns.Ledger and ns.Ledger.Recent and ns.Ledger.Recent(300) or {}) do
+    local amount = ""
+    if e.k == "buy" then amount = RED .. "-" .. money(e.c) .. "|r"
+    elseif e.k == "sale" then amount = GREEN .. "+" .. money((e.c or 0) - (e.cut or 0)) .. "|r"
+    elseif e.k == "vendor" then amount = GREEN .. "+" .. money(e.c) .. "|r"
+    elseif e.k == "post" and e.p then amount = MUTED .. money(e.p * (e.u or 1)) .. "|r" end
+    out[#out + 1] = { itemID = e.i, icon = iconOf(e.i),
+      e.n or (e.i and ns.ItemName(e.i)) or "?",
+      MUTED .. date("%d.%m. %H:%M", e.t or 0) .. "|r  " .. (KINDS[e.k] or tostring(e.k)),
+      tostring(e.u or 1), amount }
+  end
+  return out
 end
 
 local function buildOverview(page, w)
@@ -165,86 +265,47 @@ local function buildOverview(page, w)
 
   -- 2. stock (right)
   local stock = card(page, w, 5 + CARD_W + 2, -41, CARD_W, TOP_H, "Bestand")
-  local stockSlot = NW.Slot(stock, "Interface\\Icons\\INV_Box_02", "Buchgewinn", "|cff5fd38d+6g 74s|r")
+  local stockSlot = NW.Slot(stock, "Interface\\Icons\\INV_Box_02", "Buchgewinn", "")
   stockSlot:SetPoint("TOPLEFT", 16, -40)
   local stockFig = NW.Figures(stock, stockSlot, { "Einkauf", "Erlös", "Items" }, { line = false, gap = 8, step = 14 })
   stockFig.labels[1]:ClearAllPoints()
   stockFig.labels[1]:SetPoint("TOPLEFT", stockSlot, "BOTTOMLEFT", 2, -8)
   stockFig.SetWidth(CARD_W - 40)
-  stockFig.values[1]:SetText("4g 02s"); stockFig.values[2]:SetText("10g 76s"); stockFig.values[3]:SetText("7 Items · 11 Stück")
 
   -- 3. running auctions (full width)
   local AH = 200
   local auc = card(page, w, 5, -41 - TOP_H + 4, 664, AH, "Laufende Auktionen")
   local aucInfo = auc:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
   aucInfo:SetPoint("TOPRIGHT", -20, -18)
-  aucInfo:SetText("5 Auktionen  ·  |cffff6b6b2 unterboten|r")
-  cardTable(auc, { { "Gegenstand", 20, "LEFT", 330 }, { "Preis", 470, "RIGHT" }, { "Status", 580, "RIGHT" }, { "Zeit", 640, "RIGHT" } }, {
-    { icon = "Interface\\Icons\\INV_Boots_08", "Stiefel des Nachtschleichers  |cff9999993×|r", "1g 05s", "|cff5fd38dbester Preis|r", "|cff99999923 h|r" },
-    { icon = "Interface\\Icons\\INV_Scroll_03", "Muster: Rote Magiestoffschultern", "17s 50c", "|cffff6b6bunterboten 1c|r", "|cff99999921 h|r" },
-    { icon = "Interface\\Icons\\INV_Belt_03", "Zornprankengürtel des arkanen Zorns", "78s 67c", "|cff5fd38dbester Preis|r", "|cff99999911 h|r" },
-    { icon = "Interface\\Icons\\INV_Misc_LeatherScrap_03", "Leichtes Leder  |cff99999920×|r", "4s 32c", "|cffff6b6bunterboten 12c|r", "|cff9999998 h|r" },
-    { icon = "Interface\\Icons\\INV_Crate_01", "Abgefangene Kiste: Blühende Kräuter", "1s 00c", "|cff999999allein im AH|r", "|cff9999992 h|r" },
-  }, -42)
+  local setAuctions = scrollTable(auc, { { "Gegenstand", 20, "LEFT", 330 }, { "Preis", 470, "RIGHT" },
+    { "Status", 580, "RIGHT" }, { "Zeit", 640, "RIGHT" } }, -42)
 
-  -- 4. recent trades (full width), scrollable like Blizzard's lists
+  -- 4. recent trades (full width), scrollable
   local trTop = -41 - TOP_H + 4 - AH + 4
   local tr = card(page, w, 5, trTop, 664, 594 + trTop - 10, "Letzte Vorgänge")
-  local TCOLS = { { "Item", 20, "LEFT", 290 }, { "Art", 400, "LEFT", 90 }, { "Menge", 520, "RIGHT" }, { "Betrag", 630, "RIGHT" } }
-  cardTable(tr, TCOLS, {}, -42)
-  local EXAMPLE_TRADES = {}
-  local kinds = {
-    { "Interface\\Icons\\INV_Boots_08", "Stiefel des Nachtschleichers", "Verkauf", "1", "|cff5fd38d+99s 75c|r" },
-    { "Interface\\Icons\\INV_Misc_LeatherScrap_03", "Unverwüstliches Leder", "Kauf", "20", "|cffff6b6b-5g 64s|r" },
-    { "Interface\\Icons\\INV_Gauntlets_19", "Tückische Lederstulpen", "Hergestellt", "4", "" },
-    { "Interface\\Icons\\INV_Scroll_03", "Muster: Robe der Leere", "Abgelaufen", "1", "|cffff6b6b-45s|r" },
-    { "Interface\\Icons\\INV_Belt_03", "Zornprankengürtel des arkanen Zorns", "Händler", "1", "|cff5fd38d+15s 20c|r" },
-  }
-  for i = 1, 20 do EXAMPLE_TRADES[i] = kinds[(i - 1) % #kinds + 1] end
-  local box = CreateFrame("Frame", nil, tr, "WowScrollBoxList")
-  local bar = CreateFrame("EventFrame", nil, tr, "MinimalScrollBar")
-  if box and bar and CreateScrollBoxListLinearView and ScrollUtil then
-    box:SetPoint("TOPLEFT", 16, -60)
-    box:SetPoint("BOTTOMRIGHT", -30, 14)
-    bar:SetPoint("TOPLEFT", box, "TOPRIGHT", 8, 0)
-    bar:SetPoint("BOTTOMLEFT", box, "BOTTOMRIGHT", 8, 0)
-    local view = CreateScrollBoxListLinearView()
-    view:SetElementExtent(20)
-    view:SetElementInitializer("BackdropTemplate", function(row, r)
-      if not row.m4 then
-        row.m4 = {}
-        row.m4.icon = row:CreateTexture(nil, "ARTWORK")
-        row.m4.icon:SetSize(16, 16)
-        row.m4.icon:SetPoint("LEFT", 4, 0)
-        for k, col in ipairs(TCOLS) do
-          local fs = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-          fs:SetWordWrap(false)
-          if col[3] == "LEFT" then
-            fs:SetPoint("LEFT", row, "LEFT", k == 1 and 26 or (col[2] - 16), 0)
-            fs:SetWidth(col[4] or 200)
-            fs:SetJustifyH("LEFT")
-          else
-            fs:SetPoint("RIGHT", row, "LEFT", col[2] - 16, 0)
-            fs:SetJustifyH("RIGHT")
-          end
-          row.m4[k] = fs
-        end
-      end
-      row.m4.icon:SetTexture(r[1])
-      for k = 1, #TCOLS do row.m4[k]:SetText(r[k + 1] or "") end
-    end)
-    ScrollUtil.InitScrollBoxListWithScrollBar(box, bar, view)
-    box:SetDataProvider(CreateDataProvider(EXAMPLE_TRADES))
-  end
+  local setTrades = scrollTable(tr, { { "Item", 20, "LEFT", 270 }, { "Wann · Art", 330, "LEFT", 170 },
+    { "Menge", 540, "RIGHT" }, { "Betrag", 640, "RIGHT" } }, -42)
 
   function page.Refresh()
     local label
     for _, def in ipairs(PERIODS) do if def.key == period then label = def.label end end
     if dd.SetText then dd:SetText(label) end
     if dd.GenerateMenu then pcall(dd.GenerateMenu, dd) end
-    local e = EXAMPLE[period]
-    pnlSlot.Sub:SetText(e.profit)
-    pnlFig.values[1]:SetText(e.revenue); pnlFig.values[2]:SetText(e.cost); pnlFig.values[3]:SetText(e.fees)
+    -- profit and loss of the period, stock now (ns.Profit, one replay)
+    local report = ns.Profit and ns.Profit.Report and ns.Profit.Report(since())
+    local t = report and report.totals or {}
+    local sales = 0
+    for _, g in ipairs(report and report.groups or {}) do sales = sales + (g.sold or 0) end
+    pnlSlot.Sub:SetText(signed(t.profit) .. MUTED .. "  ·  " .. sales .. " verkauft|r")
+    pnlFig.values[1]:SetText(money(t.revenue)); pnlFig.values[2]:SetText(money(t.materials)); pnlFig.values[3]:SetText(money(t.fees))
+    local st = report and report.stockTotals or {}
+    stockSlot.Sub:SetText(signed(st.gain))
+    stockFig.values[1]:SetText(money(st.cost)); stockFig.values[2]:SetText(money(st.sell))
+    stockFig.values[3]:SetText(string.format("%d Items · %d Stück", report and #(report.stock or {}) or 0, st.units or 0))
+    local rows, under = auctionRows()
+    setAuctions(rows)
+    aucInfo:SetText(#rows .. " Auktionen" .. (under > 0 and ("  ·  " .. RED .. under .. " unterboten|r") or ""))
+    setTrades(tradeRows())
   end
   page.Refresh()
 end
