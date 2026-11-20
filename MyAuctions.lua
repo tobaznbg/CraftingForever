@@ -102,6 +102,7 @@ onResult = function(offers, itemID)
     run.ids[itemID] = "done"
     run.done = run.done + 1
   end
+  if My.StoreOwned then ns.Safe(My.StoreOwned) end -- keep the check's result
   changed()
 end
 
@@ -267,12 +268,30 @@ end
 -- Own auctions for the companion app: the last answer of this character (expired ones left out).
 local function storeOwned()
   if not (ns.db and ns.CharKey) then return end
+  -- the result of the last check per item, kept with the auctions (shown without the AH):
+  -- st status, f cheapest other offer, df the gap, ck when it was checked
+  local checks = {}
+  for _, r in ipairs(My.Rows()) do
+    if r.checked then checks[r.itemID] = r end
+  end
+  local key0 = ns.CharKey()
+  local prevList = ns.db.owned and ns.db.owned[key0] and ns.db.owned[key0].list or {}
+  local prevCheck = {}
+  for _, p in ipairs(prevList) do if p.ck then prevCheck[p.id] = p end end
   local list = {}
   for _, a in ipairs(owned) do
     if a.auctionID and not a.expired then
       local offers = ns.AHSearch and ns.AHSearch.Last(a.itemID) or nil
-      table.insert(list, { id = a.auctionID, i = a.itemID, u = unitOf(a, offers), b = a.buyout,
-        q = a.quantity or 1, tl = a.timeLeftSeconds, s = a.sold and 1 or nil })
+      local e = { id = a.auctionID, i = a.itemID, u = unitOf(a, offers), b = a.buyout,
+        q = a.quantity or 1, tl = a.timeLeftSeconds, s = a.sold and 1 or nil }
+      local c = checks[a.itemID]
+      local p = prevCheck[a.auctionID]
+      if c then
+        e.st, e.f, e.df, e.ck = c.status, c.foreign, c.diff, c.checked
+      elseif p then
+        e.st, e.f, e.df, e.ck = p.st, p.f, p.df, p.ck -- keep the older check of this auction
+      end
+      table.insert(list, e)
     end
   end
   ns.db.owned = ns.db.owned or {}

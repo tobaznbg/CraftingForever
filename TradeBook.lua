@@ -150,9 +150,12 @@ local function auctionRows()
     local saved = key and ns.db and ns.db.owned and ns.db.owned[key]
     for _, a in ipairs(saved and saved.list or {}) do
       if not a.s then
+        if a.st == "under" then under = under + 1 end
         out[#out + 1] = { itemID = a.i, icon = iconOf(a.i),
           (ns.ItemName(a.i) or "") .. ((a.q or 1) > 1 and (MUTED .. "  " .. a.q .. "×|r") or ""),
-          a.u and money(a.u) or "–", MUTED .. "nicht geprüft|r",
+          a.u and money(a.u) or "–",
+          a.st == "under" and (RED .. "unterboten " .. money(a.df) .. "|r") or (a.st == "best" and (GREEN .. "bester Preis|r"))
+            or (a.st == "alone" and (MUTED .. "allein im AH|r")) or (MUTED .. "nicht geprüft|r"),
           MUTED .. (a.tl and string.format("%d h", math.ceil(a.tl / 3600)) or "–") .. "|r" }
       end
     end
@@ -803,8 +806,22 @@ local function collectAuctions()
   if not any then
     local key = ns.CharKey and ns.CharKey()
     local saved = key and ns.db and ns.db.owned and ns.db.owned[key]
+    -- the stored auctions with the result of their last check (time left counted down)
+    local age = saved and saved.t and math.max(0, time() - saved.t) or 0
+    local function ago(t)
+      local d = math.max(0, time() - (t or 0))
+      return d < 3600 and string.format("vor %d min", math.floor(d / 60 + 0.5)) or string.format("vor %d h", math.floor(d / 3600 + 0.5))
+    end
     for _, a in ipairs(saved and saved.list or {}) do
-      if not a.s then add("other", { itemID = a.i, unit = a.u, quantity = a.q, timeLeft = a.tl }, "nicht geprüft (Auktionshaus öffnen)") end
+      if not a.s then
+        local r = { itemID = a.i, unit = a.u, quantity = a.q, foreign = a.f, diff = a.df,
+          timeLeft = a.tl and math.max(0, a.tl - age) or nil }
+        local when = a.ck and ("  " .. MUTED .. "· geprüft " .. ago(a.ck) .. "|r") or ""
+        if a.st == "under" then add("under", r, RED .. "unterboten um " .. money(a.df) .. "|r" .. when)
+        elseif a.st == "best" then add("best", r, GREEN .. "bester Preis|r" .. when)
+        elseif a.st == "alone" then add("other", r, "allein im AH" .. when)
+        else add("other", r, "nicht geprüft (Auktionshaus öffnen)") end
+      end
     end
   end
   local out = {}
