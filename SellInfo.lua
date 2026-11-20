@@ -121,6 +121,7 @@ local function sellingPanel(show)
   local panel = ns.Selling and ns.Selling.Frame and ns.Selling.Frame()
   if not panel then return end
   if show then
+    if not ns.Selling.ENABLED then return end
     if AuctionHouseFrame and AuctionHouseFrame:IsShown() and not panel:IsShown() then
       panel:Show()
       if ns.Selling.Refresh then ns.Safe(ns.Selling.Refresh) end

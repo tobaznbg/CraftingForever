@@ -777,7 +777,13 @@ function Selling.Refresh()
       #entries, money(total)))
 end
 
+-- The panel at the auction house is retired (20 Nov 2026): Blizzard's own tabs plus the
+-- native detail window ("Marktdaten") and the cost rows in the sell frame replace it.
+-- Selling.ENABLED = true brings it back (code kept).
+Selling.ENABLED = false
+
 ns.On("AUCTION_HOUSE_SHOW", function()
+  if not Selling.ENABLED then return end
   C_Timer.After(0.2, function()
     local parent = AuctionHouseFrame
     if not parent or not api.PostCommodity then return end
