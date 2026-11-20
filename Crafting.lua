@@ -567,6 +567,25 @@ local function useLevel(itemID)
   return nil
 end
 
+-- An item's quality (0 poor … 5 legendary), nil while the client has not loaded it (asked for;
+-- the window follows when it arrives).
+local function quality(itemID)
+  local q = C_Item and C_Item.GetItemQualityByID and C_Item.GetItemQualityByID(itemID)
+  if q == nil and GetItemInfo then q = select(3, GetItemInfo(itemID)) end
+  if q == nil then
+    if C_Item and C_Item.RequestLoadItemDataByID then pcall(C_Item.RequestLoadItemDataByID, itemID) end
+    pendingLevels = true
+  end
+  return q
+end
+
+-- The name in its quality color, as Blizzard's recipe form shows it.
+local function qualityName(itemID, name)
+  local q = quality(itemID)
+  local c = q and ITEM_QUALITY_COLORS and ITEM_QUALITY_COLORS[q]
+  return c and c.hex and (c.hex .. name .. "|r") or name
+end
+
 local function levelRange(key)
   if key == "me" then
     local lv = UnitLevel and UnitLevel("player") or 60
@@ -650,14 +669,70 @@ end
 -- at the auction house right now. nil when the sources do not know the recipe.
 local KIND = { vendor = "Händler", limited = "Händler (begrenzter Vorrat)", rep = "Ruf-Händler", favor = "Händlergunst",
   cond = "Händler (mit Bedingung)", unknown = "Händler (NPC unbekannt)" }
+-- "vor 35 min" / "vor 3 h" / "vor 2 Tagen".
+local function ago(t)
+  local d = math.max(0, time() - (t or 0))
+  if d < 3600 then return string.format("vor %d min", math.floor(d / 60 + 0.5)) end
+  if d < 172800 then return string.format("vor %d h", math.floor(d / 3600 + 0.5)) end
+  return string.format("vor %d Tagen", math.floor(d / 86400 + 0.5))
+end
+
+-- A place on the map: a waypoint (Blizzard's map pin, tracked) where the client offers it, the
+-- world map opened on the zone; else zone and coordinates in the chat.
+-- loc = { name, zone, x, y } (x, y in percent).
+local zoneMaps -- zone name -> uiMapID, from the client's map tree (built once)
+local function zoneMapID(zone)
+  if not (C_Map and C_Map.GetMapChildrenInfo) then return nil end
+  if not zoneMaps then
+    zoneMaps = {}
+    for _, root in ipairs({ 947, 12, 13 }) do -- Azeroth, Kalimdor, Östliche Königreiche
+      local ok, list = pcall(C_Map.GetMapChildrenInfo, root, nil, true)
+      for _, m in ipairs(ok and list or {}) do
+        if m.name and not zoneMaps[m.name] then zoneMaps[m.name] = m.mapID end
+      end
+    end
+  end
+  return zoneMaps[zone]
+end
+
+function ns.ShowOnMap(loc)
+  if not (loc and loc.zone and loc.x and loc.y) then return end
+  local mapID = zoneMapID(loc.zone)
+  local done = false
+  if mapID and C_Map and C_Map.SetUserWaypoint and UiMapPoint and UiMapPoint.CreateFromCoordinates then
+    local ok = pcall(function()
+      C_Map.SetUserWaypoint(UiMapPoint.CreateFromCoordinates(mapID, loc.x / 100, loc.y / 100))
+      if C_SuperTrack and C_SuperTrack.SetSuperTrackedUserWaypoint then C_SuperTrack.SetSuperTrackedUserWaypoint(true) end
+    end)
+    done = ok
+    if ok and OpenWorldMap then pcall(OpenWorldMap, mapID) end
+  end
+  print(string.format("|cff33ccffm4:|r %s – %s %.1f, %.1f%s", loc.name or "Ziel", loc.zone, loc.x, loc.y,
+    done and " (Wegpunkt auf der Karte gesetzt)" or ""))
+end
+
+-- How a recipe is learned, as lines { text, loc }: loc (name, zone, x, y) where the place is
+-- known, for the map button.
 local function sourceLines(pid, spell)
   local srcs = ns.RecipeSources and ns.RecipeSources[pid]
   local entry = srcs and srcs.recipes and srcs.recipes[spell]
   if not entry then return nil end
   local mine = (UnitFactionGroup and UnitFactionGroup("player")) == "Alliance" and "A" or "H"
   local lines = {}
-  if entry.auto then lines[#lines + 1] = "Beim Erlernen des Berufs" end
-  if entry.t then lines[#lines + 1] = "Lehrer" .. (entry.rank and (" (" .. entry.rank .. ")") or "") end
+  local function add(text, loc) lines[#lines + 1] = { text = text, loc = loc } end
+  if entry.auto then add("Beim Erlernen des Berufs") end
+  if entry.t then
+    -- the own faction's trainer of that rank
+    local tr
+    for _, t in ipairs(srcs.trainers or {}) do
+      if t[1] == entry.rank and (t[8] == mine or t[8] == "B") then tr = t break end
+    end
+    if tr then
+      add("Lehrer (" .. tr[1] .. "): " .. tr[4] .. " (" .. tr[5] .. ")", tr[6] and { name = tr[4], zone = tr[5], x = tr[6], y = tr[7] } or nil)
+    else
+      add("Lehrer" .. (entry.rank and (" (" .. entry.rank .. ")") or ""))
+    end
+  end
   for _, s in ipairs(entry) do
     local npc = s[2] and s[2] > 0 and srcs.npcs and srcs.npcs[s[2]] or nil
     if not npc or npc[5] == "B" or npc[5] == mine or npc[5] == nil then
@@ -667,23 +742,30 @@ local function sourceLines(pid, spell)
       if s.favor then text = text .. ", " .. s.favor .. " Gunst" end
       if (s[3] or 0) > 0 then text = text .. ", " .. money(s[3]) end
       if s.c == 1 then text = text .. " |cff999999(Classic-Daten)|r" end
-      lines[#lines + 1] = text
+      add(text, npc and npc[3] and { name = npc[1], zone = npc[2], x = npc[3], y = npc[4] } or nil)
     end
   end
   if entry.d then
     if entry.dr then
-      lines[#lines + 1] = "Drop: " .. table.concat(entry.dr, ", ")
-        .. (entry.drMore and string.format(" |cff999999und %d weitere|r", entry.drMore) or "")
+      add("Drop: " .. table.concat(entry.dr, ", ")
+        .. (entry.drMore and string.format(" |cff999999und %d weitere|r", entry.drMore) or ""))
     else
-      lines[#lines + 1] = "Drop: zufällig (Weltdrop)"
+      add("Drop: zufällig (Weltdrop)")
     end
   end
-  if entry.q then lines[#lines + 1] = "Quest: " .. entry.q end
+  if entry.q then add("Quest: " .. entry.q) end
   if entry.item then
-    local p = ns.Item(entry.item).now
-    lines[#lines + 1] = p and ("Rezept im AH: " .. money(p)) or "|cff999999Rezept handelbar, gerade nicht im AH|r"
+    -- the recipe item at the auction house: cheapest offer, how many, and how old that is
+    local it = ns.Item(entry.item)
+    local when = it.dataT and ("|cff999999 · Stand " .. ago(it.dataT) .. "|r") or ""
+    if it.now then
+      local n = it.offers or it.quantity
+      add("Rezept im AH: " .. money(it.now) .. (n and string.format("|cff999999 · %d %s|r", n, n == 1 and "Angebot" or "Angebote") or "") .. when)
+    else
+      add("|cff999999Rezept handelbar, gerade nicht im AH|r" .. when)
+    end
   elseif entry.bop then
-    lines[#lines + 1] = "|cff999999Rezept nicht handelbar (seelengebunden)|r"
+    add("|cff999999Rezept nicht handelbar (seelengebunden)|r")
   end
   return #lines > 0 and lines or nil
 end
@@ -734,12 +816,33 @@ local function productCard(c)
   v.LearnHead = c:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
   v.LearnHead:SetPoint("TOPLEFT", v.Icon, "BOTTOMLEFT", 0, -16)
   v.LearnHead:SetText("Erlernen:")
-  v.Source = c:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-  v.Source:SetPoint("TOPLEFT", v.LearnHead, "BOTTOMLEFT", 0, -5)
-  v.Source:SetPoint("RIGHT", c, "RIGHT", -RIGHT_EDGE, 0)
-  v.Source:SetJustifyH("LEFT")
-  v.Source:SetSpacing(3)
-  v.Source:SetMaxLines(8)
+  -- one font string per way (money icons sit right only in single-line text)
+  v.SourceLines, v.MapButtons = {}, {}
+  for i = 1, 8 do
+    local fs = c:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    fs:SetPoint("TOPLEFT", i == 1 and v.LearnHead or v.SourceLines[i - 1], "BOTTOMLEFT", 0, i == 1 and -5 or -4)
+    fs:SetPoint("RIGHT", c, "RIGHT", -RIGHT_EDGE - 20, 0)
+    fs:SetJustifyH("LEFT")
+    fs:SetWordWrap(false)
+    v.SourceLines[i] = fs
+    -- "Auf der Karte anzeigen" at the end of a line whose place is known
+    local b = CreateFrame("Button", nil, c)
+    b:SetSize(16, 16)
+    b:SetPoint("RIGHT", c, "RIGHT", -RIGHT_EDGE + 2, 0)
+    b:SetPoint("TOP", fs, "TOP", 0, 3)
+    b:SetNormalTexture("Interface\\Icons\\INV_Misc_Map_01")
+    b:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
+    b:SetScript("OnEnter", function(self)
+      GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+      GameTooltip:SetText("Auf der Karte anzeigen")
+      if self.loc then GameTooltip:AddLine(string.format("%s, %s %.1f / %.1f", self.loc.name or "", self.loc.zone, self.loc.x, self.loc.y), 1, 1, 1) end
+      GameTooltip:Show()
+    end)
+    b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    b:SetScript("OnClick", function(self) ns.Safe(ns.ShowOnMap, self.loc) end)
+    b:Hide()
+    v.MapButtons[i] = b
+  end
   v.Head:SetText("Reagenzien:")
   v.reagents = {}
   for i = 1, MAX_REAGENTS do v.reagents[i] = reagentSlot(c) end
@@ -764,7 +867,10 @@ local function showProduct(entry, c)
   local v = c.m4Product
   local e = entry and entry.e
   local shown = e ~= nil
-  for _, part in ipairs({ v.Icon, v.Ring, v.Name, v.Sub, v.Head, v.LearnHead, v.Source, v.Line }) do part:SetShown(shown) end
+  for _, part in ipairs({ v.Icon, v.Ring, v.Name, v.Sub, v.Head, v.LearnHead, v.Line }) do part:SetShown(shown) end
+  if not shown then
+    for i, fs in ipairs(v.SourceLines) do fs:Hide(); v.MapButtons[i]:Hide() end
+  end
   for _, row in ipairs(v.rows) do row.label:SetShown(shown); row.value:SetShown(shown) end
   for _, r in ipairs(v.reagents) do r.Slot:Hide(); r.Name:Hide(); r.Price:Hide(); r.itemID = nil end
   if productsSplit and productsSplit.empty then
@@ -773,15 +879,24 @@ local function showProduct(entry, c)
   if not shown then return end
   v.Icon:SetTexture(itemIcon(e.itemID))
   v.itemID = e.itemID
-  v.Name:SetText(e.recipe .. (e.produced > 1 and string.format("  |cff999999x%g|r", e.produced) or ""))
+  v.Name:SetText(qualityName(e.itemID, e.recipe)
+    .. (e.produced > 1 and string.format("  |cff999999x%g|r", e.produced) or ""))
   v.Sub:SetText(e.learned and "gelernt"
     or ((e.tooHigh and "|cffff6b6b" or "|cffffb547") .. "nicht gelernt" .. (e.learn and (": " .. e.learn:gsub("^Quelle %? ", "")) or "") .. "|r"))
   local src = not e.learned and sourceLines(e.pid, e.spell) or nil
-  v.Source:SetText(src and table.concat(src, "\n") or "")
-  v.Source:SetShown(src ~= nil)
+  local lastSource
+  for i, fs in ipairs(v.SourceLines) do
+    local line = src and src[i]
+    fs:SetText(line and line.text or "")
+    fs:SetShown(line ~= nil)
+    if line then lastSource = fs end
+    local b = v.MapButtons[i]
+    b.loc = line and line.loc
+    b:SetShown(b.loc ~= nil)
+  end
   v.LearnHead:SetShown(src ~= nil)
   v.Head:ClearAllPoints()
-  v.Head:SetPoint("TOPLEFT", src and v.Source or v.Icon, "BOTTOMLEFT", 0, src and -16 or -20)
+  v.Head:SetPoint("TOPLEFT", lastSource or v.Icon, "BOTTOMLEFT", 0, lastSource and -16 or -20)
   local last = v.Head
   for i, g in ipairs(e.reagents or {}) do
     local r = v.reagents[i]
@@ -790,6 +905,8 @@ local function showProduct(entry, c)
     local have = ns.Costs and ns.Costs.Owned and ns.Costs.Owned(g.i) or 0
     r.itemID = g.i
     r.Icon:SetTexture(itemIcon(g.i))
+    -- the slot's border in the reagent's quality, like Blizzard's item buttons
+    if SetItemButtonQuality then pcall(SetItemButtonQuality, r.Slot, quality(g.i), g.i) end
     r.Slot:ClearAllPoints()
     r.Slot:SetPoint("TOPLEFT", last, "BOTTOMLEFT", 0, i == 1 and -8 or -6)
     r.Name:SetText(string.format("%s%d/%d|r %s", have >= g.n and "|cffffffff" or "|cff999999", have, g.n,
