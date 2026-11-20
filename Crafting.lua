@@ -1190,13 +1190,16 @@ function Products.Show(pid)
   productsWindow:SelectTab("products")
 end
 
--- The tab under the profession window looks selected while the window is open.
+-- The tabs under the profession window look selected while their window is open.
 function Products.SyncTab()
-  local tab = Products.tab
-  if not tab then return end
-  local open = productsWindow and productsWindow.frame:IsShown()
-  local fn = open and PanelTemplates_SelectTab or PanelTemplates_DeselectTab
-  if fn then pcall(fn, tab) end
+  local function set(tab, open)
+    if not tab then return end
+    local fn = open and PanelTemplates_SelectTab or PanelTemplates_DeselectTab
+    if fn then pcall(fn, tab) end
+  end
+  set(Products.tab, productsWindow and productsWindow.frame:IsShown())
+  local shop = ns.ShoppingList and ns.ShoppingList.Frame and ns.ShoppingList.Frame()
+  set(Products.shopTab, shop and shop:IsShown())
 end
 
 -- The tab: closes the window, unless it shows another profession (then it switches).
@@ -1431,8 +1434,17 @@ local function attachProfessions()
     if PanelTemplates_TabResize then pcall(PanelTemplates_TabResize, tab, 0) end
     tab:SetPoint("TOPLEFT", pf, "BOTTOMLEFT", 12, 2)
     Products.tab = tab
-    Products.SyncTab()
     tab:SetScript("OnClick", function() ns.Safe(Products.Toggle) end)
+    -- "Einkaufsliste" next to it (ShoppingList.lua): the list is always one click away
+    local okS, shop = pcall(CreateFrame, "Button", "M4CompanionShoppingTab", pf, "PanelTabButtonTemplate")
+    if okS and shop then
+      shop:SetText("Einkaufsliste")
+      if PanelTemplates_TabResize then pcall(PanelTemplates_TabResize, shop, 0) end
+      shop:SetPoint("LEFT", tab, "RIGHT", 4, 0)
+      shop:SetScript("OnClick", function() if ns.ShoppingList then ns.Safe(ns.ShoppingList.Toggle) end end)
+      Products.shopTab = shop
+    end
+    Products.SyncTab()
   end
   local elapsed = 0
   layer:SetScript("OnUpdate", function(_, dt)

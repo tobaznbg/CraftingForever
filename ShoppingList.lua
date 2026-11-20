@@ -439,6 +439,10 @@ local function create()
   -- wider than the profession window: room for the reagent names next to four columns
   window = NW.New({ name = "M4CompanionShoppingList", title = "Einkaufsliste", icon = "Interface\\Icons\\INV_Misc_Note_02",
     width = 760 })
+  -- its tab under the profession window follows (Crafting.lua)
+  local function sync() if ns.Products and ns.Products.SyncTab then ns.Products.SyncTab() end end
+  window.frame:HookScript("OnShow", sync)
+  window.frame:HookScript("OnHide", sync)
   window:AddTab({ key = "list", title = "Einkaufsliste", hidden = true, build = function(page)
     split = NW.Split(page, { onSelect = show })
   end, onShow = function() refresh() end })
