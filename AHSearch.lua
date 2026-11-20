@@ -248,6 +248,13 @@ if ns.On then
   end)
   ns.On("ITEM_SEARCH_RESULTS_UPDATED", function(_, itemKey)
     if not current or not itemKey or current.itemID ~= itemKey.itemID then return end
+    -- Gear comes in pages: ask for the rest first (the next update brings it).
+    if api.HasFullItemSearchResults and not api.HasFullItemSearchResults(itemKey)
+        and api.RequestMoreItemSearchResults and not current.more then
+      current.more = true
+      api.RequestMoreItemSearchResults(itemKey)
+      return
+    end
     local listings = {}
     for i = 1, (api.GetNumItemSearchResults(itemKey) or 0) do
       local r = api.GetItemSearchResultInfo(itemKey, i)
