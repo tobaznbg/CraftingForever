@@ -451,9 +451,14 @@ local function buildLedger(page)
     item.SetEvents = scrollTable(il, { { "Wann · Art", 20, "LEFT", 160 }, { "Menge", 225, "RIGHT" }, { "Betrag", 300, "RIGHT" } }, -250)
     local okB, back = pcall(CreateFrame, "Button", nil, il, "UIPanelButtonTemplate")
     if not okB then back = CreateFrame("Button", nil, il) end
-    back:SetSize(80, 22)
-    back:SetPoint("TOPRIGHT", -16, -14)
+    back:SetSize(76, 22)
+    back:SetPoint("RIGHT", il, "RIGHT", -16, 0)
+    back:SetPoint("TOP", item.Name, "TOP", 0, 4)
     back:SetText("‹ Zurück")
+    -- the name and the line below end before the button
+    item.Name:ClearAllPoints()
+    item.Name:SetPoint("LEFT", item.Icon, "RIGHT", 14, 6)
+    item.Name:SetPoint("RIGHT", back, "LEFT", -8, 0)
     back:SetScript("OnClick", function()
       if currentArea then il:Hide(); al:Show() end
     end)
