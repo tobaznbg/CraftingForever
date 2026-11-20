@@ -33,8 +33,12 @@ local function goldOf(key)
   return c and c.money or 0, c and c.updated
 end
 
--- Name and realm, as the game writes it ("Lok-CAMWOW EU5 Realm 8 PvP").
-local function fullName(key) return key or "?" end
+-- First and last name as the player frame shows it ("Lokm Bank"), else the first name. The
+-- realm is left out: the household is one realm anyway.
+local function fullName(key)
+  local c = key and ns.db and ns.db.chars and ns.db.chars[key]
+  return (c and (c.fullName or c.name)) or (key and key:match("^([^-]+)")) or "?"
+end
 
 function TradeBook.Gold()
   local sum = 0
@@ -1058,7 +1062,7 @@ local function buildChoices(w)
   local charLabel = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
   charLabel:SetPoint("TOPLEFT", 66, -36)
   charLabel:SetText("Charakter")
-  choices.char = chooser(f, 240, function()
+  choices.char = chooser(f, 180, function()
     local opts = { { key = "all", label = "Alle Charaktere" } }
     for _, key in ipairs(household()) do opts[#opts + 1] = { key = key, label = fullName(key) } end
     return opts
@@ -1113,6 +1117,13 @@ local function create()
 end
 
 function TradeBook.Show()
+  -- the playing character's last name (the player frame is filled by now)
+  local c = ns.db and ns.db.chars and ns.CharKey and ns.db.chars[ns.CharKey()]
+  local T = ns.Tracker
+  if c and T and T.FullName then
+    local ok, n = pcall(T.FullName)
+    if ok and n then c.fullName = n end
+  end
   if not window then create() end
   window:Show()
   window:SelectTab("overview")
