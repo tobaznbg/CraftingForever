@@ -903,7 +903,26 @@ local function sourceLines(pid, spell)
       if #detail > 0 then add("|cff999999    " .. table.concat(detail, " · ") .. "|r") end
     end
   end
-  if entry.d then
+  if entry.dd then
+    -- the creatures that drop it (wowhead's measured chance, >= 1 %), best first; the place
+    -- of each from Data_SpotCoords (densest spawn spot)
+    local F, C = ns.Farming, ns.SpotCoords
+    for i, d in ipairs(entry.dd) do
+      if i > 3 then
+        add(string.format("|cff999999    und %d weitere|r", #entry.dd - 3))
+        break
+      end
+      local c = C and C.npc and C.npc[d[1]]
+      local zone = F and F.ZoneName and F.ZoneName((c and c[1]) or d[3]) or "?"
+      local chance = d[6] >= 100 and string.format("%d %%", math.floor(d[6] / 10 + 0.5))
+        or (string.format("%.1f %%", d[6] / 10):gsub("%.", ","))
+      add("Drop: " .. d[2] .. " (" .. chance .. ")", c and { name = d[2], zone = zone, x = c[2], y = c[3] } or nil)
+      local level = (d[4] > 0) and ((d[4] == d[5]) and ("Stufe " .. d[4]) or string.format("Stufe %d–%d", d[4], d[5])) or nil
+      add("|cff999999    " .. (level and (level .. " · ") or "") .. zone .. "|r")
+    end
+  elseif entry.dw then
+    add(string.format("Drop: Weltdrop, selten (%d Gegner, Stufe %d–%d)", entry.dw[1], entry.dw[2], entry.dw[3]))
+  elseif entry.d then
     if entry.dr then
       add("Drop: " .. table.concat(entry.dr, ", ")
         .. (entry.drMore and string.format(" |cff999999und %d weitere|r", entry.drMore) or ""))
