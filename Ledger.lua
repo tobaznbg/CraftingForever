@@ -5,6 +5,7 @@
 --   expired    "expired" mail, cancelled: "cancelled" mail
 --   craft      the player made an item (see "Crafting" below)
 --   vendor     sold to a merchant (c: what the merchant paid, no cut); a buyback removes it
+--   buy with src = "vendor": bought from a merchant (BuyMerchantItem; c what was paid)
 -- Mails stay in the inbox until taken, so every scan sees them again. A mail counts
 -- once: same kind, item, amount and count and a receive time within MAIL_SLACK of
 -- an entry already logged is the same mail.
@@ -454,7 +455,24 @@ function Ledger.OnBuyback(index)
   end
 end
 
+-- A purchase from a merchant: price per unit from the merchant list (its price is for a stack of
+-- `perStack` units), quantity as asked for (nil: one stack). Items for other currencies only
+-- (price 0) are left out.
+function Ledger.OnMerchantBuy(index, quantity)
+  if not (merchantOpen and GetMerchantItemInfo) then return end
+  local _, _, price, perStack = GetMerchantItemInfo(index)
+  local link = GetMerchantItemLink and GetMerchantItemLink(index)
+  local id = link and tonumber(link:match("item:(%d+)"))
+  if not (id and price and price > 0) then return end
+  perStack = (perStack and perStack > 0) and perStack or 1
+  local units = (quantity and quantity > 0) and quantity or perStack
+  add({ k = "buy", i = id, u = units, c = math.floor(price / perStack * units + 0.5), src = "vendor" })
+end
+
 if hooksecurefunc then
+  if BuyMerchantItem then
+    hooksecurefunc("BuyMerchantItem", function(index, quantity) ns.Safe(Ledger.OnMerchantBuy, index, quantity) end)
+  end
   if C_Container and C_Container.UseContainerItem then
     hooksecurefunc(C_Container, "UseContainerItem", function(bag, slot) ns.Safe(Ledger.OnContainerUse, bag, slot) end)
   elseif UseContainerItem then
