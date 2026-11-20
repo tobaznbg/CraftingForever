@@ -379,6 +379,16 @@ local PROFESSION_ICONS = {
 -- Card head: icon in a ring, name, a line below (shared by the area and the item view).
 local function head(layer) return ns.NativeWindow.CardHead(layer) end
 
+-- An item's result in the lists: the profit once something was sold (or lost on expiry); an item
+-- bought and not sold yet is no loss but stock: what it cost, grey ("Bestand 12g 50s").
+local function resultText(r)
+  local active = (r.sold or 0) > 0 or (r.expired or 0) > 0 or (r.cancelled or 0) > 0 or (r.profit or 0) ~= 0
+  if not active and (r.stockUnits or 0) > 0 then
+    return MUTED .. "Bestand " .. money(r.stockValue) .. "|r"
+  end
+  return signed(r.profit)
+end
+
 local function buildLedger(page)
   local NW = ns.NativeWindow
   local ITEM_LABELS = { "Hergestellt / gekauft", "Verkauft", "Ø Verkaufspreis", "Umsatz", "Einkauf", "Gebühren", "Gewinn" }
@@ -478,9 +488,9 @@ local function buildLedger(page)
     end
     local rows = {}
     for _, r in ipairs(entry.items) do
-      local value = entry.isLoot and money(r.revenue) or signed(r.profit)
+      local value = entry.isLoot and money(r.revenue) or resultText(r)
       rows[#rows + 1] = { itemID = r.itemId, icon = iconOf(r.itemId), r.name or ns.ItemName(r.itemId) or "?",
-        tostring(r.sold or 0), value, onClick = function() showItem(r, true) end }
+        (r.sold or 0) > 0 and tostring(r.sold) or (MUTED .. "–|r"), value, onClick = function() showItem(r, true) end }
     end
     area.SetItems(rows)
   end
@@ -499,7 +509,7 @@ local function buildLedger(page)
         local name = (r.name or ns.ItemName(r.itemId) or ""):lower()
         if name:find(query, 1, true) then
           out[#out + 1] = { key = "i:" .. r.prof .. ":" .. r.itemId, name = r.name or ns.ItemName(r.itemId),
-            icon = iconOf(r.itemId), value = signed(r.profit), row = r }
+            icon = iconOf(r.itemId), value = resultText(r), row = r }
         end
       end
       return out
