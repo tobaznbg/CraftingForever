@@ -155,6 +155,7 @@ function Style.Scroll(parent)
   track:SetWidth(4)
   local thumb = solid(parent, Style.C.accent, "OVERLAY")
   thumb:SetWidth(4)
+  scroll.track, scroll.thumb = track, thumb -- recolored by skins (ItemDetail)
   local function update()
     local range = scroll:GetVerticalScrollRange() or 0
     local height = scroll:GetHeight() or 0

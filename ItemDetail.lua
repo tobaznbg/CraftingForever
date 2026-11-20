@@ -31,6 +31,12 @@ local lines, sections = {}, {}
 local chart
 local live     -- { itemID, state = "searching"|"done"|"failed", offers, t } of the search on opening
 local skin = "m4" -- "m4" (own flat look) or "blizzard" (native look, pilot: AH sell tab, SellInfo.lua)
+local GOLD_RGB = { 1, 0.82, 0 }
+
+-- Width of the scroll body: the native frame has a wider border and inset.
+local function contentWidth() return skin == "blizzard" and WIDTH - 42 or WIDTH - 26 end
+-- Line color of the chart and highlight color of the active view: gold in the native look.
+local function lineColor() return skin == "blizzard" and GOLD_RGB or ns.Style.C.accent end
 local render -- forward declared: used by Show/Toggle/Refresh, defined below
 local place  -- forward declared: used by create and the auction house events
 
@@ -326,9 +332,9 @@ local function drawChart(c, history, limit, sellAt, viewKey)
     local on = key == viewKey
     b.active = on
     b.bg:SetColorTexture(unpack(on and Style.C.buttonHi or Style.C.button))
-    b.label:SetTextColor(unpack(on and Style.C.accent or Style.C.muted))
+    b.label:SetTextColor(unpack(on and lineColor() or Style.C.muted))
   end
-  local w = WIDTH - 34 -- body width minus the chart's margins
+  local w = contentWidth() - 8 -- body width minus the chart's margins
   local prices, qty = history and history.prices or {}, history and history.qty or {}
   local SLOTS = #prices
   local step = history and history.step or 3600
@@ -424,9 +430,9 @@ local function drawChart(c, history, limit, sellAt, viewKey)
         local l = pooled(c.lines, nl, function()
           local ln = plot:CreateLine(nil, "OVERLAY")
           ln:SetThickness(2)
-          ln:SetColorTexture(unpack(Style.C.accent))
           return ln
         end)
+        l:SetColorTexture(unpack(lineColor()))
         l:SetStartPoint("BOTTOMLEFT", plot, x0, y0)
         l:SetEndPoint("BOTTOMLEFT", plot, x1, yy)
       end
@@ -504,7 +510,7 @@ local function drawChart(c, history, limit, sellAt, viewKey)
   c.t1:SetText(stamp(axisStart))
   c.t2:SetText(stamp(axisStart + SPAN / 2))
   c.t3:SetText("jetzt")
-  c.legend:SetText(ns.Style.ACCENT .. "Linie|r billigstes  ·  Balken Menge  ·  " .. ORANGE .. "orange|r ausverkauft"
+  c.legend:SetText((skin == "blizzard" and "|cffffd100" or ns.Style.ACCENT) .. "Linie|r billigstes  ·  Balken Menge  ·  " .. ORANGE .. "orange|r ausverkauft"
     .. (limit and ("  ·  " .. GREEN .. "grün|r Kauf bis  ·  weiß Einstellen") or ""))
 end
 
@@ -851,7 +857,7 @@ render = function()
 
   for i = used + 1, #lines do lines[i].label:Hide(); lines[i].value:Hide() end
   for i = usedSections + 1, #sections do sections[i].text:Hide(); sections[i].rule:Hide() end
-  body:SetSize(WIDTH - 26, math.max(1, y + 6))
+  body:SetSize(contentWidth(), math.max(1, y + 6))
   if scroll.UpdateBar then scroll.UpdateBar() end
 end
 
@@ -979,6 +985,15 @@ local function applySkin()
   if frame.blizzdeco then frame.blizzdeco:SetFrameLevel(base) end
   frame.head:SetFrameLevel(base + 5)
   scroll:SetFrameLevel(base + 5)
+  if scroll.thumb then
+    if blizz then
+      scroll.thumb:SetColorTexture(0.85, 0.68, 0.2, 0.8)
+      scroll.track:SetColorTexture(0, 0, 0, 0.35)
+    else
+      scroll.thumb:SetColorTexture(unpack(ns.Style.C.accent))
+      scroll.track:SetColorTexture(1, 1, 1, 0.04)
+    end
+  end
   frame.head:ClearAllPoints()
   scroll:ClearAllPoints()
   if blizz then
@@ -987,8 +1002,8 @@ local function applySkin()
     frame.head:SetHeight(28)
     frame.icon:SetSize(24, 24)
     frame.name:SetFontObject(GameFontHighlightLarge)
-    scroll:SetPoint("TOPLEFT", 12, -64)
-    scroll:SetPoint("BOTTOMRIGHT", -22, 12)
+    scroll:SetPoint("TOPLEFT", 14, -66)
+    scroll:SetPoint("BOTTOMRIGHT", -24, 14)
   else
     frame.head:SetPoint("TOPLEFT", 6, -4)
     frame.head:SetPoint("RIGHT", frame, "RIGHT", -32, 0)
