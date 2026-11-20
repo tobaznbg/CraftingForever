@@ -543,12 +543,144 @@ local function attachAuctions()
   end)
 end
 
+-- Blizzard's tab "Kaufen" (browse results): right of the price two columns, "zu Marktwert"
+-- (cheapest offer against R, the market value of yesterday: green from -10 %, red from +10 %)
+-- and "Nachfrage" (ns.Item.DemandText). Same technique as the auction columns: every layout
+-- Blizzard sets on the list is wrapped and gets the two text columns after its price column.
+local BROWSE_WIDTH = 74
+local browseWrapped = setmetatable({}, { __mode = "k" })
+
+local function wrapBrowseLayout(original, list)
+  local fn
+  fn = function(tableBuilder)
+    local count, added = 0, false
+    local cols = {}
+    local function addColumn(method, ...)
+      count = count + 1
+      local col = method(tableBuilder, ...)
+      if added then return col end
+      local args = { ... }
+      local n = select("#", ...)
+      local isPrice = false
+      for i = 1, n do
+        if type(args[i]) == "string" and args[i]:find("Price") then isPrice = true end
+      end
+      if isPrice then
+        added = true
+        for i = 1, n do
+          if type(args[i]) == "string" then args[i] = TEXT_TEMPLATE end
+        end
+        local widthSet = false
+        for i = 1, n do
+          if not widthSet and type(args[i]) == "number" and args[i] > 60 then args[i] = BROWSE_WIDTH; widthSet = true end
+        end
+        if method == tableBuilder.AddFillColumn then
+          method = tableBuilder.AddFixedWidthColumn -- a fill price column: ours are fixed
+        end
+        local pct = method(tableBuilder, unpack(args, 1, n))
+        local demand = method(tableBuilder, unpack(args, 1, n))
+        pct:GetHeaderFrame():SetText("zu Marktwert")
+        demand:GetHeaderFrame():SetText("Nachfrage")
+        count = count + 2
+        cols.pct, cols.demand = count - 1, count
+      end
+      return col
+    end
+    local proxy = setmetatable({}, { __index = function(_, k)
+      local v = tableBuilder[k]
+      if type(v) ~= "function" then return v end
+      if type(k) == "string" and k:find("^Add") and k:find("Column") then
+        return function(_, ...) return addColumn(v, ...) end
+      end
+      return function(_, ...) return v(tableBuilder, ...) end
+    end })
+    local ok, err = pcall(original, proxy)
+    if not ok then
+      trace("browseError", tostring(err))
+      list.m4Cols = nil
+      return original(tableBuilder)
+    end
+    list.m4Cols = added and cols or nil
+  end
+  browseWrapped[fn] = true
+  return fn
+end
+
+local function installBrowse(list)
+  if not (list and list.SetTableBuilderLayout) or list.m4BrowseHooked then return end
+  list.m4BrowseHooked = true
+  hooksecurefunc(list, "SetTableBuilderLayout", function(self, layout)
+    if type(layout) == "function" and not browseWrapped[layout] then
+      self:SetTableBuilderLayout(wrapBrowseLayout(layout, self))
+    end
+  end)
+  local current = rawget(list, "tableBuilderLayoutFunction")
+  if type(current) == "function" and not browseWrapped[current] then
+    pcall(function()
+      list:SetTableBuilderLayout(wrapBrowseLayout(current, list))
+      if list.RefreshScrollFrame then list:RefreshScrollFrame() end
+    end)
+  end
+end
+
+-- The two values of a browse row: price against the market value, demand.
+function SellInfo.BrowseValues(id, price)
+  if not (id and ns.Item) then return "", "" end
+  local item = ns.Item(id)
+  local pctText = "|cff999999–|r"
+  if price and price > 0 and item.ref and item.ref > 0 then
+    local d = price / item.ref - 1
+    local pct = math.floor(math.abs(d) * 100 + 0.5) * (d < 0 and -1 or 1)
+    local text = string.format("%+d %%", pct)
+    if d <= -0.10 then text = "|cff5fd38d" .. text .. "|r"
+    elseif d >= 0.10 then text = "|cffff6b6b" .. text .. "|r"
+    else text = "|cff999999" .. text .. "|r" end
+    pctText = text
+  end
+  return pctText, ns.Item.DemandText(item) or "|cff999999–|r"
+end
+
+local function updateBrowseRows(list)
+  local cols = list.m4Cols
+  if not cols then return end
+  forEachRow(list, function(row)
+    local d = rowData(row)
+    local cells = rawget(row, "cells")
+    if type(cells) ~= "table" then return end
+    local pc, dc = cells[cols.pct], cells[cols.demand]
+    if not (pc and dc) then return end
+    local key = d and d.itemKey
+    local id = type(key) == "table" and key.itemID or nil
+    local pctText, demandText = "", ""
+    if id then pctText, demandText = SellInfo.BrowseValues(id, d.minPrice) end
+    cellText(pc):SetText(pctText)
+    cellText(dc):SetText(demandText)
+  end)
+end
+
+local function attachBrowse()
+  local bf = AuctionHouseFrame and rawget(AuctionHouseFrame, "BrowseResultsFrame")
+  local list = type(bf) == "table" and rawget(bf, "ItemList")
+  if type(list) ~= "table" or bf.m4Browse then return end
+  bf.m4Browse = true
+  ns.Safe(installBrowse, list)
+  local layer = CreateFrame("Frame", nil, bf)
+  local elapsed = 0
+  layer:SetScript("OnUpdate", function(_, dt)
+    elapsed = elapsed + (dt or 0)
+    if elapsed < 0.3 then return end
+    elapsed = 0
+    ns.Safe(updateBrowseRows, list)
+  end)
+end
+
 local function attachAll()
   local ah = AuctionHouseFrame
   if not ah then return end
   attach(ah.ItemSellFrame)
   attach(ah.CommoditiesSellFrame)
   attachAuctions()
+  attachBrowse()
 end
 
 if ns.On then
