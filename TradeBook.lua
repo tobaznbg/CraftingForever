@@ -878,13 +878,16 @@ local function refreshPage(page) if page.Refresh then page.Refresh() end end
 local function create()
   window = ns.NativeWindow.New({ name = NAME, title = "Handelsbuch", icon = ICON })
   window:AddTab({ key = "overview", title = "Übersicht", icon = "Interface\\Icons\\INV_Misc_Coin_02", overview = true,
-    build = buildOverview, onShow = function(page) if page.Refresh then page.Refresh() end end })
+    build = buildOverview, onShow = function(page)
+      if page.Refresh then page.Refresh() end
+      ns.Safe(TradeBook.CheckAuctions)
+    end })
   window:AddTab({ key = "ledger", title = "Handelsbuch", icon = "Interface\\Icons\\INV_Misc_Note_01",
     build = buildLedger, onShow = refreshPage })
   window:AddTab({ key = "stock", title = "Bestand", icon = "Interface\\Icons\\INV_Box_02",
     build = buildStock, onShow = refreshPage })
   window:AddTab({ key = "auctions", title = "Auktionen", icon = "Interface\\Icons\\INV_Hammer_15",
-    build = buildAuctions, onShow = refreshPage })
+    build = buildAuctions, onShow = function(page) refreshPage(page); ns.Safe(TradeBook.CheckAuctions) end })
 end
 
 function TradeBook.Show()
@@ -898,6 +901,35 @@ function TradeBook.Toggle()
 end
 
 function TradeBook.Frame() return window and window.frame end
+
+-- Own auctions changed (MyAuctions: list or a search result): the shown page follows.
+function TradeBook.OnAuctionsChanged()
+  if not (window and window.frame:IsShown() and window.current) then return end
+  local tab = window.tabs[window.current]
+  if tab and tab.page and tab.page.Refresh and (window.current == "auctions" or window.current == "overview") then
+    tab.page.Refresh()
+  end
+end
+
+-- At the auction house the auctions are checked (own list, then one search per item): when the
+-- auctions or the overview page shows, at most once a minute.
+local lastCheck = 0
+local function checkAuctions()
+  local My = ns.MyAuctions
+  if not (My and My.Check and ns.AHSearch and ns.AHSearch.IsOpen and ns.AHSearch.IsOpen()) then return end
+  if time() - lastCheck < 60 then return end
+  lastCheck = time()
+  My.Check()
+end
+TradeBook.CheckAuctions = checkAuctions
+if ns.On then
+  -- the auction house opens while the window shows: check right away
+  ns.On("AUCTION_HOUSE_SHOW", function()
+    if window and window.frame:IsShown() and C_Timer then
+      C_Timer.After(1, function() ns.Safe(checkAuctions) end)
+    end
+  end)
+end
 
 -- The tab "Handelsbuch" under the auction house, after Blizzard's tabs. It opens the window and
 -- leaves the auction house view as it is (it is not one of the AH's display modes).

@@ -28,14 +28,18 @@ local onResult -- forward declared: the one callback for every search of this mo
 
 -- Search results arrive one by one: several within a moment make one refresh.
 local refreshQueued = false
+local function notify()
+  if ns.Selling and ns.Selling.Refresh then ns.Safe(ns.Selling.Refresh) end
+  if ns.TradeBook and ns.TradeBook.OnAuctionsChanged then ns.Safe(ns.TradeBook.OnAuctionsChanged) end
+end
+
 local function changed()
-  if not (ns.Selling and ns.Selling.Refresh) then return end
-  if not C_Timer then return ns.Safe(ns.Selling.Refresh) end
+  if not C_Timer then return notify() end
   if refreshQueued then return end
   refreshQueued = true
   C_Timer.After(0.25, function()
     refreshQueued = false
-    ns.Safe(ns.Selling.Refresh)
+    notify()
   end)
 end
 

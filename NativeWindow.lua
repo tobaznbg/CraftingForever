@@ -356,6 +356,12 @@ function NW.Split(page, opts)
             button.m4Value:SetJustifyH("RIGHT")
           end
           button.m4Value:SetText(data.value or "")
+          -- the name ends before the value (cut with "…" instead of running into it)
+          if type(label) == "table" then
+            local vw = (data.value and data.value ~= "") and ((button.m4Value:GetStringWidth() or 0) + 14) or 6
+            label:SetPoint("RIGHT", button, "RIGHT", -vw, 0)
+            if label.SetWordWrap then label:SetWordWrap(false) end
+          end
           for _, key in ipairs({ "SkillUps", "LockedIcon", "Count" }) do
             local part = rawget(button, key)
             if type(part) == "table" and part.Hide then part:Hide() end
