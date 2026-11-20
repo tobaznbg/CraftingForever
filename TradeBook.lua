@@ -781,7 +781,7 @@ local function collectAuctions()
     local profit = cost and r.unit and math.floor((r.unit * 0.95 - cost) * qty) or nil
     local name = ns.ItemName(r.itemID) or ("#" .. tostring(r.itemID))
     g.items[#g.items + 1] = { key = bucket .. ":" .. tostring(r.itemID), itemID = r.itemID, icon = iconOf(r.itemID),
-      name = name, sub = status, profit = profit or -1e12, worth = (r.unit or 0) * qty,
+      name = name, sub = status, profit = profit or -1e12, worth = (r.unit or 0) * qty, under = bucket == "under",
       cols = { name, r.unit and money(r.unit) or "–", profit and signed(profit) or "–" },
       values = { tostring(qty), r.unit and money(r.unit) or "–", r.foreign and money(r.foreign) or "–", status,
         r.timeLeft and string.format("%d h", math.ceil(r.timeLeft / 3600)) or "–",
@@ -866,7 +866,8 @@ local function buildAuctions(page)
     table.sort(items, function(x, y) return (x.worth or 0) > (y.worth or 0) end)
     local entries = { { key = "auctions", header = "Laufende Auktionen" } }
     for _, it in ipairs(items) do
-      entries[#entries + 1] = { key = it.key, name = it.name, icon = it.icon, itemID = it.itemID, value = it.cols[2], it = it }
+      entries[#entries + 1] = { key = it.key, name = it.name, icon = it.icon, itemID = it.itemID, value = it.cols[2], it = it,
+        marker = it.under and "down" or nil }
     end
     split.SetEntries(entries)
     if balance then for i, fs in ipairs(balance.values) do fs:SetText(data.balance[i] or "–") end end

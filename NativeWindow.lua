@@ -356,6 +356,18 @@ function NW.Split(page, opts)
             button.m4Value:SetJustifyH("RIGHT")
           end
           button.m4Value:SetText(data.value or "")
+          -- data.marker = "down": a red arrow where the profession list shows its skill-up arrow
+          if not button.m4Marker then
+            button.m4Marker = button:CreateTexture(nil, "OVERLAY")
+            button.m4Marker:SetSize(14, 14)
+            button.m4Marker:SetTexture("Interface\\Buttons\\Arrow-Down-Up")
+            button.m4Marker:SetVertexColor(1, 0.25, 0.2)
+          end
+          if type(label) == "table" then
+            button.m4Marker:ClearAllPoints()
+            button.m4Marker:SetPoint("RIGHT", label, "LEFT", -2, -1)
+          end
+          button.m4Marker:SetShown(data.marker == "down")
           -- the name ends before the value (cut with "…" instead of running into it)
           if type(label) == "table" then
             local vw = (data.value and data.value ~= "") and ((button.m4Value:GetStringWidth() or 0) + 14) or 6
