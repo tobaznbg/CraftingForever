@@ -597,91 +597,238 @@ local function buildLedger(page)
   end
 end
 
--- "Bestand": what the character holds by source, with cost and what selling would bring.
-local function buildStock(page)
+-- Grouped pages (Bestand, Auktionen), built like the ledger page: left the groups as rows with a
+-- value and a balance under them, right the group's summary with its items (scrollable), an item
+-- opens in place with "‹ Zurück".
+--   spec.groupLabels      labels of the group summary (values per group: g.values)
+--   spec.itemLabels       labels of the item view (values per item: it.values)
+--   spec.listCols         columns of the item list (it.cols, the first one is the name)
+--   spec.balanceLabels    labels of the balance (values: data.balance)
+--   spec.collect()        -> { groups = { { key, name, icon, value, values, items = { { itemID, name,
+--                            icon, sub, cols, values } } } }, balance = { … } }
+local function buildGrouped(page, spec)
   local NW = ns.NativeWindow
-  local LABELS = { "Stück", "Einkauf / Stk.", "Einkauf", "Erlös / Stk.", "Erlös", "Buchgewinn" }
-  local split = NW.Split(page, { onSelect = function(entry, card)
-    local d = cardFrame(card, LABELS)
-    local s = entry and entry.row
-    showCard(card, d, entry, s and {
-      tostring(s.units), money(s.unitCost), money(s.cost), s.sellUnit and money(s.sellUnit) or "–",
-      s.sell and money(s.sell) or "–",
-      s.gain and (signed(s.gain) .. (s.gainPct and string.format("  (%+d %%)", math.floor(s.gainPct * 100 + 0.5)) or "")) or "–",
-    }, s and s.source)
-  end })
-  function page.Refresh()
-    local report = ns.Profit and ns.Profit.Report and ns.Profit.Report(nil) or { stock = {} }
-    local groups, order = {}, {}
-    for _, s in ipairs(report.stock or {}) do
-      local key = s.source or "?"
-      if not groups[key] then groups[key] = {}; order[#order + 1] = key end
-      table.insert(groups[key], s)
+  local area, item, current
+  local function layers(c)
+    if area then return end
+    local al = CreateFrame("Frame", nil, c)
+    al:SetAllPoints(c)
+    area = head(al)
+    area.layer = al
+    area.Figures = NW.Figures(al, area.Head, spec.groupLabels)
+    area.SetItems = scrollTable(al, spec.listCols, -86 - 10 - #spec.groupLabels * 16 - 30)
+    local il = CreateFrame("Frame", nil, c)
+    il:SetAllPoints(c)
+    item = head(il)
+    item.layer = il
+    item.Figures = NW.Figures(il, item.Head, spec.itemLabels)
+    local okB, back = pcall(CreateFrame, "Button", nil, il, "UIPanelButtonTemplate")
+    if not okB then back = CreateFrame("Button", nil, il) end
+    back:SetSize(76, 22)
+    back:SetPoint("TOPRIGHT", il, "TOPRIGHT", -16, -27)
+    back:SetText("‹ Zurück")
+    back:SetScript("OnClick", function() il:Hide(); al:Show() end)
+    item.Name:ClearAllPoints()
+    item.Name:SetPoint("LEFT", item.Icon, "RIGHT", 14, 6)
+    item.Name:SetPoint("RIGHT", back, "LEFT", -8, 0)
+    il:Hide()
+    local function widths(fr)
+      local w = math.max(100, (fr:GetWidth() or 340) - 46)
+      area.Figures.SetWidth(w)
+      item.Figures.SetWidth(w)
     end
-    local entries = {}
-    for _, key in ipairs(order) do
-      entries[#entries + 1] = { key = key, header = key:sub(1, 1):upper() .. key:sub(2) }
-      for _, s in ipairs(groups[key]) do
-        entries[#entries + 1] = { key = key .. ":" .. s.itemId, itemID = s.itemId, icon = iconOf(s.itemId),
-          name = s.name or ns.ItemName(s.itemId) or ("#" .. s.itemId), row = s }
+    widths(c)
+    c:HookScript("OnSizeChanged", widths)
+  end
+  local function showItem(it)
+    item.layer:Show()
+    area.layer:Hide()
+    item.Icon:SetTexture(it.icon)
+    item.itemID = it.itemID
+    item.Name:SetText(it.name)
+    item.Sub:SetText(it.sub or "")
+    for i, fs in ipairs(item.Figures.values) do fs:SetText(it.values[i] or "–") end
+  end
+  local function showGroup(g)
+    current = g
+    area.layer:Show()
+    item.layer:Hide()
+    area.Icon:SetTexture(g.icon)
+    area.itemID = nil
+    area.Name:SetText(g.name)
+    area.Sub:SetText("Zusammenfassung")
+    for i, fs in ipairs(area.Figures.values) do fs:SetText(g.values[i] or "–") end
+    local rows = {}
+    for _, it in ipairs(g.items) do
+      local row = { itemID = it.itemID, icon = it.icon, onClick = function() showItem(it) end }
+      for k, v in ipairs(it.cols) do row[k] = v end
+      rows[#rows + 1] = row
+    end
+    area.SetItems(rows)
+  end
+  local all = {}
+  local split = NW.Split(page, {
+    footer = 22 + #spec.balanceLabels * 15 + 16,
+    onSelect = function(entry, c)
+      layers(c)
+      if entry and entry.group then showGroup(entry.group)
+      elseif entry and entry.it then showItem(entry.it) end
+    end,
+    search = function(query)
+      local out = { { key = "search", header = "Suchergebnisse" } }
+      for _, it in ipairs(all) do
+        if (it.name or ""):lower():find(query, 1, true) then
+          out[#out + 1] = { key = "i:" .. tostring(it.key or it.itemID), name = it.name, icon = it.icon, itemID = it.itemID,
+            value = it.cols[#it.cols], it = it }
+        end
       end
+      return out
+    end,
+  })
+  local balance
+  if split.footer then
+    local title = split.footer:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    title:SetPoint("TOPLEFT", 6, -8)
+    title:SetText("Bilanz")
+    balance = NW.Figures(split.footer, title, spec.balanceLabels, { gap = 6, step = 15 })
+    balance.SetWidth(math.max(100, (split.footer:GetWidth() or 280) - 14))
+    split.footer:HookScript("OnSizeChanged", function(f) balance.SetWidth(math.max(100, (f:GetWidth() or 280) - 14)) end)
+  end
+  function page.Refresh()
+    local data = spec.collect()
+    if balance then
+      for i, fs in ipairs(balance.values) do fs:SetText(data.balance[i] or "–") end
+    end
+    local entries = { { key = "groups", header = spec.title } }
+    all = {}
+    for _, g in ipairs(data.groups) do
+      entries[#entries + 1] = { key = g.key, name = g.name, icon = g.icon, value = g.value, group = g }
+      for _, it in ipairs(g.items) do all[#all + 1] = it end
     end
     split.SetEntries(entries)
   end
 end
 
--- "Auktionen": the running auctions by status (undercut first), price, cheapest other offer,
--- cost and profit.
-local function buildAuctions(page)
-  local NW = ns.NativeWindow
-  local LABELS = { "Stück", "Mein Preis", "Billigst fremd", "Restzeit", "Einkauf / Stk.", "Gewinn" }
-  local split = NW.Split(page, { onSelect = function(entry, card)
-    local d = cardFrame(card, LABELS)
-    local r = entry and entry.row
-    local profit
-    if r and r.unit then
-      local cost, source = ns.Profit.UnitCost(r.itemID)
-      if cost then profit = signed(math.floor((r.unit * 0.95 - cost) * (r.quantity or 1))) .. (source == "Beute" and (MUTED .. "  Beute|r") or "") end
+local function pctText(gain, cost)
+  if not (gain and cost and cost > 0) then return "–" end
+  return string.format("%+d %%", math.floor(gain / cost * 100 + 0.5))
+end
+
+-- "Bestand": what the character holds, by where it comes from (trade, each profession).
+local function collectStock()
+  local P = ns.Profit
+  local report = P and P.Report and P.Report(nil) or { stock = {} }
+  local groups, order = {}, {}
+  local total = { cost = 0, sell = 0, gain = 0, units = 0 }
+  for _, s in ipairs(report.stock or {}) do
+    local maker = (s.source or ""):find("hergestellt") and ns.CraftedBy and ns.CraftedBy(s.itemId)
+    local key = maker or ((s.source or ""):find("hergestellt") and "Hergestellt" or "Handel")
+    local g = groups[key]
+    if not g then
+      g = { key = key, name = key, items = {}, units = 0, cost = 0, sell = 0, gain = 0,
+        icon = key == "Handel" and AREA_ICONS.trade or PROFESSION_ICONS[key] or "Interface\\Icons\\INV_Box_02" }
+      groups[key] = g
+      order[#order + 1] = g
     end
-    local cost = r and ns.Profit.UnitCost(r.itemID)
-    showCard(card, d, entry, r and {
-      tostring(r.quantity or 1), r.unit and money(r.unit) or "–", r.foreign and money(r.foreign) or "–",
-      r.timeLeft and string.format("%d h", math.ceil(r.timeLeft / 3600)) or "–",
-      cost and money(cost) or "–", profit or "–",
-    }, entry and entry.status)
-  end })
-  function page.Refresh()
-    local My = ns.MyAuctions
-    local buckets = { under = {}, best = {}, other = {} }
-    for _, r in ipairs(My and My.Rows and My.Rows() or {}) do
-      if (r.active or 0) > 0 then
-        local status = r.status == "best" and "bester Preis" or (r.status == "under" and ("unterboten um " .. money(r.diff)))
-          or (r.status == "alone" and "allein im AH") or "nicht geprüft"
-        local b = r.status == "under" and "under" or (r.status == "best" and "best" or "other")
-        table.insert(buckets[b], { key = "a:" .. r.itemID, itemID = r.itemID, icon = iconOf(r.itemID),
-          name = ns.ItemName(r.itemID) or ("#" .. r.itemID), row = r, status = status })
-      end
-    end
-    if #buckets.under + #buckets.best + #buckets.other == 0 then
-      local key = ns.CharKey and ns.CharKey()
-      local saved = key and ns.db and ns.db.owned and ns.db.owned[key]
-      for _, a in ipairs(saved and saved.list or {}) do
-        if not a.s then
-          table.insert(buckets.other, { key = "s:" .. tostring(a.id), itemID = a.i, icon = iconOf(a.i),
-            name = ns.ItemName(a.i) or ("#" .. tostring(a.i)), status = "nicht geprüft (Auktionshaus öffnen)",
-            row = { itemID = a.i, unit = a.u, quantity = a.q, timeLeft = a.tl } })
-        end
-      end
-    end
-    local entries = {}
-    for _, def in ipairs({ { "under", "Unterboten" }, { "best", "Bester Preis" }, { "other", "Sonstige" } }) do
-      if #buckets[def[1]] > 0 then
-        entries[#entries + 1] = { key = def[1], header = def[2] .. "  " .. MUTED .. "(" .. #buckets[def[1]] .. ")|r" }
-        for _, e in ipairs(buckets[def[1]]) do entries[#entries + 1] = e end
-      end
-    end
-    split.SetEntries(entries)
+    local name = s.name or ns.ItemName(s.itemId) or ("#" .. s.itemId)
+    g.items[#g.items + 1] = { key = key .. ":" .. s.itemId, itemID = s.itemId, icon = iconOf(s.itemId), name = name,
+      sub = key .. " · " .. (s.source or ""), gain = s.gain or -1e12,
+      cols = { name, tostring(s.units), s.gain and signed(s.gain) or "–" },
+      values = { tostring(s.units), money(s.unitCost), money(s.cost), s.sellUnit and money(s.sellUnit) or "–",
+        s.sell and money(s.sell) or "–", pctText(s.gain, s.cost), s.gain and signed(s.gain) or "–" } }
+    g.units, g.cost = g.units + s.units, g.cost + s.cost
+    if s.sell then g.sell, g.gain = g.sell + s.sell, g.gain + s.gain end
+    total.units, total.cost = total.units + s.units, total.cost + s.cost
+    if s.sell then total.sell, total.gain = total.sell + s.sell, total.gain + s.gain end
   end
+  table.sort(order, function(a, b) return a.gain > b.gain end)
+  for _, g in ipairs(order) do
+    table.sort(g.items, function(a, b) return a.gain > b.gain end)
+    g.value = signed(g.gain)
+    g.values = { string.format("%d Items · %d Stück", #g.items, g.units), money(g.cost), money(g.sell),
+      pctText(g.gain, g.cost), signed(g.gain) }
+  end
+  return { groups = order, balance = { money(total.cost), money(total.sell), signed(total.gain) } }
+end
+
+local function buildStock(page)
+  buildGrouped(page, {
+    title = "Herkunft",
+    groupLabels = { "Bestand", "Einkauf", "Erlös (nach Gebühr)", "Marge", "Buchgewinn" },
+    itemLabels = { "Stück", "Einkauf / Stk.", "Einkauf", "Erlös / Stk.", "Erlös", "Marge", "Buchgewinn" },
+    listCols = { { "Item", 20, "LEFT", 190 }, { "Stück", 245, "RIGHT" }, { "Buchgewinn", 315, "RIGHT" } },
+    balanceLabels = { "Einkauf", "Erlös", "Buchgewinn" },
+    collect = collectStock,
+  })
+end
+
+-- "Auktionen": the running auctions by status (undercut first), with value, cost and profit.
+local function collectAuctions()
+  local My = ns.MyAuctions
+  local defs = {
+    { key = "under", name = "Unterboten", icon = "Interface\\Icons\\INV_Misc_QuestionMark" },
+    { key = "best", name = "Bester Preis", icon = "Interface\\Icons\\INV_Misc_Coin_02" },
+    { key = "other", name = "Nicht geprüft", icon = "Interface\\Icons\\INV_Hammer_15" },
+  }
+  local groups = {}
+  for _, d in ipairs(defs) do groups[d.key] = { key = d.key, name = d.name, icon = d.icon, items = {}, worth = 0, net = 0, profit = 0, units = 0 } end
+  local total = { worth = 0, profit = 0, count = 0 }
+  local function add(bucket, r, status)
+    local g = groups[bucket]
+    local qty = r.quantity or 1
+    local cost, source = ns.Profit.UnitCost(r.itemID)
+    local net = r.unit and math.floor(r.unit * 0.95 * qty) or 0
+    local profit = cost and r.unit and math.floor((r.unit * 0.95 - cost) * qty) or nil
+    local name = ns.ItemName(r.itemID) or ("#" .. tostring(r.itemID))
+    g.items[#g.items + 1] = { key = bucket .. ":" .. tostring(r.itemID), itemID = r.itemID, icon = iconOf(r.itemID),
+      name = name, sub = status, profit = profit or -1e12,
+      cols = { name, r.unit and money(r.unit) or "–", profit and signed(profit) or "–" },
+      values = { tostring(qty), r.unit and money(r.unit) or "–", r.foreign and money(r.foreign) or "–", status,
+        r.timeLeft and string.format("%d h", math.ceil(r.timeLeft / 3600)) or "–",
+        cost and (source == "Beute" and "Beute" or money(cost)) or "–", profit and signed(profit) or "–" } }
+    g.worth, g.net, g.units = g.worth + (r.unit or 0) * qty, g.net + net, g.units + qty
+    if profit then g.profit = g.profit + profit; total.profit = total.profit + profit end
+    total.worth, total.count = total.worth + (r.unit or 0) * qty, total.count + 1
+  end
+  local rows = My and My.Rows and My.Rows() or {}
+  local any = false
+  for _, r in ipairs(rows) do
+    if (r.active or 0) > 0 then
+      any = true
+      if r.status == "under" then add("under", r, RED .. "unterboten um " .. money(r.diff) .. "|r")
+      elseif r.status == "best" then add("best", r, GREEN .. "bester Preis|r")
+      else add("other", r, r.status == "alone" and "allein im AH" or "nicht geprüft") end
+    end
+  end
+  if not any then
+    local key = ns.CharKey and ns.CharKey()
+    local saved = key and ns.db and ns.db.owned and ns.db.owned[key]
+    for _, a in ipairs(saved and saved.list or {}) do
+      if not a.s then add("other", { itemID = a.i, unit = a.u, quantity = a.q, timeLeft = a.tl }, "nicht geprüft (Auktionshaus öffnen)") end
+    end
+  end
+  local out = {}
+  for _, d in ipairs(defs) do
+    local g = groups[d.key]
+    if #g.items > 0 then
+      table.sort(g.items, function(a, b) return a.profit > b.profit end)
+      g.value = MUTED .. #g.items .. "|r"
+      g.values = { string.format("%d Auktionen · %d Stück", #g.items, g.units), money(g.worth), money(g.net), signed(g.profit) }
+      out[#out + 1] = g
+    end
+  end
+  return { groups = out, balance = { tostring(total.count), money(total.worth), signed(total.profit) } }
+end
+
+local function buildAuctions(page)
+  buildGrouped(page, {
+    title = "Status",
+    groupLabels = { "Auktionen", "Wert (Kaufpreis)", "Erlös nach Gebühr", "Gewinn" },
+    itemLabels = { "Stück", "Mein Preis", "Billigst fremd", "Status", "Restzeit", "Einkauf / Stk.", "Gewinn" },
+    listCols = { { "Item", 20, "LEFT", 170 }, { "Preis", 245, "RIGHT" }, { "Gewinn", 315, "RIGHT" } },
+    balanceLabels = { "Auktionen", "Wert", "Gewinn" },
+    collect = collectAuctions,
+  })
 end
 
 local function refreshPage(page) if page.Refresh then page.Refresh() end end
