@@ -584,7 +584,7 @@ local function updateForm(form)
     end
     local r = e and e.reagents and itemID and e.reagents[itemID]
     if itemID and r and r.unit then
-      slot.m4Price:SetText(fmt(r.unit * (need or r.n)) .. "|cff999999  " .. (r.vendor and "Händler" or "AH") .. "|r")
+      slot.m4Price:SetText(fmt(r.unit * (need or r.n)) .. "|cff999999  " .. (r.vendor and "H" or "AH") .. "|r")
     elseif itemID then
       slot.m4Price:SetText("|cffff6b6bkein Preis|r")
     else
@@ -598,7 +598,7 @@ local function updateForm(form)
   -- Summary: three rows like Blizzard's (gold label left, value right in the price column).
   if not form.m4Rows then
     form.m4Rows = {}
-    for i, text in ipairs({ "Herstellkosten", "Erlös", "Gewinn", "Daten" }) do
+    for i, text in ipairs({ "Herstellkosten", "Erlös", "Gewinn" }) do
       local l = form:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
       l:SetText(text)
       local v = form:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
@@ -609,23 +609,8 @@ local function updateForm(form)
   local values
   if e and e.cost and e.value then
     local p = e.profit
-    -- how old the prices are: the oldest source among product and reagents
-    local oldest
-    for id in pairs(e.reagents or {}) do
-      local t = ns.Item(id).dataT
-      if t and (not oldest or t < oldest) then oldest = t end
-    end
-    local pt = ns.Item(e.out).dataT
-    if pt and (not oldest or pt < oldest) then oldest = pt end
-    local age = "–"
-    if oldest then
-      local d = math.max(0, time() - oldest)
-      age = d < 90 and "gerade" or (d < 5400 and string.format("vor %d min", math.floor(d / 60 + 0.5))
-        or string.format("vor %d h", math.floor(d / 3600 + 0.5)))
-    end
-    values = { fmt(e.cost), fmt(e.value) .. "|cff999999  " .. (e.onAH and "AH" or "Händler") .. "|r",
-      p >= 0 and ("|cff5fd38d+" .. fmt(p) .. "|r") or ("|cffff6b6b-" .. fmt(-p) .. "|r"),
-      "|cff999999" .. age .. "|r" }
+    values = { fmt(e.cost), fmt(e.value) .. (e.onAH and "" or "|cff999999  H|r"),
+      p >= 0 and ("|cff5fd38d+" .. fmt(p) .. "|r") or ("|cffff6b6b-" .. fmt(-p) .. "|r") }
   end
   -- a thin line between revenue and profit
   if not form.m4Line then
