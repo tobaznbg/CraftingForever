@@ -543,6 +543,9 @@ function Profit.UnitCost(itemID)
   if m then return m, "von Hand eingetragen" end
   local c = ns.CraftingCost and ns.CraftingCost(itemID)
   if c then return c, "Material heute" end
+  -- neither bought, crafted nor entered: looted (or bought before the ledger ran) - free, as
+  -- in the profit report (FARMED)
+  return 0, "Beute"
 end
 
 -- The lowest unit price that still covers the cost after the auction house cut.

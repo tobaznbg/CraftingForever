@@ -63,14 +63,15 @@ end
 -- costText, profitText (nil: no profit row). Nothing at all without an item.
 function SellInfo.Values(id, price, qty)
   if not (id and ns.Profit and ns.Profit.UnitCost) then return nil end
-  local cost = ns.Profit.UnitCost(id)
+  local cost, source = ns.Profit.UnitCost(id)
   if not cost then return "|cff999999unbekannt|r", nil end
   qty = qty or 1
   local total = math.floor(cost * qty + 0.5)
-  if not price then return money(total), nil end
+  local costText = source == "Beute" and "Beute" or money(total)
+  if not price then return costText, nil end
   local profit = math.floor(price * qty * (1 - CUT) - total)
   local text = profit >= 0 and ("|cff5fd38d" .. money(profit) .. "|r") or ("|cffff6b6b-" .. money(-profit) .. "|r")
-  return money(total), text
+  return costText, text
 end
 
 -- One row like Blizzard's: label right-aligned in the label column, value left in the value column.
@@ -253,12 +254,12 @@ end
 
 function SellInfo.AuctionText(id, unit, qty)
   if not (id and unit and unit > 0 and ns.Profit and ns.Profit.UnitCost) then return nil end
-  local cost = ns.Profit.UnitCost(id)
+  local cost, source = ns.Profit.UnitCost(id)
   if not cost then return nil end
   qty = qty or 1
   local profit = math.floor((unit * (1 - CUT) - cost) * qty)
   local short = function(c) return ns.FormatMoney(c, true) end
-  return "|cff999999Einkauf " .. short(math.floor(cost + 0.5)) .. "|r\n"
+  return "|cff999999Einkauf " .. (source == "Beute" and "Beute" or short(math.floor(cost + 0.5))) .. "|r\n"
     .. (profit >= 0 and ("|cff5fd38dGewinn +" .. short(profit)) or ("|cffff6b6bGewinn -" .. short(-profit))) .. "|r"
 end
 
@@ -392,12 +393,12 @@ end
 -- Values of the two columns: cost of the units, profit after the cut ("" without a cost).
 function SellInfo.AuctionValues(id, unit, qty)
   if not (id and unit and unit > 0 and ns.Profit and ns.Profit.UnitCost) then return "", "" end
-  local cost = ns.Profit.UnitCost(id)
+  local cost, source = ns.Profit.UnitCost(id)
   if not cost then return "|cff999999–|r", "|cff999999–|r" end
   qty = qty or 1
   local profit = math.floor((unit * (1 - CUT) - cost) * qty)
   local fmt = function(c) return ns.FormatMoney(c, true) end
-  return fmt(math.floor(cost * qty + 0.5)),
+  return source == "Beute" and "|cff999999Beute|r" or fmt(math.floor(cost * qty + 0.5)),
     profit >= 0 and ("|cff5fd38d+" .. fmt(profit) .. "|r") or ("|cffff6b6b-" .. fmt(-profit) .. "|r")
 end
 
