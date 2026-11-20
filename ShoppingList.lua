@@ -36,12 +36,21 @@ local function qualityName(id, name)
   return c and c.hex and (c.hex .. name .. "|r") or name
 end
 
--- Recipes of the character's profession scans ------------------------------------------------
+-- Recipes of the household's profession scans --------------------------------------------------
+-- The list is the account's (ns.db), so a bank character sees it too: recipes and
+-- intermediates come from the scans of every household character, the playing one first.
 
 local function ownScans()
-  local out, prefix = {}, ns.CharKey() .. ":"
-  for key, scan in pairs(ns.db and ns.db.recipes or {}) do
-    if key:sub(1, #prefix) == prefix and type(scan.recipes) == "table" then out[#out + 1] = scan end
+  local me = ns.CharKey()
+  local keys = ns.Ledger and ns.Ledger.Household and ns.Ledger.Household() or { me }
+  local out = {}
+  for _, char in ipairs(keys) do
+    local prefix = char .. ":"
+    for key, scan in pairs(ns.db and ns.db.recipes or {}) do
+      if key:sub(1, #prefix) == prefix and type(scan.recipes) == "table" then
+        if char == me then table.insert(out, 1, scan) else out[#out + 1] = scan end
+      end
+    end
   end
   return out
 end

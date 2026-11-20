@@ -41,6 +41,8 @@ local function create()
     -- for now (pilot): left click the ledger window in Blizzard's look, right click the main window
     if mouse == "RightButton" then
       if ns.MainUI then ns.Safe(ns.MainUI.Toggle) else ns.Safe(ns.PlannerUI.Toggle) end
+    elseif IsShiftKeyDown() and ns.ShoppingList then
+      ns.Safe(ns.ShoppingList.Toggle) -- also for a character without the profession (bank)
     elseif ns.TradeBook then
       ns.Safe(ns.TradeBook.Toggle)
     elseif ns.MainUI then
@@ -62,6 +64,7 @@ local function create()
     GameTooltip:AddLine("m4-companion")
     GameTooltip:AddLine(ns.Status.Text(), 0.8, 0.8, 0.8)
     GameTooltip:AddLine("Linksklick: Handelsbuch  ·  Rechtsklick: Fenster", 0.6, 0.6, 0.6)
+    GameTooltip:AddLine("Shift+Linksklick: Einkaufsliste", 0.6, 0.6, 0.6)
     GameTooltip:Show()
   end)
   button:SetScript("OnLeave", function() GameTooltip:Hide() end)

@@ -220,6 +220,8 @@ SlashCmdList.M4COMPANION = function(msg)
     ns.Safe(ns.AuctionScan.Start)
   elseif msg == "buch" then
     if ns.TradeBook then ns.Safe(ns.TradeBook.Toggle) end
+  elseif msg == "liste" then
+    if ns.ShoppingList then ns.Safe(ns.ShoppingList.Toggle) end
   elseif msg == "berufe" or msg == "b" then
     ns.PlannerUI.Toggle()
   elseif msg == "handel" or msg == "h" then
