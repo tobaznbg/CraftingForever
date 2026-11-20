@@ -276,7 +276,7 @@ end
 
 -- Left Blizzard's recipe list, right the recipe card.
 function NW.Split(page, opts)
-  local split = { selected = nil }
+  local split = { selected = nil, collapsed = {} }
   local list = try("Frame", page, "ProfessionsRecipeListTemplate") or try("Frame", page, "InsetFrameTemplate")
   list:ClearAllPoints()
   list:SetPoint("TOPLEFT", 0, -4)
@@ -304,9 +304,17 @@ function NW.Split(page, opts)
           if type(text) == "table" then text:SetText(data.header) end
           local rank = rawget(button, "RankBar") -- the profession's skill bar of a category
           if type(rank) == "table" and rank.Hide then rank:Hide() end
+          -- a click folds the category in and out (state per header key), like the profession list
+          local folded = split.collapsed[data.key or data.header] and true or false
+          local collapse = rawget(button, "CollapseButton")
+          if type(collapse) == "table" and collapse.UpdateCollapsedState then pcall(collapse.UpdateCollapsedState, collapse, folded) end
           button:SetScript("OnEnter", nil)
           button:SetScript("OnLeave", nil)
-          button:SetScript("OnClick", nil)
+          button:SetScript("OnClick", function()
+            local k = data.key or data.header
+            split.collapsed[k] = not split.collapsed[k] or nil
+            if split.Rebuild then split.Rebuild() end
+          end)
         end)
       else
         factory("ProfessionsRecipeListRecipeTemplate", function(button)
@@ -343,14 +351,15 @@ function NW.Split(page, opts)
   -- The search box filters the entries by name (a header stays when one of its entries does).
   local all, query = {}, ""
   local function filtered()
-    if query == "" then return all end
-    local out, header = {}, nil
+    local out, header, folded = {}, nil, false
     for _, e in ipairs(all) do
       if e.header then
         header = e
-      elseif (e.name or ""):lower():find(query, 1, true) then
+        folded = split.collapsed[e.key or e.header] and true or false
+        if query == "" then out[#out + 1] = e; header = nil end
+      elseif query == "" or (e.name or ""):lower():find(query, 1, true) then
         if header then out[#out + 1] = header; header = nil end
-        out[#out + 1] = e
+        if not folded then out[#out + 1] = e end
       end
     end
     return out
@@ -379,6 +388,7 @@ function NW.Split(page, opts)
     all = entries or {}
     show(true)
   end
+  function split.Rebuild() show(true) end
   local search = rawget(list, "SearchBox")
   if type(search) == "table" and search.HookScript then
     search:HookScript("OnTextChanged", function(edit)

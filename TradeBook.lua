@@ -353,7 +353,7 @@ local function buildLedger(page)
     local report = ns.Profit and ns.Profit.Report and ns.Profit.Report(since()) or { groups = {}, items = {} }
     local entries = {}
     for _, g in ipairs(report.groups) do
-      entries[#entries + 1] = { header = shortGroup(g.name) .. "  " .. signed(g.profit) }
+      entries[#entries + 1] = { key = g.name, header = shortGroup(g.name) .. "  " .. signed(g.profit) }
       for _, r in ipairs(report.items[g.name] or {}) do
         entries[#entries + 1] = { key = g.name .. ":" .. r.itemId, itemID = r.itemId, icon = iconOf(r.itemId),
           name = r.name or ns.ItemName(r.itemId) or ("#" .. r.itemId), row = r }
@@ -386,7 +386,7 @@ local function buildStock(page)
     end
     local entries = {}
     for _, key in ipairs(order) do
-      entries[#entries + 1] = { header = key:sub(1, 1):upper() .. key:sub(2) }
+      entries[#entries + 1] = { key = key, header = key:sub(1, 1):upper() .. key:sub(2) }
       for _, s in ipairs(groups[key]) do
         entries[#entries + 1] = { key = key .. ":" .. s.itemId, itemID = s.itemId, icon = iconOf(s.itemId),
           name = s.name or ns.ItemName(s.itemId) or ("#" .. s.itemId), row = s }
@@ -442,7 +442,7 @@ local function buildAuctions(page)
     local entries = {}
     for _, def in ipairs({ { "under", "Unterboten" }, { "best", "Bester Preis" }, { "other", "Sonstige" } }) do
       if #buckets[def[1]] > 0 then
-        entries[#entries + 1] = { header = def[2] .. "  " .. MUTED .. "(" .. #buckets[def[1]] .. ")|r" }
+        entries[#entries + 1] = { key = def[1], header = def[2] .. "  " .. MUTED .. "(" .. #buckets[def[1]] .. ")|r" }
         for _, e in ipairs(buckets[def[1]]) do entries[#entries + 1] = e end
       end
     end
