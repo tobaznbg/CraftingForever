@@ -266,7 +266,9 @@ end
 -- GetAllAuctionsLayout). It runs on a stand-in for the table builder that adds two text columns
 -- "Einkauf" and "Gewinn" where Blizzard adds the bid price column (always empty when posting
 -- with buyout only). The cells are filled from the rows' data (updateAuctionRows).
-local BID_TEMPLATE, TEXT_TEMPLATE = "AuctionHouseTableCellAuctionsBidTemplate", "AuctionHouseTableCellTextTemplate"
+-- the bid column's cell template (Forever: "...AllAuctionsBid...", retail: "...AuctionsBid...")
+local BID_TEMPLATES = { AuctionHouseTableCellAllAuctionsBidTemplate = true, AuctionHouseTableCellAuctionsBidTemplate = true }
+local TEXT_TEMPLATE = "AuctionHouseTableCellTextTemplate"
 local OWN_WIDTH = 92
 SellInfo.columns = false -- true once the own columns are in the table
 
@@ -306,7 +308,7 @@ local function wrapLayout(original)
       for i = 1, n do sig[#sig + 1] = type(args[i]) == "string" and args[i] or type(args[i]) end
       seen[#seen + 1] = table.concat(sig, " ")
       for i = 1, n do
-        if args[i] == BID_TEMPLATE then
+        if type(args[i]) == "string" and BID_TEMPLATES[args[i]] then
           for k = 1, n do
             if type(args[k]) == "number" and args[k] > 60 then args[k] = OWN_WIDTH break end -- the width
           end
