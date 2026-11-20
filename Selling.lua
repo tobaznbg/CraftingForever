@@ -200,7 +200,8 @@ local function sniperRow(body, i)
   r:SetScript("OnLeave", function() GameTooltip:Hide() end)
   -- Click on the row (not the buy button): detail window right of the panel, again closes it.
   r:SetScript("OnMouseUp", function(self, button)
-    if button ~= "RightButton" and self.entry then
+    -- Alt+click: the detail's own click watcher already opened it (a toggle would close it).
+    if button ~= "RightButton" and self.entry and not ns.ItemDetail.IsAltClick() then
       ns.Safe(ns.ItemDetail.Toggle, self.entry.itemID, panel)
       ns.Safe(Selling.Refresh)
     end
@@ -352,7 +353,9 @@ local function mineRow(body, i)
   r:SetScript("OnLeave", function() GameTooltip:Hide() end)
   -- A click opens the item's detail (a second click closes it), like a sniper hit.
   r:SetScript("OnMouseUp", function(self, button)
-    if button == "LeftButton" and self.entry then ns.Safe(ns.ItemDetail.Toggle, self.entry.itemID, nil, "mine") end
+    if button == "LeftButton" and self.entry and not ns.ItemDetail.IsAltClick() then
+      ns.Safe(ns.ItemDetail.Toggle, self.entry.itemID, nil, "mine")
+    end
   end)
   return r
 end
@@ -416,14 +419,17 @@ function Selling.MineStatus(e)
   return text .. Selling.MineRoom(e)
 end
 
--- "  ·  Einstand 12s (gekauft) · Luft 3s": what one unit cost and how far the price can still
+-- "Einstand 12s (gekauft) · Luft 3s": what one unit cost and how far the price can still
 -- go down: undercutting the cheapest other offer by 1 copper, after the 5 % cut, minus the cost.
+-- Always shown: without a known cost it says so (looted, or bought before the ledger ran).
 function Selling.MineRoom(e)
   -- (not "a and b and f()": that keeps only the first return value)
   local cost, source
   if ns.Profit and ns.Profit.UnitCost then cost, source = ns.Profit.UnitCost(e.itemID) end
-  if not cost then return "" end
-  local text = "\n" .. MUTED .. "Einstand " .. money(math.floor(cost + 0.5)) .. " (" .. source .. ")|r"
+  if not cost then
+    return "\n" .. "Einstand " .. MUTED .. "unbekannt – kein Kauf erfasst (Details: eintragen)|r"
+  end
+  local text = "\n" .. "Einstand " .. money(math.floor(cost + 0.5)) .. MUTED .. " (" .. source .. ")|r"
   local target = e.foreign and (e.foreign - 1) or e.unit
   if target then
     local room = math.floor(target * (1 - 0.05) - cost)

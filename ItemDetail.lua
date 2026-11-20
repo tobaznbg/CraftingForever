@@ -1053,10 +1053,36 @@ end
 -- Blizzard's auction house lists do not go through HandleModifiedItemClick. Every item the
 -- game shows a tooltip for can be opened instead: Alt+left click while the game tooltip
 -- shows an item (GLOBAL_MOUSE_DOWN only observes the click, nothing is intercepted).
+-- A recipe's tooltip embeds the tooltip of what it makes, and GameTooltip:GetItem() then names
+-- that product. So the first item set on the tooltip is remembered too, and of the candidates
+-- the one whose name is the tooltip's title wins.
+local tooltipFirst = nil
+if GameTooltip and GameTooltip.HookScript then
+  GameTooltip:HookScript("OnTooltipCleared", function() tooltipFirst = nil end)
+  if TooltipDataProcessor and Enum and Enum.TooltipDataType then
+    TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Item, function(tooltip, data)
+      if tooltip == GameTooltip and not tooltipFirst and data and data.id then tooltipFirst = data.id end
+    end)
+  else
+    GameTooltip:HookScript("OnTooltipSetItem", function(tooltip)
+      if tooltipFirst then return end
+      local _, link = tooltip:GetItem()
+      tooltipFirst = toID(link)
+    end)
+  end
+end
+
 function Detail.TooltipItem()
   if not (GameTooltip and GameTooltip:IsShown() and GameTooltip.GetItem) then return nil end
   local _, link = GameTooltip:GetItem()
-  return toID(link)
+  local id = toID(link)
+  local titleLine = _G.GameTooltipTextLeft1
+  local title = titleLine and titleLine.GetText and titleLine:GetText()
+  if title and tooltipFirst and tooltipFirst ~= id then
+    if ns.ItemName(tooltipFirst) == title then return tooltipFirst end
+    if id and ns.ItemName(id) == title then return id end
+  end
+  return tooltipFirst or id
 end
 
 if CreateFrame then
