@@ -201,11 +201,112 @@ local function attach(frame)
   end)
 end
 
+-- Blizzard's tab "Auktionen": in each own auction's row, in the (empty) bid price column,
+-- what one unit cost and what the auction brings after the cut:
+--   Einstand 2g 88s
+--   Gewinn +2g 81s        (green / red; nothing without a known cost or with a bid shown)
+local function auctionsList(af)
+  return rawget(af, "AllAuctionsList") or rawget(af, "ItemList")
+end
+
+local function forEachRow(list, fn)
+  local box = rawget(list, "ScrollBox")
+  if type(box) == "table" and box.ForEachFrame then
+    box:ForEachFrame(fn)
+    return
+  end
+  local sf = rawget(list, "ScrollFrame")
+  for _, row in ipairs(type(sf) == "table" and rawget(sf, "buttons") or {}) do fn(row) end
+end
+
+local function rowData(row)
+  local d = rawget(row, "rowData")
+  if d == nil and row.GetRowData then
+    local ok, v = pcall(row.GetRowData, row)
+    d = ok and v or nil
+  end
+  if d == nil and row.GetElementData then
+    local ok, v = pcall(row.GetElementData, row)
+    d = ok and v or nil
+  end
+  return type(d) == "table" and d or nil
+end
+
+local function rowText(row)
+  if row.m4Info then return row.m4Info end
+  local layer = CreateFrame("Frame", nil, row)
+  layer:SetAllPoints(row)
+  layer:SetFrameLevel((row:GetFrameLevel() or 1) + 5)
+  local fs = layer:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  fs:SetJustifyH("RIGHT")
+  local cells = rawget(row, "cells")
+  local cell = type(cells) == "table" and cells[2]
+  if type(cell) == "table" and cell.GetObjectType then
+    fs:SetPoint("RIGHT", cell, "RIGHT", -4, 0)
+  else
+    -- no cells table: the bid column starts right of the item name (about 62 % of the row)
+    fs:SetPoint("RIGHT", row, "LEFT", (row:GetWidth() or 560) * 0.66, 0)
+  end
+  row.m4Info = fs
+  return fs
+end
+
+function SellInfo.AuctionText(id, unit, qty)
+  if not (id and unit and unit > 0 and ns.Profit and ns.Profit.UnitCost) then return nil end
+  local cost = ns.Profit.UnitCost(id)
+  if not cost then return nil end
+  qty = qty or 1
+  local profit = math.floor((unit * (1 - CUT) - cost) * qty)
+  local short = function(c) return ns.FormatMoney(c, true) end
+  return "|cff999999Einstand " .. short(math.floor(cost + 0.5)) .. "|r\n"
+    .. (profit >= 0 and ("|cff5fd38dGewinn +" .. short(profit)) or ("|cffff6b6bGewinn -" .. short(-profit))) .. "|r"
+end
+
+local probed = false
+local function updateAuctionRows(af)
+  local list = auctionsList(af)
+  if not list then return end
+  forEachRow(list, function(row)
+    local d = rowData(row)
+    local key = d and d.itemKey
+    local id = type(key) == "table" and key.itemID or nil
+    local text
+    if id and not ((d.bidAmount or 0) > 0) then
+      text = SellInfo.AuctionText(id, d.buyoutAmount, d.quantity)
+    end
+    local fs = row.m4Info
+    if text or fs then rowText(row):SetText(text or "") end
+    if not probed and ns.db and d then
+      probed = true
+      local keys = {}
+      for k, v in pairs(row) do if type(v) == "table" then keys[#keys + 1] = tostring(k) end end
+      table.sort(keys)
+      ns.db.auctionsProbe = { row = table.concat(keys, ","), data = (d.buyoutAmount and "buyout " or "") .. (d.quantity and "qty" or ""),
+        t = time() }
+    end
+  end)
+end
+
+local function attachAuctions()
+  local af = AuctionHouseFrame and rawget(AuctionHouseFrame, "AuctionsFrame")
+  if type(af) ~= "table" or af.m4Rows then return end
+  local layer = CreateFrame("Frame", nil, af)
+  af.m4Rows = layer
+  local elapsed = 0
+  layer:SetScript("OnUpdate", function(_, dt)
+    elapsed = elapsed + (dt or 0)
+    if elapsed < 0.3 then return end
+    elapsed = 0
+    ns.Safe(updateAuctionRows, af)
+  end)
+end
+
 local function attachAll()
   local ah = AuctionHouseFrame
   if not ah then return end
   attach(ah.ItemSellFrame)
   attach(ah.CommoditiesSellFrame)
+  attachAuctions()
 end
 
 if ns.On then
