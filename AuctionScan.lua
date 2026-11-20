@@ -314,36 +314,66 @@ local function abort()
   end
 end
 
--- Button on the auction house window ----------------------------------------------
+-- Tab "AH-Scan" under the auction house ----------------------------------------------------
+-- After Blizzard's tabs (Kaufen / Verkaufen / Auktionen), in their look. A click starts the full
+-- scan (it also starts by itself when the auction house opens, every 15 min at most); the
+-- tooltip says how old the last scan is and when the next one is possible. While a scan
+-- runs the tab reads "Scannt …".
+Scan.BUTTON = true
 
--- The button is retired (20 Nov 2026): the scan starts by itself when the auction house opens
--- (every 15 min at most) and with /m4 scan. Scan.BUTTON = true brings it back.
-Scan.BUTTON = false
+local function ago(seconds)
+  if seconds < 90 then return "gerade eben" end
+  if seconds < 5400 then return string.format("vor %d min", math.floor(seconds / 60 + 0.5)) end
+  return string.format("vor %d h", math.floor(seconds / 3600 + 0.5))
+end
+
+local function setTabText()
+  if not button then return end
+  button:SetText(state and "Scannt …" or "AH-Scan")
+  if PanelTemplates_TabResize then pcall(PanelTemplates_TabResize, button, 20, nil, 70) end
+end
 
 local function createButton()
   if not Scan.BUTTON then return end
-  local parent = AuctionHouseFrame or AuctionFrame
+  local parent = AuctionHouseFrame
   if not parent or button then return end
-  button = ns.Style.Button(parent, "CF Scan", 110, 24, nil, ns.Style.C.accent)
-  -- Below the window's bottom edge, where no Blizzard or Auctionator element sits.
-  button:SetPoint("TOPRIGHT", parent, "BOTTOMRIGHT", -10, -2)
-  button:SetFrameStrata("HIGH")
-  button:SetFrameLevel(parent:GetFrameLevel() + 50)
-  ns.db.ui = ns.db.ui or {}
-  ns.db.ui.scanButton = { t = time(), parent = parent:GetName() }
-  button:SetScript("OnClick", function() ns.Safe(Scan.Start) end)
-  button:HookScript("OnEnter", function(self)
-    GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
-    GameTooltip:AddLine("M4: Vollscan")
-    local wait = Scan.Wait()
-    if wait > 0 then
-      GameTooltip:AddLine(string.format("Wieder möglich in %d:%02d", math.floor(wait / 60), wait % 60), 1, 1, 1)
+  local ok, t = pcall(CreateFrame, "Button", "M4CompanionScanTab", parent, "AuctionHouseFrameDisplayModeTabTemplate")
+  if not ok or not t then ok, t = pcall(CreateFrame, "Button", "M4CompanionScanTab", parent, "UIPanelButtonTemplate") end
+  if not ok or not t then return end
+  button = t
+  local tabs = rawget(parent, "Tabs")
+  local last = type(tabs) == "table" and tabs[#tabs]
+  if last then
+    t:SetPoint("TOPLEFT", last, "TOPRIGHT", 3, 0)
+  else
+    t:SetPoint("TOPLEFT", parent, "BOTTOMLEFT", 300, 2)
+  end
+  setTabText()
+  if PanelTemplates_DeselectTab then pcall(PanelTemplates_DeselectTab, t) end
+  t:SetScript("OnClick", function()
+    ns.Safe(Scan.Start)
+    setTabText()
+    if PanelTemplates_DeselectTab then pcall(PanelTemplates_DeselectTab, t) end
+  end)
+  t:SetScript("OnEnter", function(self)
+    GameTooltip:SetOwner(self, "ANCHOR_TOP")
+    GameTooltip:AddLine("AH-Scan")
+    local age = Scan.Age()
+    GameTooltip:AddLine(age and ("Letzter Scan " .. ago(age)) or "Noch kein Scan", 1, 1, 1)
+    if state then
+      GameTooltip:AddLine("Läuft gerade …", 0.37, 0.83, 0.55)
     else
-      GameTooltip:AddLine("Liest alle Angebote, alle 15 Minuten möglich.", 1, 1, 1)
+      local wait = Scan.Wait()
+      if wait > 0 then
+        GameTooltip:AddLine(string.format("Wieder möglich in %d:%02d", math.floor(wait / 60), wait % 60), 1, 0.71, 0.28)
+      else
+        GameTooltip:AddLine("Klick: alle Angebote lesen (alle 15 Minuten möglich)", 0.6, 0.6, 0.6)
+      end
     end
     GameTooltip:Show()
   end)
-  button:HookScript("OnLeave", function() GameTooltip:Hide() end)
+  t:SetScript("OnLeave", function() GameTooltip:Hide() end)
+  Scan.OnDone(function() C_Timer.After(0, setTabText) end)
 end
 
 -- Opening the auction house starts the full scan by itself (every 15 min at most).
@@ -368,4 +398,5 @@ ns.On("AUCTION_HOUSE_SHOW", function()
     if not autoBlocked and not off then ns.Safe(Scan.EnsureFresh) end
   end)
 end)
-ns.On("AUCTION_HOUSE_CLOSED", abort)
+ns.On("AUCTION_HOUSE_CLOSED", function() abort(); setTabText() end)
+hooksecurefunc(Scan, "Start", function() setTabText() end)
