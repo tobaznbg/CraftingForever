@@ -506,7 +506,6 @@ end
 -- Same figures as the coin in the profession window and the old professions page (rows()).
 local Products = {}
 ns.Products = Products
-local GREY = { 0.5, 0.5, 0.5 }
 local FILTERS = {
   { key = "attractive", label = "Attraktiv (Gewinn + Nachfrage)" },
   { key = "profit", label = "Mit Gewinn" },
@@ -553,8 +552,7 @@ local function productEntries(pid)
   local out = {}
   local function entry(e)
     return { key = tostring(e.spell or e.itemID), name = e.recipe, icon = itemIcon(e.itemID), itemID = e.itemID,
-      value = signedMoney(e.profit), marker = (e.profit > 0 and e.onAH) and "coin" or nil,
-      color = not e.learned and GREY or nil, e = e }
+      marker = (e.profit > 0 and e.onAH) and "coin" or nil, locked = not e.learned, e = e }
   end
   for _, e in ipairs(list) do e.attractive, e.why, e.rank = ns.CraftAttractive(e) end
   if key == "attractive" or key == "profit" then
@@ -599,85 +597,120 @@ local function productEntries(pid)
   return out
 end
 
--- How a recipe is learned, from the Forever recipe sources (Data_RecipeSources.lua): trainer,
--- vendors of the own faction (NPC, zone), reputation, Merchant's Favor, drop, quest; a tradeable
--- recipe item with its price at the auction house right now. nil when the sources do not know it.
-local KIND = { vendor = "Händler", limited = "Händler (begrenzt)", rep = "Ruf-Händler", favor = "Händlergunst",
-  cond = "Händler (Bedingung)", unknown = "Händler (unbekannt)" }
-local function sourceText(pid, spell)
+-- How a recipe is learned, from the Forever recipe sources (Data_RecipeSources.lua): one line
+-- per way - trainer, vendors of the own faction (NPC, zone), reputation, Merchant's Favor, drop
+-- (who drops it, else a random world drop), quest - and a tradeable recipe item with its price
+-- at the auction house right now. nil when the sources do not know the recipe.
+local KIND = { vendor = "Händler", limited = "Händler (begrenzter Vorrat)", rep = "Ruf-Händler", favor = "Händlergunst",
+  cond = "Händler (mit Bedingung)", unknown = "Händler (NPC unbekannt)" }
+local function sourceLines(pid, spell)
   local srcs = ns.RecipeSources and ns.RecipeSources[pid]
   local entry = srcs and srcs.recipes and srcs.recipes[spell]
   if not entry then return nil end
   local mine = (UnitFactionGroup and UnitFactionGroup("player")) == "Alliance" and "A" or "H"
-  local parts = {}
-  if entry.auto then parts[#parts + 1] = "beim Erlernen des Berufs" end
-  if entry.t then parts[#parts + 1] = "Lehrer" .. (entry.rank and (" (" .. entry.rank .. ")") or "") end
+  local lines = {}
+  if entry.auto then lines[#lines + 1] = "Beim Erlernen des Berufs" end
+  if entry.t then lines[#lines + 1] = "Lehrer" .. (entry.rank and (" (" .. entry.rank .. ")") or "") end
   for _, s in ipairs(entry) do
     local npc = s[2] and s[2] > 0 and srcs.npcs and srcs.npcs[s[2]] or nil
     if not npc or npc[5] == "B" or npc[5] == mine or npc[5] == nil then
       local text = KIND[s[1]] or s[1]
-      if npc then text = text .. " " .. npc[1] .. " (" .. (npc[2] or "?") .. ")" end
+      if npc then text = text .. ": " .. npc[1] .. " (" .. (npc[2] or "?") .. ")" end
       if s.rf then text = text .. ", Ruf " .. s.rf .. " " .. (s.rs or "") end
       if s.favor then text = text .. ", " .. s.favor .. " Gunst" end
       if (s[3] or 0) > 0 then text = text .. ", " .. money(s[3]) end
       if s.c == 1 then text = text .. " |cff999999(Classic-Daten)|r" end
-      parts[#parts + 1] = text
+      lines[#lines + 1] = text
     end
   end
-  if entry.d then parts[#parts + 1] = "Drop" end
-  if entry.q then parts[#parts + 1] = "Quest „" .. entry.q .. "“" end
-  local text = table.concat(parts, " · ")
+  if entry.d then
+    if entry.dr then
+      lines[#lines + 1] = "Drop: " .. table.concat(entry.dr, ", ")
+        .. (entry.drMore and string.format(" |cff999999und %d weitere|r", entry.drMore) or "")
+    else
+      lines[#lines + 1] = "Drop: zufällig (Weltdrop)"
+    end
+  end
+  if entry.q then lines[#lines + 1] = "Quest: " .. entry.q end
   if entry.item then
     local p = ns.Item(entry.item).now
-    text = text .. (text ~= "" and " · " or "") .. (p and ("Rezept im AH: " .. money(p)) or "Rezept handelbar, gerade nicht im AH")
+    lines[#lines + 1] = p and ("Rezept im AH: " .. money(p)) or "|cff999999Rezept handelbar, gerade nicht im AH|r"
+  elseif entry.bop then
+    lines[#lines + 1] = "|cff999999Rezept nicht handelbar (seelengebunden)|r"
   end
-  return text ~= "" and text or nil
+  return #lines > 0 and lines or nil
 end
 
+-- A reagent slot like the profession window's: Blizzard's slot template if the client has it,
+-- else an item button (icon in the slot frame); "0/20 Name" right of it, the price at the edge.
+local function reagentSlot(c)
+  local r = {}
+  local ok, slot = pcall(CreateFrame, "Button", nil, c, "ItemButtonTemplate")
+  if not ok or not slot then slot = CreateFrame("Button", nil, c) end
+  slot:SetSize(37, 37)
+  r.Slot = slot
+  r.Icon = rawget(slot, "icon") or rawget(slot, "Icon")
+  if type(r.Icon) ~= "table" then
+    r.Icon = slot:CreateTexture(nil, "ARTWORK")
+    r.Icon:SetAllPoints()
+  end
+  local count = rawget(slot, "Count")
+  if type(count) == "table" and count.Hide then count:Hide() end
+  r.Name = c:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  r.Name:SetPoint("LEFT", slot, "RIGHT", 8, 0)
+  r.Name:SetWidth(150)
+  r.Name:SetJustifyH("LEFT")
+  r.Name:SetMaxLines(2)
+  r.Price = c:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  r.Price:SetPoint("RIGHT", c, "RIGHT", -RIGHT_EDGE, 0)
+  r.Price:SetPoint("TOP", slot, "TOP", 0, -12)
+  r.Price:SetJustifyH("RIGHT")
+  slot:SetScript("OnEnter", function(self)
+    if not r.itemID then return end
+    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+    GameTooltip:SetItemByID(r.itemID)
+    GameTooltip:Show()
+  end)
+  slot:SetScript("OnLeave", function() GameTooltip:Hide() end)
+  slot:SetScript("OnClick", function() if r.itemID and ns.ItemDetail then ns.ItemDetail.AltClick(r.itemID) end end)
+  return r
+end
+
+-- The card in the profession window's look: icon and name, how it is learned where Blizzard
+-- shows the description, "Reagenzien:" with slots and prices, then the summary rows the
+-- profession window gets from this addon (Herstellkosten, Erlös, Nachfrage, line, Gewinn).
+local SUMMARY = { "Herstellkosten", "Erlös", "Nachfrage", "Gewinn" }
 local function productCard(c)
-  local NW = ns.NativeWindow
-  local v = NW.CardHead(c)
-  -- how the recipe is learned (unlearned ones), two lines under the head
+  local v = ns.NativeWindow.CardHead(c)
+  -- "Erlernen:" with one line per way to learn it (unlearned recipes), where Blizzard shows the
+  -- description
+  v.LearnHead = c:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+  v.LearnHead:SetPoint("TOPLEFT", v.Icon, "BOTTOMLEFT", 0, -16)
+  v.LearnHead:SetText("Erlernen:")
   v.Source = c:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-  v.Source:SetPoint("TOPLEFT", v.Icon, "BOTTOMLEFT", 0, -14)
-  v.Source:SetPoint("RIGHT", c, "RIGHT", -24, 0)
+  v.Source:SetPoint("TOPLEFT", v.LearnHead, "BOTTOMLEFT", 0, -5)
+  v.Source:SetPoint("RIGHT", c, "RIGHT", -RIGHT_EDGE, 0)
   v.Source:SetJustifyH("LEFT")
-  v.Source:SetMaxLines(3)
+  v.Source:SetSpacing(3)
+  v.Source:SetMaxLines(8)
   v.Head:SetText("Reagenzien:")
   v.reagents = {}
-  for i = 1, MAX_REAGENTS do
-    local r = {}
-    r.Icon = c:CreateTexture(nil, "ARTWORK")
-    r.Icon:SetSize(18, 18)
-    r.Icon:SetPoint("TOPLEFT", v.Head, "BOTTOMLEFT", 0, -6 - (i - 1) * 22)
-    r.Name = c:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    r.Name:SetPoint("LEFT", r.Icon, "RIGHT", 6, 0)
-    r.Name:SetJustifyH("LEFT")
-    r.Name:SetWordWrap(false)
-    r.Price = c:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    r.Price:SetPoint("RIGHT", c, "RIGHT", -24, 0)
-    r.Price:SetPoint("TOP", r.Icon, "TOP", 0, -3)
-    r.Price:SetJustifyH("RIGHT")
-    r.Name:SetPoint("RIGHT", r.Price, "LEFT", -8, 0)
-    local hit = CreateFrame("Button", nil, c)
-    hit:SetAllPoints(r.Icon)
-    hit:SetScript("OnEnter", function(self)
-      if not r.itemID then return end
-      GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-      GameTooltip:SetItemByID(r.itemID)
-      GameTooltip:Show()
-    end)
-    hit:SetScript("OnLeave", function() GameTooltip:Hide() end)
-    hit:SetScript("OnClick", function() if r.itemID and ns.ItemDetail then ns.ItemDetail.AltClick(r.itemID) end end)
-    r.Hit = hit
-    v.reagents[i] = r
+  for i = 1, MAX_REAGENTS do v.reagents[i] = reagentSlot(c) end
+  v.rows = {}
+  for i, text in ipairs(SUMMARY) do
+    local l = c:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    l:SetText(text)
+    local val = c:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    val:SetJustifyH("RIGHT")
+    val:SetPoint("RIGHT", c, "RIGHT", -RIGHT_EDGE, 0)
+    val:SetPoint("TOP", l, "TOP", 0, 0)
+    v.rows[i] = { label = l, value = val }
   end
-  v.FigHead = c:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-  v.FigHead:SetText("Kennzahlen:")
-  v.Figures = NW.Figures(c, v.FigHead, { "Herstellkosten", "Preis jetzt", "Erlös (nach Gebühr)", "Nachfrage", "Attraktiv", "Gewinn" })
-  local function widths(fr) v.Figures.SetWidth(math.max(100, (fr:GetWidth() or 340) - 46)) end
-  widths(c)
-  c:HookScript("OnSizeChanged", widths)
+  v.Line = c:CreateTexture(nil, "ARTWORK")
+  v.Line:SetColorTexture(1, 0.82, 0, 0.25)
+  v.Line:SetHeight(1)
+  v.Verdict = c:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+  v.Verdict:SetJustifyH("LEFT")
   return v
 end
 
@@ -686,28 +719,24 @@ local function showProduct(entry, c)
   local v = c.m4Product
   local e = entry and entry.e
   local shown = e ~= nil
-  for _, part in ipairs({ v.Icon, v.Ring, v.Name, v.Sub, v.Head, v.FigHead, v.Source }) do part:SetShown(shown) end
-  for i, fs in ipairs(v.Figures.values) do fs:SetShown(shown); v.Figures.labels[i]:SetShown(shown) end
-  if v.Figures.line then v.Figures.line:SetShown(shown) end
+  for _, part in ipairs({ v.Icon, v.Ring, v.Name, v.Sub, v.Head, v.LearnHead, v.Source, v.Line, v.Verdict }) do part:SetShown(shown) end
+  for _, row in ipairs(v.rows) do row.label:SetShown(shown); row.value:SetShown(shown) end
+  for _, r in ipairs(v.reagents) do r.Slot:Hide(); r.Name:Hide(); r.Price:Hide(); r.itemID = nil end
   if productsSplit and productsSplit.empty then
     productsSplit.empty:SetText(shown and "" or "Keine Rezepte für diesen Filter.")
   end
-  for _, r in ipairs(v.reagents) do r.Icon:Hide(); r.Name:Hide(); r.Price:Hide(); r.Hit:Hide(); r.itemID = nil end
   if not shown then return end
   v.Icon:SetTexture(itemIcon(e.itemID))
   v.itemID = e.itemID
   v.Name:SetText(e.recipe .. (e.produced > 1 and string.format("  |cff999999x%g|r", e.produced) or ""))
   v.Sub:SetText(e.learned and "gelernt"
     or ((e.tooHigh and "|cffff6b6b" or "|cffffb547") .. "nicht gelernt" .. (e.learn and (": " .. e.learn:gsub("^Quelle %? ", "")) or "") .. "|r"))
-  local src = not e.learned and sourceText(e.pid, e.spell) or nil
-  v.Source:SetText(src and ("|cffffd100Erlernen:|r " .. src) or "")
+  local src = not e.learned and sourceLines(e.pid, e.spell) or nil
+  v.Source:SetText(src and table.concat(src, "\n") or "")
   v.Source:SetShown(src ~= nil)
+  v.LearnHead:SetShown(src ~= nil)
   v.Head:ClearAllPoints()
-  if src then
-    v.Head:SetPoint("TOPLEFT", v.Source, "BOTTOMLEFT", 0, -12)
-  else
-    v.Head:SetPoint("TOPLEFT", v.Icon, "BOTTOMLEFT", 0, -20)
-  end
+  v.Head:SetPoint("TOPLEFT", src and v.Source or v.Icon, "BOTTOMLEFT", 0, src and -16 or -20)
   local last = v.Head
   for i, g in ipairs(e.reagents or {}) do
     local r = v.reagents[i]
@@ -716,23 +745,34 @@ local function showProduct(entry, c)
     local have = ns.Costs and ns.Costs.Owned and ns.Costs.Owned(g.i) or 0
     r.itemID = g.i
     r.Icon:SetTexture(itemIcon(g.i))
-    r.Name:SetText(string.format("%s%d/%d|r  %s", have >= g.n and "|cff5fd38d" or "|cffffffff", have, g.n,
+    r.Slot:ClearAllPoints()
+    r.Slot:SetPoint("TOPLEFT", last, "BOTTOMLEFT", 0, i == 1 and -8 or -6)
+    r.Name:SetText(string.format("%s%d/%d|r %s", have >= g.n and "|cffffffff" or "|cff999999", have, g.n,
       ns.ItemName(g.i) or ("#" .. g.i)))
-    r.Price:SetText(unit and (money(unit * g.n) .. (vendor and " |cff999999H|r" or "")) or "–")
-    r.Icon:Show(); r.Name:Show(); r.Price:Show(); r.Hit:Show()
-    last = r.Icon
+    r.Price:SetText(unit and (money(unit * g.n) .. "|cff999999  " .. (vendor and "H" or "AH") .. "|r") or "|cffff6b6bkein Preis|r")
+    r.Slot:Show(); r.Name:Show(); r.Price:Show()
+    last = r.Slot
   end
-  v.FigHead:ClearAllPoints()
-  v.FigHead:SetPoint("TOPLEFT", last, "BOTTOMLEFT", 0, -18)
-  local vals = {
+  local values = {
     money(e.cost),
-    e.nowPrice and (e.unsure and ("|cffffb547" .. money(e.nowPrice) .. " (unsicher)|r") or money(e.nowPrice)) or "nicht im Angebot",
-    (e.onAH and "" or "|cff999999Händler |r") .. money(e.value),
+    money(e.value) .. (e.onAH and "" or "|cff999999  H|r"),
     ns.Item.DemandText(e) or "–",
-    e.attractive and "|cff5fd38dja|r" or ("|cff999999nein – " .. (e.why or "?") .. "|r"),
     signedMoney(e.profit),
   }
-  for i, fs in ipairs(v.Figures.values) do fs:SetText(vals[i] or "–") end
+  for i, row in ipairs(v.rows) do
+    row.label:ClearAllPoints()
+    local gap = i == #v.rows and 7 or 0 -- room for the line before "Gewinn"
+    row.label:SetPoint("TOPLEFT", last, "BOTTOMLEFT", 0, -14 - (i - 1) * 14 - gap)
+    row.value:SetText(values[i])
+  end
+  local gewinn = v.rows[#v.rows].label
+  v.Line:ClearAllPoints()
+  v.Line:SetPoint("BOTTOMLEFT", gewinn, "TOPLEFT", 0, 3)
+  v.Line:SetPoint("RIGHT", c, "RIGHT", -RIGHT_EDGE + 2, 0)
+  v.Verdict:ClearAllPoints()
+  v.Verdict:SetPoint("TOPLEFT", gewinn, "BOTTOMLEFT", 0, -10)
+  v.Verdict:SetText(e.attractive and "|cff5fd38dattraktiv: Gewinn und Nachfrage stimmen|r"
+    or ("nicht attraktiv: " .. (e.why or "?")))
 end
 
 local function refreshProducts()
@@ -778,7 +818,7 @@ local function openProfessionID()
 end
 
 Products.Entries = productEntries -- for tests
-Products.SourceText = sourceText
+Products.SourceLines = sourceLines
 
 function Products.Show(pid)
   if not productsWindow then createProducts() end

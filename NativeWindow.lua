@@ -13,7 +13,8 @@
 --     left Blizzard's recipe list (search box, filter, category and recipe rows), right the recipe
 --     card (border and background of the profession window's form)
 --     entry fields: value (right in the row), marker ("down": red arrow, "coin": gold coin left
---     of the name), color ({ r, g, b } of the name), itemID (tooltip, Alt+click market data);
+--     of the name), color ({ r, g, b } of the name), locked (Blizzard's lock icon), itemID
+--     (tooltip, Alt+click market data);
 --     opts.filter = { options = { { key, label }… }, get(), set(key) }: Blizzard's filter button
 --   ns.NativeWindow.CardHead(layer) -> { Icon, Name, Sub, Head, itemID }: the card's head (icon in
 --     a ring, name, a small line, "Kennzahlen:"); the icon shows the item tooltip of .itemID
@@ -447,6 +448,9 @@ function NW.Split(page, opts)
             local part = rawget(button, key)
             if type(part) == "table" and part.Hide then part:Hide() end
           end
+          -- data.locked: Blizzard's lock of the recipe list (a recipe not learned yet)
+          local lock = rawget(button, "LockedIcon")
+          if data.locked and type(lock) == "table" and lock.Show then lock:Show() end
           local selected = rawget(button, "SelectedOverlay")
           if type(selected) == "table" then selected:SetShown(split.selected == data) end
           button:SetScript("OnEnter", function(b)
