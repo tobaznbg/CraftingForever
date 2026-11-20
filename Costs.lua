@@ -247,12 +247,28 @@ end
 -- buying that many (Costs.BuyMany), and the path is planned again (up to PLAN_ROUNDS).
 -- Returns { segments, total, reached, skipped, need, made, scarce = { [itemID] = true },
 --           missing (Planner.Missing at the end of the way) }.
+-- Material the household already has (bags and bank of every character, ns.ShoppingList.Holdings)
+-- costs what selling it would bring (decided 20 Nov 2026: stock is used up first, but is not
+-- free); what is needed beyond the stock is bought. The first round assumes the stock covers
+-- it, later rounds mix both by the counts of the plan.
 Costs.PLAN_ROUNDS = 4
+local function stockValue(itemID, buyPrice)
+  local sell = ns.Item and ns.Item.SellNet and ns.Item.SellNet(ns.Item(itemID)) or 0
+  if not buyPrice then return sell end
+  return math.min(sell, buyPrice)
+end
+local function holdings(itemID)
+  local H = ns.ShoppingList and ns.ShoppingList.Holdings
+  return H and (H(itemID)) or 0
+end
+
 function Costs.Plan(prof, from, to, ahCap, way)
   local prices, scarce = {}, {}
   local function buy(itemID)
     if prices[itemID] then return prices[itemID] end
-    return (Costs.Buy(itemID))
+    local base = Costs.Buy(itemID)
+    if holdings(itemID) > 0 then return stockValue(itemID, base) end
+    return base
   end
   local result
   for _ = 1, Costs.PLAN_ROUNDS do
@@ -264,11 +280,19 @@ function Costs.Plan(prof, from, to, ahCap, way)
       need = need, made = made, scarce = scarce }
     local changed = false
     for itemID, count in pairs(need) do
-      local unit, short = Costs.BuyMany(itemID, count)
+      local have = math.min(holdings(itemID), count)
+      local rest = count - have
+      local unit, short = Costs.BuyMany(itemID, math.max(1, rest))
+      if short and rest > 0 then scarce[itemID] = true end
       local current = buy(itemID)
-      if short then scarce[itemID] = true end
-      if unit and current and unit > current * 1.02 then
-        prices[itemID] = unit
+      local price = unit
+      if have > 0 then
+        -- stock at its sale value, the rest at the price of buying that many
+        local stock = stockValue(itemID, Costs.Buy(itemID))
+        price = (have * stock + rest * (unit or stock)) / count
+      end
+      if price and current and math.abs(price - current) > current * 0.02 + 1 then
+        prices[itemID] = price
         changed = true
       end
     end

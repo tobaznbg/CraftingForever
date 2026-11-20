@@ -392,6 +392,24 @@ end
 Planner.SWITCH_BASE = 1000
 Planner.SWITCH_CRAFTS = 3
 Planner.MIN_SEGMENT = 5
+-- Time counts a little (decided 20 Nov 2026): every expected craft is charged CRAFT_CHARGE
+-- copper in the choice, so a path with far fewer crafts wins when it costs only a bit more.
+-- Steering only, like the switch charge; costs shown are the real ones.
+Planner.CRAFT_CHARGE = 100
+-- Buying for yellow/green points (the chance scatters a lot): BUFFER more crafts' material
+-- (decided 20 Nov 2026). Orange points are exact. Costs stay the expected ones.
+Planner.BUFFER = 0.15
+
+-- Crafts to buy material for: the orange points exactly, the rest with the buffer.
+function Planner.BufferedCrafts(seg)
+  local colors = seg.recipe and seg.recipe.colors
+  if not colors then return seg.crafts end
+  local orange = 0
+  for s = seg.from, seg.to - 1 do
+    if Planner.Chance(colors, s) >= 1 then orange = orange + 1 end
+  end
+  return orange + math.max(0, seg.crafts - orange) * (1 + Planner.BUFFER)
+end
 
 -- Cheapest path from skill `from` to `to`.
 --   ahCap  how many units of one product can be sold at the auction price;
@@ -431,7 +449,7 @@ function Planner.Path(candidates, from, to, ahCap, opts)
             if switch then
               local charge = Planner.SWITCH_BASE + Planner.SWITCH_CRAFTS * math.max(0, c.cost)
               if t - s < Planner.MIN_SEGMENT and t < to then charge = charge * 3 end
-              total = total + charge
+              total = total + charge + Planner.CRAFT_CHARGE * crafts
             end
             if best[t] == nil or total < best[t] then
               best[t] = total
@@ -512,11 +530,12 @@ function Planner.Profit(candidates, minProfit, minMargin)
   return rows
 end
 
--- Total reagents to buy/bring for a path: { [itemID] = count }, and the intermediate
+-- Total reagents to buy/bring for a path (buffer: with Planner.BUFFER on yellow/green points):
+-- { [itemID] = count }, and the intermediate
 -- products made on the way: { [itemID] = { recipe = maker candidate, count, crafts } }.
 -- Products of earlier segments are used up first (Feueröl from the oil segment goes into
 -- the later elixirs); made reagents are expanded into their own material.
-function Planner.Shopping(segments)
+function Planner.Shopping(segments, buffer)
   local need, made, stock = {}, {}, {}
   local function add(c, crafts, depth)
     for _, reagent in ipairs(c.reagents or {}) do
@@ -543,7 +562,8 @@ function Planner.Shopping(segments)
     end
   end
   for _, seg in ipairs(segments) do
-    local crafts = math.ceil(seg.crafts)
+    -- buffer: material for the buffered crafts (Planner.BufferedCrafts), for buying
+    local crafts = math.ceil(buffer and Planner.BufferedCrafts(seg) or seg.crafts)
     add(seg.recipe, crafts, 0)
     local out = seg.recipe.out
     if out then stock[out] = (stock[out] or 0) + math.floor(crafts * (seg.recipe.qty or 1)) end

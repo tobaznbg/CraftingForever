@@ -20,7 +20,6 @@ ns.PlanWindow = Plan
 
 local MAX_ROWS = 12
 local RIGHT_EDGE = 24
-local AH_CAP = 3 -- units per product sold at auction when MainUI's planner is set to "AH-Verkauf"
 local GREEN, RED, MUTED, ORANGE = "|cff5fd38d", "|cffff6b6b", "|cff999999", "|cffffb547"
 local DONE = { 0.5, 0.5, 0.5 } -- steps below the own skill (plan from 1)
 local PLAN_ICON = "Interface\\Icons\\INV_Misc_Book_09"
@@ -67,11 +66,8 @@ local function ui()
 end
 local function startKey() return ui().planStart == "one" and "one" or "rank" end
 local function wayKey() return ui().planWay == "standard" and "standard" or "dynamic" end
--- MainUI's planner setting "AH-Verkauf (bis 3)" / "Händler (sicher)": both planners agree
-local function ahCap()
-  local s = ns.db.mainui and ns.db.mainui.planner
-  return s and s.ah and AH_CAP or 0
-end
+-- Sales count at the merchant's price only (decided 20 Nov 2026: no auction income planned in)
+local function ahCap() return 0 end
 
 -- Section (1..4) of a skill level and of a rank name.
 local function sectionOf(skill)
@@ -85,7 +81,9 @@ end
 
 -- Shopping-list count of a segment: the items its expected crafts make.
 local function segmentItems(seg)
-  return math.ceil(math.ceil(seg.crafts) * (seg.recipe.qty or 1) - 0.001)
+  -- material is bought with the buffer on yellow/green points (Planner.BufferedCrafts)
+  local crafts = ns.Planner.BufferedCrafts and ns.Planner.BufferedCrafts(seg) or seg.crafts
+  return math.ceil(math.ceil(crafts) * (seg.recipe.qty or 1) - 0.001)
 end
 
 -- The plan ----------------------------------------------------------------------------------
@@ -177,7 +175,8 @@ end
 local function overview(st)
   if not st.overview then
     local r = st.result
-    local lines = materialLines(r.need, r.made, r.scarce)
+    local need, made = ns.Planner.Shopping(r.segments, true) -- with the buffer, for buying
+    local lines = materialLines(need, made, r.scarce)
     st.overview = { lines = lines, balance = balance(lines, r.segments) }
   end
   return st.overview
@@ -626,12 +625,14 @@ local function showStep(v, st, seg, section)
   local crafts = math.ceil(seg.crafts)
   local icon = itemIcon(c.out) or (GetSpellTexture and GetSpellTexture(c.id)) or PLAN_ICON
   local sub = string.format("Skill %d → %d · ~%d× herstellen", seg.from, seg.to, crafts)
+  local buffered = math.ceil(ns.Planner.BufferedCrafts(seg))
+  if buffered > crafts then sub = sub .. string.format(" · Material für %d×", buffered) end
   if (c.qty or 1) > 1 then sub = sub .. string.format(" (ergibt ~%d)", segmentItems(seg)) end
   setHead(v, icon, c.out, qualityName(c.out, c.name or "?"), sub)
   local anchor, gap = v.Icon, -20
   local info = not c.learned and learnLines(st, c) or nil
   if info then anchor, gap = setInfo(v, "Erlernen:", info) end
-  local need, made = ns.Planner.Shopping({ seg })
+  local need, made = ns.Planner.Shopping({ seg }, true) -- with the buffer, for buying
   local lines = materialLines(need, made, st.result.scarce)
   v.Head:SetText("Reagenzien:")
   local last = setTable(v, anchor, gap, lines, math.max(4, MAX_ROWS - (info and #info + 1 or 0)))
