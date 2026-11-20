@@ -554,22 +554,15 @@ local function productEntries(pid)
     return { key = tostring(e.spell or e.itemID), name = e.recipe, icon = itemIcon(e.itemID), itemID = e.itemID,
       marker = (e.profit > 0 and e.onAH) and "coin" or nil, locked = not e.learned, e = e }
   end
-  for _, e in ipairs(list) do e.attractive, e.why, e.rank = ns.CraftAttractive(e) end
-  if key == "attractive" or key == "profit" then
-    local picked = {}
-    for _, e in ipairs(list) do
-      if (key == "attractive" and e.attractive) or (key == "profit" and e.profit > 0 and e.onAH) then picked[#picked + 1] = e end
+  -- the filter only leaves recipes out; the game's categories stay as in "Alle Rezepte"
+  local kept = {}
+  for _, e in ipairs(list) do
+    e.attractive, e.why, e.rank = ns.CraftAttractive(e)
+    if (key ~= "attractive" or e.attractive) and (key ~= "profit" or (e.profit > 0 and e.onAH)) then
+      kept[#kept + 1] = e
     end
-    table.sort(picked, function(a, b)
-      local x, y = a.rank or a.profit, b.rank or b.profit
-      if key == "profit" then x, y = a.profit, b.profit end
-      if x ~= y then return x > y end
-      return (a.recipe or "") < (b.recipe or "")
-    end)
-    out[1] = { key = "h:" .. key, header = key == "attractive" and "Attraktiv – Gewinn × Nachfrage" or "Mit Gewinn" }
-    for _, e in ipairs(picked) do out[#out + 1] = entry(e) end
-    return out
   end
+  list = kept
   local groups, order = {}, {}
   for _, e in ipairs(list) do
     local c = category(e.cat)
