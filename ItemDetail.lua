@@ -897,7 +897,6 @@ render = function()
 
   -- 6. Recipe items (at the end, below the market): what the recipe teaches, what making it costs and brings (Crafting.lua).
   local teach = ns.RecipeTeachInfo and ns.RecipeTeachInfo(itemID)
-  if not teach and ns.Materials then ns.Materials.Hide() end
   if teach then
     local t = teach.teaches
     local function m(c) return money(math.floor(c + 0.5)) end
@@ -916,11 +915,6 @@ render = function()
         demand = demand .. "  ·  mind. " .. count(p.certain) .. " / Tag verkauft"
       end
       line("Nachfrage (Produkt)", demand or "–")
-    end
-    local list = t.reagents or {}
-    -- The materials open in their own window right of this one (Materials.lua).
-    if ns.Materials then
-      if #list > 0 then ns.Materials.Show(itemID, t, frame, skin) else ns.Materials.Hide() end
     end
   end
 
@@ -1006,10 +1000,7 @@ local function create()
   end
   -- ESC closes the window (Blizzard's CloseSpecialWindows).
   if UISpecialFrames then tinsert(UISpecialFrames, FRAME_NAME) end
-  frame:SetScript("OnHide", function()
-    origin = nil
-    if ns.Materials then ns.Materials.Hide() end
-  end)
+  frame:SetScript("OnHide", function() origin = nil end)
   local close = Style.Close(frame, function() Detail.Hide() end)
   close:SetPoint("TOPRIGHT", -4, -4)
   frame.close = close

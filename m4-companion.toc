@@ -37,7 +37,6 @@ Selling.lua
 Data_RecipeWatch.lua
 Sniper.lua
 ItemDetail.lua
-Materials.lua
 Ledger.lua
 Sync.lua
 Profit.lua
