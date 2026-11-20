@@ -85,7 +85,7 @@ local function scanRecipe(rid)
     local r = scan.recipes[rid]
     if r then return r, scan end
   end
-  return skillRecipe(rid)
+  return skillRecipe(rid) or (ns.RecipeFromSchematic and ns.RecipeFromSchematic(rid))
 end
 
 -- The learned recipe that makes an item (an intermediate), or nil.
@@ -192,7 +192,7 @@ function List.Plan(list)
   end
   local plan = { lines = lines, cost = 0, toBuy = 0, revenue = 0, sellable = true, missing = 0 }
   for _, w in ipairs(list) do
-    local r = scanRecipe(w.rid)
+    local r = scanRecipe(w.rid) or (w.r and { r = w.r, qmin = w.q, qmax = w.q, out = w.out })
     if r and r.r then
       local crafts = math.ceil((w.n or 1) / made(r))
       for _, g in ipairs(r.r) do
@@ -231,7 +231,12 @@ function List.Add(rid, n)
       return w
     end
   end
-  local w = { rid = rid, out = r.out, name = r.name or ns.ItemName(r.out), pid = scan.professionID, n = n }
+  local w = { rid = rid, out = r.out, name = r.name or ns.ItemName(r.out), pid = scan and scan.professionID, n = n }
+  -- a recipe no household scan has (another player's window): keep its reagents with the wish
+  if not scan then
+    w.r, w.q = {}, made(r)
+    for _, g in ipairs(r.r or {}) do w.r[#w.r + 1] = { i = g.i, n = g.n } end
+  end
   table.insert(wishes(), w)
   return w
 end

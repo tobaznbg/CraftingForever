@@ -465,12 +465,31 @@ end)
 local RIGHT_EDGE = 24 -- prices and summary values end this far from the form's right edge
 
 -- Economics of one recipe (spell id) of the character's scans; nil without a product or price.
+-- A recipe from the game's schematic (any recipe id, also one the character does not know, e.g.
+-- in another player's profession window): { r = { { i, n }… }, out, qmin, qmax, name } or nil.
+function ns.RecipeFromSchematic(recipeID)
+  local api = C_TradeSkillUI
+  if not (recipeID and api and api.GetRecipeSchematic) then return nil end
+  local ok, s = pcall(api.GetRecipeSchematic, recipeID, false)
+  if not ok or type(s) ~= "table" or not s.outputItemID then return nil end
+  local r = {}
+  for _, slot in ipairs(s.reagentSlotSchematics or {}) do
+    local reagent = slot.reagents and slot.reagents[1]
+    if reagent and reagent.itemID and (slot.quantityRequired or 0) > 0 and slot.reagentType ~= 0 then
+      r[#r + 1] = { i = reagent.itemID, n = slot.quantityRequired }
+    end
+  end
+  return { r = r, out = s.outputItemID, qmin = s.quantityMin or 1, qmax = s.quantityMax or s.quantityMin or 1, name = s.name }
+end
+
 function ns.RecipeEconomics(recipeID)
   local prefix = ns.CharKey() .. ":"
   local r
   for key, scan in pairs(ns.db and ns.db.recipes or {}) do
     if key:sub(1, #prefix) == prefix and scan.recipes and scan.recipes[recipeID] then r = scan.recipes[recipeID] end
   end
+  -- not in the own scans (another player's window): the game's schematic
+  if not (r and r.out) then r = ns.RecipeFromSchematic(recipeID) end
   if not (r and r.out) then return nil end
   local cost, reagents = 0, {}
   for _, g in ipairs(r.r or {}) do
@@ -761,6 +780,12 @@ local function productEntries(pid)
   local function entry(e)
     return { key = tostring(e.spell or e.itemID), name = e.recipe, icon = itemIcon(e.itemID), itemID = e.itemID,
       coins = e.onAH and ns.CoinCount(e.profit) or 0, coinsHot = ns.CoinHot(e.demand), locked = not e.learned, e = e }
+  end
+  -- another player's profession window: what they know is not known here, so nothing is
+  -- shown as locked
+  local linked = C_TradeSkillUI and C_TradeSkillUI.IsTradeSkillLinked and C_TradeSkillUI.IsTradeSkillLinked()
+  if linked then
+    for _, e in ipairs(list) do e.learned, e.tooHigh = true, false end
   end
   -- the filter only leaves recipes out; the game's categories stay as in "Alle Rezepte"
   local kept = {}
