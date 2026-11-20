@@ -5,6 +5,7 @@ local ADDON, ns = ...
 local function money(c) return c and ns.FormatMoney(c, true) or "–" end
 
 ns.AHTable.Add({
+  ahTab = false, -- only in the main window (the AH tabs are retired, 20 Nov 2026)
   id = "Invest", label = "Anlage", title = "Anlage – Klassiker unter Wert",
   sort = "upside",
   columns = {

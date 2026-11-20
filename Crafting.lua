@@ -404,6 +404,7 @@ local function detail(e, count)
 end
 
 ns.AHTable.Add({
+  ahTab = false, -- only in the main window (the AH tabs are retired, 20 Nov 2026)
   id = "Crafting", label = "Crafting", title = "Crafting",
   chooser = professions,
   sort = "score",          -- learned first, then learnable now, then later; each by profit

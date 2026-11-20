@@ -316,7 +316,12 @@ end
 
 -- Button on the auction house window ----------------------------------------------
 
+-- The button is retired (20 Nov 2026): the scan starts by itself when the auction house opens
+-- (every 15 min at most) and with /m4 scan. Scan.BUTTON = true brings it back.
+Scan.BUTTON = false
+
 local function createButton()
+  if not Scan.BUTTON then return end
   local parent = AuctionHouseFrame or AuctionFrame
   if not parent or button then return end
   button = ns.Style.Button(parent, "CF Scan", 110, 24, nil, ns.Style.C.accent)

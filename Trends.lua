@@ -10,6 +10,7 @@ local function pct(v)
 end
 
 ns.AHTable.Add({
+  ahTab = false, -- only in the main window (the AH tabs are retired, 20 Nov 2026)
   id = "Trends", label = "Trends", title = "Trends – steigende und fallende Preise",
   -- Most demanded first: in thin markets one odd listing makes a "trend" of +5000 %.
   sort = "demand",

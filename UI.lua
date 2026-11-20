@@ -135,7 +135,7 @@ function UI.Refresh()
   local lines = {}
 
   if not (ns.AuctionScan and ns.AuctionScan.HasData()) then
-    table.insert(lines, "|cffffaa00Noch kein AH-Scan – am Auktionshaus \"CF Scan\" klicken|r")
+    table.insert(lines, "|cffffaa00Noch kein AH-Scan – Auktionshaus öffnen (scannt von selbst) oder /m4 scan|r")
   end
 
   characterLines(lines)

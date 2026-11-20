@@ -6,6 +6,7 @@ local ADDON, ns = ...
 local function money(c) return c and ns.FormatMoney(c, true) or "–" end
 
 ns.AHTable.Add({
+  ahTab = false, -- only in the main window (the AH tabs are retired, 20 Nov 2026)
   id = "Vendor", label = "Händler", title = "Händler – im AH billiger als beim Händler",
   sort = "total",
   onOpen = function() if ns.AuctionScan then ns.AuctionScan.EnsureFresh() end end,

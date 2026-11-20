@@ -385,7 +385,7 @@ local function showPatterns()
   addBlank()
   addText(string.format("%s%d weitere Muster ohne AH-Preis. Preise kommen aus dem eigenen AH-Scan:|r",
     GREY, unpriced))
-  addText(GREY .. "am Auktionshaus \"CF Scan\" klicken (alle 15 Minuten möglich).|r")
+  addText(GREY .. "Auktionshaus öffnen, es scannt von selbst (alle 15 Minuten), oder /m4 scan.|r")
 end
 
 local SIGNAL_COLORS = { green = GREEN, yellow = GOLD, orange = ORANGE, grey = GREY }
@@ -394,7 +394,7 @@ local function showFarming()
   title:SetText("Farmen  –  was bringt dein AH")
   local updated, hours, ownT, minHours = ns.Farming.DataInfo()
   if not updated and not ownT then
-    addText("Noch keine AH-Daten. Am Auktionshaus \"CF Scan\" klicken oder /cf scan.")
+    addText("Noch keine AH-Daten. Auktionshaus öffnen (scannt von selbst) oder /m4 scan.")
     return
   end
   addText(GREY .. string.format("Preise: %s. Absatz: %s.|r",
