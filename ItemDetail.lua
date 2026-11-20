@@ -30,6 +30,8 @@ local docked   -- anchor frame while docked at the auction house, nil as a windo
 local lines, sections = {}, {}
 local chart
 local live     -- { itemID, state = "searching"|"done"|"failed", offers, t } of the search on opening
+local liveKey -- full item key for the live search (suffix items), nil for plain items
+local liveName -- the variant's name ("Zornprankengürtel des arkanen Zorns"), nil: the item's
 local skin = "blizzard" -- "blizzard" (native look, default) or "m4" (own flat look)
 local GOLD_RGB = { 1, 0.82, 0 }
 local MEDIAN_WINDOW = 24 * 3600 -- the chart's median line: median of the hourly cheapest of the last 24 h
@@ -1052,8 +1054,6 @@ local function keyFromLink(link)
 end
 Detail.KeyFromLink = keyFromLink
 
-local liveKey -- full item key for the live search (suffix items), nil for plain items
-local liveName -- the variant's name ("Zornprankengürtel des arkanen Zorns"), nil: the item's
 
 local function searchLive(id)
   local AHSearch = ns.AHSearch
