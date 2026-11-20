@@ -453,3 +453,180 @@ ns.OnReady(function()
     ns.AuctionScan.OnDone(function() ns.AHTable.Rebuild() end)
   end
 end)
+
+-- Blizzard's profession window (minimal additions, nothing of Blizzard's changed) ------------
+-- Recipe list: a small gold coin right of each recipe name that pays (making it and selling the
+-- product brings more than the material costs), a red one when it does not. Selected recipe:
+-- the price next to each reagent and a three line summary under the reagents. Figures from the
+-- own profession scan (ns.db.recipes) and ns.Item (BuyCost, SellNet) - no own price logic.
+
+local GOLD_COIN = "Interface\\MoneyFrame\\UI-GoldIcon"
+
+-- Economics of one recipe (spell id) of the character's scans; nil without a product or price.
+function ns.RecipeEconomics(recipeID)
+  local prefix = ns.CharKey() .. ":"
+  local r
+  for key, scan in pairs(ns.db and ns.db.recipes or {}) do
+    if key:sub(1, #prefix) == prefix and scan.recipes and scan.recipes[recipeID] then r = scan.recipes[recipeID] end
+  end
+  if not (r and r.out) then return nil end
+  local cost, reagents = 0, {}
+  for _, g in ipairs(r.r or {}) do
+    if g.i then
+      local unit, vendor = ns.Item.BuyCost(ns.Item(g.i))
+      reagents[g.i] = { unit = unit, vendor = vendor, n = g.n or 1 }
+      if not unit then return { reagents = reagents, out = r.out } end
+      cost = cost + unit * (g.n or 1)
+    end
+  end
+  local qty = ((r.qmin or 1) + (r.qmax or r.qmin or 1)) / 2
+  local unitValue, onAH = ns.Item.SellNet(ns.Item(r.out))
+  local value = unitValue * qty
+  return { cost = cost, value = value, profit = value - cost, onAH = onAH, reagents = reagents, out = r.out }
+end
+
+local function profTrace(key, value)
+  if ns.db then ns.db.professionsTrace = ns.db.professionsTrace or {}; ns.db.professionsTrace[key] = value end
+end
+
+local function recipeIDOf(row)
+  local ok, node = pcall(function() return row:GetElementData() end)
+  if not ok or type(node) ~= "table" then return nil end
+  local data = node.GetData and node:GetData() or node
+  local info = type(data) == "table" and data.recipeInfo
+  return type(info) == "table" and info.recipeID or nil
+end
+
+local function updateList(list)
+  local box = rawget(list, "ScrollBox")
+  if type(box) ~= "table" or not box.ForEachFrame then return end
+  local n = 0
+  box:ForEachFrame(function(row)
+    local id = recipeIDOf(row)
+    local label = rawget(row, "Label")
+    if not (id and type(label) == "table") then
+      if row.m4Coin then row.m4Coin:Hide() end
+      return
+    end
+    n = n + 1
+    local e = ns.RecipeEconomics(id)
+    if not row.m4Coin then
+      row.m4Coin = row:CreateTexture(nil, "OVERLAY")
+      row.m4Coin:SetSize(11, 11)
+      row.m4Coin:SetTexture(GOLD_COIN)
+    end
+    local coin = row.m4Coin
+    if e and e.profit then
+      coin:ClearAllPoints()
+      coin:SetPoint("LEFT", label, "LEFT", math.min((label:GetStringWidth() or 0) + 4, (label:GetWidth() or 200) - 2), 0)
+      if e.profit > 0 and e.onAH then
+        coin:SetDesaturated(false); coin:SetVertexColor(1, 1, 1)
+      else
+        coin:SetDesaturated(true); coin:SetVertexColor(1, 0.25, 0.25)
+      end
+      coin:Show()
+    else
+      coin:Hide()
+    end
+  end)
+  profTrace("listRows", n)
+end
+
+-- The reagent slots of the schematic form (frames that carry a reagent schematic).
+local function reagentSlots(form)
+  local out = {}
+  local slots = rawget(form, "reagentSlots")
+  if type(slots) == "table" then
+    for _, list in pairs(slots) do
+      if type(list) == "table" then
+        for _, slot in ipairs(list) do out[#out + 1] = slot end
+      end
+    end
+  end
+  return out
+end
+
+local function slotItem(slot)
+  local s = rawget(slot, "reagentSlotSchematic")
+  local reagent = type(s) == "table" and s.reagents and s.reagents[1]
+  return reagent and reagent.itemID, s and s.quantityRequired
+end
+
+local function updateForm(form)
+  local info = rawget(form, "currentRecipeInfo")
+  if (type(info) ~= "table") and form.GetRecipeInfo then
+    local ok, v = pcall(form.GetRecipeInfo, form)
+    info = ok and v or nil
+  end
+  local id = type(info) == "table" and info.recipeID or nil
+  local e = id and ns.RecipeEconomics(id)
+  local fmt = function(c) return ns.FormatMoney(c, true) end
+  local slots = reagentSlots(form)
+  profTrace("slots", #slots)
+  local lowest
+  for _, slot in ipairs(slots) do
+    local itemID, need = slotItem(slot)
+    if not slot.m4Price then
+      slot.m4Price = slot:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+      slot.m4Price:SetPoint("TOPRIGHT", slot, "TOPRIGHT", -2, -2)
+      slot.m4Price:SetJustifyH("RIGHT")
+    end
+    local r = e and e.reagents and itemID and e.reagents[itemID]
+    if itemID and r and r.unit then
+      slot.m4Price:SetText(fmt(r.unit * (need or r.n)) .. (r.vendor and "|cff999999 Händler|r" or ""))
+    elseif itemID then
+      slot.m4Price:SetText("|cffff6b6bkein Preis|r")
+    else
+      slot.m4Price:SetText("")
+    end
+    if slot:IsShown() then
+      local b = slot:GetBottom()
+      if b and (not lowest or b < lowest:GetBottom()) then lowest = slot end
+    end
+  end
+  if not form.m4Summary then
+    form.m4Summary = form:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    form.m4Summary:SetJustifyH("LEFT")
+  end
+  local sum = form.m4Summary
+  sum:ClearAllPoints()
+  if lowest then sum:SetPoint("TOPLEFT", lowest, "BOTTOMLEFT", 0, -10) else sum:SetPoint("BOTTOMLEFT", form, "BOTTOMLEFT", 20, 60) end
+  if e and e.cost and e.value then
+    local p = e.profit
+    sum:SetText("|cffffd100Herstellkosten|r  " .. fmt(e.cost)
+      .. "\n|cffffd100Erlös|r  " .. fmt(e.value) .. (e.onAH and "" or "|cff999999 (Händler)|r")
+      .. "\n|cffffd100Gewinn|r  " .. (p >= 0 and ("|cff5fd38d+" .. fmt(p)) or ("|cffff6b6b-" .. fmt(-p))) .. "|r")
+  elseif e then
+    sum:SetText("|cff999999Für ein Material fehlt der Preis.|r")
+  else
+    sum:SetText("")
+  end
+end
+
+local function attachProfessions()
+  local pf = rawget(_G, "ProfessionsFrame")
+  local page = type(pf) == "table" and rawget(pf, "CraftingPage")
+  if type(page) ~= "table" or page.m4Info then
+    profTrace("frame", type(pf) == "table" and (type(page) == "table" and "page" or "no page") or "no ProfessionsFrame")
+    return
+  end
+  local list, form = rawget(page, "RecipeList"), rawget(page, "SchematicForm")
+  profTrace("frame", "list=" .. type(list) .. " form=" .. type(form))
+  local layer = CreateFrame("Frame", nil, page)
+  page.m4Info = layer
+  local elapsed = 0
+  layer:SetScript("OnUpdate", function(_, dt)
+    elapsed = elapsed + (dt or 0)
+    if elapsed < 0.4 then return end
+    elapsed = 0
+    if type(list) == "table" then ns.Safe(updateList, list) end
+    if type(form) == "table" and form:IsShown() then ns.Safe(updateForm, form) end
+  end)
+end
+
+if ns.On then
+  ns.On("TRADE_SKILL_SHOW", function()
+    ns.Safe(attachProfessions)
+    if C_Timer then C_Timer.After(0.3, function() ns.Safe(attachProfessions) end) end
+  end)
+end

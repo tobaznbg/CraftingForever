@@ -892,6 +892,9 @@ local function dockAnchor()
   if sell and sell:IsShown() then return sell end
   local ah = AuctionHouseFrame
   if ah and ah.IsShown and ah:IsShown() then return ah end
+  -- the profession window (Alt+click on a recipe or reagent there)
+  local pf = rawget(_G, "ProfessionsFrame") or rawget(_G, "TradeSkillFrame")
+  if pf and pf.IsShown and pf:IsShown() then return pf end
 end
 
 -- Docks right of `anchor` (or the current AH panel), else places the own window.
@@ -899,7 +902,8 @@ place = function(anchor)
   anchor = anchor or dockAnchor()
   docked = anchor
   frame:ClearAllPoints()
-  if anchor and skin == "blizzard" and anchor == AuctionHouseFrame then
+  if anchor and skin == "blizzard" and (anchor == AuctionHouseFrame
+      or anchor == rawget(_G, "ProfessionsFrame") or anchor == rawget(_G, "TradeSkillFrame")) then
     -- right on the auction house frame's edge, same height: reads as part of it
     frame:SetPoint("TOPLEFT", anchor, "TOPRIGHT", -2, 0)
     frame:SetPoint("BOTTOMLEFT", anchor, "BOTTOMRIGHT", -2, 0)
@@ -1245,6 +1249,11 @@ if ns.On then
     end)
   end)
   -- It closes: a docked window closes with it.
+  -- The profession window closes: a window docked at it closes with it.
+  ns.On("TRADE_SKILL_CLOSE", function()
+    local pf = rawget(_G, "ProfessionsFrame") or rawget(_G, "TradeSkillFrame")
+    if docked and docked == pf then Detail.Hide() end
+  end)
   ns.On("AUCTION_HOUSE_CLOSED", function()
     if docked then Detail.Hide() end
   end)
