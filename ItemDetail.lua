@@ -151,6 +151,10 @@ local function line(label, value)
   end
   l.label:SetText(label or "")
   l.value:SetText(value or "")
+  -- the label gives way to its value (cut with "…" instead of running into it)
+  local valueW = (value and value ~= "") and (l.value:GetStringWidth() or 0) + 10 or 0
+  l.label:SetWidth(math.max(40, contentWidth() - 8 - valueW))
+  l.label:SetWordWrap(false)
   l.label:Show()
   l.value:Show()
   y = y + LINE
@@ -764,45 +768,6 @@ render = function()
     line("Treffer seit", ago(h.firstSeen or time()))
   end
 
-  -- 1b. Recipe items: what the recipe teaches, what making it costs and brings (Crafting.lua).
-  local teach = ns.RecipeTeachInfo and ns.RecipeTeachInfo(itemID)
-  if teach then
-    local t = teach.teaches
-    local function m(c) return money(math.floor(c + 0.5)) end
-    section("Rezept lehrt")
-    if t.product then
-      line("Ergibt", (ns.ItemName(t.product) or ("#" .. t.product))
-        .. (t.qty > 1 and string.format("  ×%g", t.qty) or ""))
-    else
-      line("Ergibt", (t.name or "?") .. "  " .. Style.MUTED .. "Verzauberung (kein Item)|r")
-    end
-    line("Beruf", t.profession .. (t.skill and (" ab " .. t.skill) or ""))
-    line("Dein Charakter", ns.RecipeOwnText(teach))
-    local missing = teach.missing and (ORANGE .. "kein Preis: " .. (ns.ItemName(teach.missing) or "?") .. "|r")
-    line(t.product and "Herstellkosten / Stück" or "Material", teach.cost and m(teach.cost) or missing or "–")
-    if t.product then
-      line("Verkauf netto / Stück", m(teach.value) .. (teach.onAH and "" or ("  " .. Style.MUTED .. "Händler|r")))
-      if teach.profit then
-        line("Gewinn / Stück", (teach.profit >= 0 and (GREEN .. "+") or "|cffff6b6b-") .. m(math.abs(teach.profit)) .. "|r")
-      end
-      local p = teach.product
-      local demand = ns.Item.DemandText(p)
-      if demand and p.certain and p.certain >= 1 then
-        demand = demand .. "  ·  mind. " .. count(p.certain) .. " / Tag verkauft"
-      end
-      line("Nachfrage (Produkt)", demand or "–")
-    end
-    line("Rezept selbst im AH", teach.recipeNow and money(teach.recipeNow) or (Style.MUTED .. "nicht im AH|r"))
-    local list = t.reagents or {}
-    if #list > 0 then line(Style.MUTED .. "Material je Herstellung|r", "") end
-    for i = 1, #list, 2 do
-      local id, n = list[i], list[i + 1] or 1
-      local unit = ns.Item.BuyCost(ns.Item(id))
-      line(string.format("  %g× %s", n, ns.ItemName(id) or ("#" .. id)),
-        unit and (m(unit * n) .. "  " .. Style.MUTED .. "à " .. m(unit) .. "|r") or (ORANGE .. "kein Preis|r"))
-    end
-  end
-
   -- 2. Price history: the last 48 hours hourly or the last 7 days (switch on the title row)
   local view = chartView()
   section(VIEWS[view].title)
@@ -924,6 +889,38 @@ render = function()
     section("Herstellung")
     line("Herstellkosten / Stück", money(math.floor(craft.cost + 0.5)))
     line("Rezept", craft.prof .. " · " .. craft.source)
+  end
+
+  -- 6. Recipe items (at the end, below the market): what the recipe teaches, what making it costs and brings (Crafting.lua).
+  local teach = ns.RecipeTeachInfo and ns.RecipeTeachInfo(itemID)
+  if teach then
+    local t = teach.teaches
+    local function m(c) return money(math.floor(c + 0.5)) end
+    section("Rezept lehrt")
+    line("Beruf", t.profession .. (t.skill and (" ab " .. t.skill) or ""))
+    local missing = teach.missing and (ORANGE .. "kein Preis: " .. (ns.ItemName(teach.missing) or "?") .. "|r")
+    line(t.product and "Herstellkosten / Stück" or "Material", teach.cost and m(teach.cost) or missing or "–")
+    if t.product then
+      line("Verkauf netto / Stück", m(teach.value) .. (teach.onAH and "" or ("  " .. Style.MUTED .. "Händler|r")))
+      if teach.profit then
+        line("Gewinn / Stück", (teach.profit >= 0 and (GREEN .. "+") or "|cffff6b6b-") .. m(math.abs(teach.profit)) .. "|r")
+      end
+      local p = teach.product
+      local demand = ns.Item.DemandText(p)
+      if demand and p.certain and p.certain >= 1 then
+        demand = demand .. "  ·  mind. " .. count(p.certain) .. " / Tag verkauft"
+      end
+      line("Nachfrage (Produkt)", demand or "–")
+    end
+    line("Rezept selbst im AH", teach.recipeNow and money(teach.recipeNow) or (Style.MUTED .. "nicht im AH|r"))
+    local list = t.reagents or {}
+    if #list > 0 then section("Material je Herstellung") end
+    for i = 1, #list, 2 do
+      local id, n = list[i], list[i + 1] or 1
+      local unit = ns.Item.BuyCost(ns.Item(id))
+      line(string.format("%g× %s", n, ns.ItemName(id) or ("#" .. id)),
+        unit and m(unit * n) or (ORANGE .. "kein Preis|r"))
+    end
   end
 
   for i = used + 1, #lines do lines[i].label:Hide(); lines[i].value:Hide() end
