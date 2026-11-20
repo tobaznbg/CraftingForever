@@ -12,8 +12,8 @@
 --       onSelect = function(entry, card) … end })  -> split = { list, card, SetEntries(entries) }
 --     left Blizzard's recipe list (search box, filter, category and recipe rows), right the recipe
 --     card (border and background of the profession window's form)
---     entry fields: value (right in the row), marker ("down": red arrow, "coin": gold coin left
---     of the name), color ({ r, g, b } of the name), locked (Blizzard's lock icon), itemID
+--     entry fields: value (right in the row), marker ("down": red arrow, "coin": one gold coin),
+--     coins (1..3 gold coins left of the name), color ({ r, g, b } of the name), locked (Blizzard's lock icon), itemID
 --     (tooltip, Alt+click market data);
 --     opts.filter = { options = { { key, label }… }, get(), set(key) }: Blizzard's filter button
 --   ns.NativeWindow.CardHead(layer) -> { Icon, Name, Sub, Head, itemID }: the card's head (icon in
@@ -282,6 +282,29 @@ function NW.Panel(parent, title)
 end
 
 -- Left Blizzard's recipe list, right the recipe card.
+-- 1 to 3 gold coins, slightly overlapping, the first at the anchor and the others to its left
+-- (the profession window's coin, more of them the more a recipe pays: ns.CoinCount).
+local COIN = "Interface\\MoneyFrame\\UI-GoldIcon"
+function NW.Coins(parent)
+  local st = { tex = {} }
+  for i = 1, 3 do
+    local t = parent:CreateTexture(nil, "OVERLAY", nil, 4 - i) -- the first one on top
+    t:SetSize(11, 11)
+    t:SetTexture(COIN)
+    t:Hide()
+    st.tex[i] = t
+  end
+  function st.Show(n, point, rel, relPoint, x, y)
+    for i, t in ipairs(st.tex) do
+      t:ClearAllPoints()
+      t:SetPoint(point, rel, relPoint, x - (i - 1) * 4, y)
+      t:SetShown(i <= n)
+    end
+  end
+  function st.Hide() for _, t in ipairs(st.tex) do t:Hide() end end
+  return st
+end
+
 -- The card's head: icon in a ring, name, a small line under it, "Kennzahlen:" below the icon.
 -- The icon shows the tooltip of head.itemID; Alt+click opens its market data window.
 function NW.CardHead(layer)
@@ -421,17 +444,14 @@ function NW.Split(page, opts)
             button.m4Marker:SetPoint("RIGHT", label, "LEFT", -2, -1)
           end
           button.m4Marker:SetShown(data.marker == "down")
-          -- data.marker = "coin": the gold coin of the profession window's recipe list (it pays)
-          if not button.m4Coin then
-            button.m4Coin = button:CreateTexture(nil, "OVERLAY")
-            button.m4Coin:SetSize(11, 11)
-            button.m4Coin:SetTexture("Interface\\MoneyFrame\\UI-GoldIcon")
+          -- data.coins = 1..3 (or marker "coin" = 1): gold coins left of the name, how much it pays
+          if not button.m4Coins then button.m4Coins = NW.Coins(button) end
+          local coins = data.coins or (data.marker == "coin" and 1) or 0
+          if type(label) == "table" and coins > 0 then
+            button.m4Coins.Show(coins, "RIGHT", label, "LEFT", -4, 0)
+          else
+            button.m4Coins.Hide()
           end
-          if type(label) == "table" then
-            button.m4Coin:ClearAllPoints()
-            button.m4Coin:SetPoint("RIGHT", label, "LEFT", -4, 0)
-          end
-          button.m4Coin:SetShown(data.marker == "coin")
           if type(label) == "table" and label.SetTextColor then
             -- the template's own color unless the entry brings one (buttons are recycled)
             if not button.m4LabelColor and label.GetTextColor then button.m4LabelColor = { label:GetTextColor() } end

@@ -456,12 +456,12 @@ ns.OnReady(function()
 end)
 
 -- Blizzard's profession window (minimal additions, nothing of Blizzard's changed) ------------
--- Recipe list: a small gold coin right of each recipe name that pays (making it and selling the
--- product brings more than the material costs), a red one when it does not. Selected recipe:
+-- Recipe list: gold coins left of each recipe name that pays (making it and selling the
+-- product via the auction house brings more than the material costs): 1 to 3 by the profit
+-- (ns.CoinCount). Selected recipe:
 -- the price next to each reagent and a three line summary under the reagents. Figures from the
 -- own profession scan (ns.db.recipes) and ns.Item (BuyCost, SellNet) - no own price logic.
 
-local GOLD_COIN = "Interface\\MoneyFrame\\UI-GoldIcon"
 local RIGHT_EDGE = 24 -- prices and summary values end this far from the form's right edge
 
 -- Economics of one recipe (spell id) of the character's scans; nil without a product or price.
@@ -491,6 +491,15 @@ end
 -- ahprofessions.py): at least 5 silver profit per craft via the auction house and demand of at
 -- least "mittel"; ranked by profit x demand (capped at 20) - a ranking aid, not gold per day.
 local MIN_PROFIT, MIN_DEMAND, DEMAND_CAP = 500, 1, 20
+
+-- Gold coins of a recipe that pays (profession window and "Alle Produkte"): one below 2 gold
+-- profit per craft, two up to 10 gold, three above; none without profit.
+function ns.CoinCount(profit)
+  if not profit or profit <= 0 then return 0 end
+  if profit < 20000 then return 1 end
+  if profit < 100000 then return 2 end
+  return 3
+end
 function ns.CraftAttractive(e)
   if not e.onAH then return false, "verkauft sich nur an Händler" end
   if (e.profit or 0) < MIN_PROFIT then
@@ -552,7 +561,7 @@ local function productEntries(pid)
   local out = {}
   local function entry(e)
     return { key = tostring(e.spell or e.itemID), name = e.recipe, icon = itemIcon(e.itemID), itemID = e.itemID,
-      marker = (e.profit > 0 and e.onAH) and "coin" or nil, locked = not e.learned, e = e }
+      coins = e.onAH and ns.CoinCount(e.profit) or 0, locked = not e.learned, e = e }
   end
   -- the filter only leaves recipes out; the game's categories stay as in "Alle Rezepte"
   local kept = {}
@@ -868,28 +877,22 @@ local function updateList(list)
     local id = recipeIDOf(row)
     local label = rawget(row, "Label")
     if not (id and type(label) == "table") then
-      if row.m4Coin then row.m4Coin:Hide() end
+      if row.m4Coins then row.m4Coins.Hide() end
       return
     end
     n = n + 1
     local e = ns.RecipeEconomics(id)
-    if not row.m4Coin then
-      row.m4Coin = row:CreateTexture(nil, "OVERLAY")
-      row.m4Coin:SetSize(11, 11)
-      row.m4Coin:SetTexture(GOLD_COIN)
-    end
-    local coin = row.m4Coin
-    if e and e.profit then
-      coin:ClearAllPoints()
+    if not row.m4Coins then row.m4Coins = ns.NativeWindow.Coins(row) end
+    local coins = e and e.profit and e.onAH and ns.CoinCount(e.profit) or 0 -- only where it pays
+    if coins > 0 then
       local ups = rawget(row, "SkillUps")
       if type(ups) == "table" and ups.IsShown and ups:IsShown() then
-        coin:SetPoint("RIGHT", ups, "LEFT", -2, 0)
+        row.m4Coins.Show(coins, "RIGHT", ups, "LEFT", -2, 0)
       else
-        coin:SetPoint("RIGHT", label, "LEFT", -4, 0) -- where the skill-up arrow sits
+        row.m4Coins.Show(coins, "RIGHT", label, "LEFT", -4, 0) -- where the skill-up arrow sits
       end
-      coin:SetShown(e.profit > 0 and e.onAH) -- only where it pays
     else
-      coin:Hide()
+      row.m4Coins.Hide()
     end
   end)
   profTrace("listRows", n)
