@@ -328,6 +328,13 @@ function NW.Split(page, opts)
         factory("ProfessionsRecipeListRecipeTemplate", function(button)
           local label = rawget(button, "Label")
           if type(label) == "table" then label:SetText(data.name) end
+          -- a value right in the row (e.g. an area's profit), small and right-aligned
+          if not button.m4Value then
+            button.m4Value = button:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+            button.m4Value:SetPoint("RIGHT", button, "RIGHT", -6, 0)
+            button.m4Value:SetJustifyH("RIGHT")
+          end
+          button.m4Value:SetText(data.value or "")
           for _, key in ipairs({ "SkillUps", "LockedIcon", "Count" }) do
             local part = rawget(button, key)
             if type(part) == "table" and part.Hide then part:Hide() end
@@ -359,6 +366,7 @@ function NW.Split(page, opts)
   -- The search box filters the entries by name (a header stays when one of its entries does).
   local all, query = {}, ""
   local function filtered()
+    if query ~= "" and opts.search then return opts.search(query) or {} end
     local out, header, folded = {}, nil, false
     for _, e in ipairs(all) do
       if e.header then
