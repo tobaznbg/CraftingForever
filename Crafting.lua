@@ -568,7 +568,9 @@ local function updateForm(form)
   for _, slot in ipairs(slots) do
     local itemID, need = slotItem(slot)
     if not slot.m4Price then
-      slot.m4Price = form:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+      -- on the slot (hides with it when Blizzard puts the slot back in its pool), placed by
+      -- the form's right edge
+      slot.m4Price = slot:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
       slot.m4Price:SetJustifyH("RIGHT")
       local nameFS = rawget(slot, "Name") or (type(rawget(slot, "Button")) == "table" and rawget(slot.Button, "Name"))
       if type(nameFS) == "table" and nameFS.GetFontObject and nameFS:GetFontObject() then
@@ -583,8 +585,6 @@ local function updateForm(form)
       if fy and sy then slot.m4Price:SetPoint("RIGHT", form, "RIGHT", -RIGHT_EDGE, sy - fy) end
     end
     local r = e and e.reagents and itemID and e.reagents[itemID]
-    -- Blizzard reuses the slot frames: a hidden one keeps no price on the form
-    slot.m4Price:SetShown(slot:IsShown() and slot:IsVisible())
     if itemID and r and r.unit then
       slot.m4Price:SetText(fmt(r.unit * (need or r.n)) .. "|cff999999  " .. (r.vendor and "H" or "AH") .. "|r")
     elseif itemID then
