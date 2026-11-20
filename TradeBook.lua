@@ -64,6 +64,8 @@ local function buildList(listFrame)
       factory("ProfessionsRecipeListCategoryTemplate", function(button)
         local text = rawget(button, "ButtonText") or rawget(button, "Label")
         if type(text) == "table" then text:SetText(data.header) end
+        local rank = rawget(button, "RankBar") -- the profession's skill bar of a category: not ours
+        if type(rank) == "table" and rank.Hide then rank:Hide() end
         local collapse = rawget(button, "CollapseButton")
         if type(collapse) == "table" and collapse.UpdateCollapsedState then pcall(collapse.UpdateCollapsedState, collapse, false) end
         button:SetScript("OnEnter", nil)
