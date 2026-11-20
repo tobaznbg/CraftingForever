@@ -10,7 +10,7 @@ ns.TradeBook = TradeBook
 local NAME = "M4CompanionTradeBook"
 local WIDTH, HEIGHT = 760, 560
 local LIST_WIDTH = 270
-local ICON = "Interface\\Icons\\INV_Misc_Book_11"
+local ICON = "Interface\\Icons\\INV_Misc_Coin_02" -- a pile of gold coins
 
 local frame
 
@@ -53,14 +53,14 @@ local function create()
 
   -- Left: the list column (search box on top, entries below)
   local list = CreateFrame("Frame", nil, f, "InsetFrameTemplate")
-  list:SetPoint("TOPLEFT", 8, -64)
+  list:SetPoint("TOPLEFT", 8, -92)
   list:SetPoint("BOTTOMLEFT", 8, 28)
   list:SetWidth(LIST_WIDTH)
   f.List = list
   local okS, search = pcall(CreateFrame, "EditBox", NAME .. "Search", f, "SearchBoxTemplate")
   if okS and search then
     search:SetSize(LIST_WIDTH - 12, 20)
-    search:SetPoint("BOTTOMLEFT", list, "TOPLEFT", 8, 6)
+    search:SetPoint("BOTTOMLEFT", list, "TOPLEFT", 10, 6)
     f.Search = search
   end
 
