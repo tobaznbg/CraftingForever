@@ -878,7 +878,7 @@ PAGES.ledger = function(p)
   local figPeriod = figureCard(p, { { "Umsatz (brutto)", 104 }, { "Einkauf", 100 }, { "AH-Gebühr", 90 },
     { "Einstellgeb. verloren", 112 }, { "Ergebnis", 104 } })
   figPeriod:SetPoint("TOPLEFT", PAD, y)
-  local figStock = figureCard(p, { { "Bestand (jetzt)", 80 }, { "Einstand", 96 }, { "Marktwert heute", 98 },
+  local figStock = figureCard(p, { { "Bestand (jetzt)", 80 }, { "Einstand", 96 }, { "AH jetzt", 98 },
     { "Unterschied", INNER_W - GAP - 510 - 274 } })
   figStock:SetPoint("TOPLEFT", figPeriod, "TOPRIGHT", GAP, 0)
 
@@ -931,7 +931,7 @@ PAGES.ledger = function(p)
   trades:SetPoint("TOPLEFT", PAD, listTop)
   local stockList = grid(p, INNER_W, listH, {
     { "Item", 0, nil, true }, { "Stück", 56, "RIGHT" }, { "Herkunft", 130 }, { "Einstand/Stk", 96, "RIGHT" },
-    { "Marktwert/Stk", 100, "RIGHT" }, { "Einstand", 96, "RIGHT" }, { "Marktwert", 96, "RIGHT" },
+    { "AH jetzt/Stk", 100, "RIGHT" }, { "Einstand", 96, "RIGHT" }, { "AH jetzt gesamt", 96, "RIGHT" },
     { "Unterschied", 106, "RIGHT" } }, { scroll = true })
   stockList:SetPoint("TOPLEFT", PAD, listTop)
 
@@ -1017,7 +1017,7 @@ PAGES.ledger = function(p)
       trades:SetRows(rows)
     elseif mode == "stock" then
       label:SetText(Style.HEAD .. "Bestand|r " .. Style.MUTED .. "(noch nicht verkauft)|r")
-      summary:SetText("Einstand: Kaufpreis bzw. gekauftes Material; Marktwert: AH jetzt")
+      summary:SetText("Einstand: Kaufpreis bzw. gekauftes Material; AH jetzt: billigstes Angebot gerade")
       local rows = {}
       for _, s in ipairs(report and report.stock or {}) do
         table.insert(rows, { s.name or ns.ItemName(s.itemId) or ("Item " .. tostring(s.itemId)), units(s.units),
