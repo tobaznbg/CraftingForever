@@ -12,6 +12,11 @@
 --       onSelect = function(entry, card) … end })  -> split = { list, card, SetEntries(entries) }
 --     left Blizzard's recipe list (search box, filter, category and recipe rows), right the recipe
 --     card (border and background of the profession window's form)
+--     entry fields: value (right in the row), marker ("down": red arrow, "coin": gold coin left
+--     of the name), color ({ r, g, b } of the name), itemID (tooltip, Alt+click market data);
+--     opts.filter = { options = { { key, label }… }, get(), set(key) }: Blizzard's filter button
+--   ns.NativeWindow.CardHead(layer) -> { Icon, Name, Sub, Head, itemID }: the card's head (icon in
+--     a ring, name, a small line, "Kennzahlen:"); the icon shows the item tooltip of .itemID
 --   ns.NativeWindow.Panel(parent, title)  -> an inset panel with a gold title (overview pages)
 --   ns.NativeWindow.Figures(parent, anchor, labels) -> { values = { fontstring… }, SetWidth(w) }
 --     gold labels left, values right-aligned; a line before the last row
@@ -92,8 +97,9 @@ end
 function NW:AddTab(def)
   local f = self.frame
   local i = #self.order + 1
-  local t = try("CheckButton", f, "LargeSideTabButtonTemplate") or try("Button", f, "LargeSideTabButtonTemplate")
-    or try("Frame", f, "LargeSideTabButtonTemplate")
+  -- def.hidden: a page without a side tab (a window with one page)
+  local t = not def.hidden and (try("CheckButton", f, "LargeSideTabButtonTemplate") or try("Button", f, "LargeSideTabButtonTemplate")
+    or try("Frame", f, "LargeSideTabButtonTemplate"))
   if t then
     t:ClearAllPoints()
     t:SetPoint("TOPLEFT", f, "TOPRIGHT", -2, -40 - (i - 1) * 60)
@@ -275,6 +281,52 @@ function NW.Panel(parent, title)
 end
 
 -- Left Blizzard's recipe list, right the recipe card.
+-- The card's head: icon in a ring, name, a small line under it, "Kennzahlen:" below the icon.
+-- The icon shows the tooltip of head.itemID; Alt+click opens its market data window.
+function NW.CardHead(layer)
+  local d = {}
+  d.Icon = layer:CreateTexture(nil, "ARTWORK")
+  d.Icon:SetSize(44, 44)
+  d.Icon:SetPoint("TOPLEFT", 22, -22)
+  local okMask, mask = pcall(layer.CreateMaskTexture, layer)
+  if okMask and mask then
+    mask:SetTexture("Interface\\CharacterFrame\\TempPortraitAlphaMask", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+    mask:SetAllPoints(d.Icon)
+    d.Icon:AddMaskTexture(mask)
+  end
+  local ring = layer:CreateTexture(nil, "OVERLAY")
+  ring:SetSize(60, 60)
+  ring:SetPoint("CENTER", d.Icon, "CENTER", 0, 0)
+  ring:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
+  ring:SetTexCoord(0, 0.6, 0, 0.6)
+  d.Ring = ring
+  d.Name = layer:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
+  d.Name:SetPoint("LEFT", d.Icon, "RIGHT", 14, 6)
+  d.Name:SetPoint("RIGHT", layer, "RIGHT", -20, 0)
+  d.Name:SetJustifyH("LEFT")
+  d.Name:SetWordWrap(false)
+  d.Sub = layer:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+  d.Sub:SetPoint("TOPLEFT", d.Name, "BOTTOMLEFT", 0, -3)
+  d.Sub:SetPoint("RIGHT", layer, "RIGHT", -20, 0)
+  d.Sub:SetJustifyH("LEFT")
+  d.Head = layer:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+  d.Head:SetPoint("TOPLEFT", d.Icon, "BOTTOMLEFT", 0, -20)
+  d.Head:SetText("Kennzahlen:")
+  local b = CreateFrame("Button", nil, layer)
+  b:SetAllPoints(d.Icon)
+  b:SetScript("OnEnter", function(self)
+    if not d.itemID then return end
+    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+    GameTooltip:SetItemByID(d.itemID)
+    GameTooltip:Show()
+  end)
+  b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+  b:SetScript("OnClick", function()
+    if d.itemID and ns.ItemDetail then ns.ItemDetail.AltClick(d.itemID) end
+  end)
+  return d
+end
+
 function NW.Split(page, opts)
   local split = { selected = nil, collapsed = {} }
   -- folded: explicit state per header key, else opts.folded (true: all categories start folded)
@@ -368,6 +420,23 @@ function NW.Split(page, opts)
             button.m4Marker:SetPoint("RIGHT", label, "LEFT", -2, -1)
           end
           button.m4Marker:SetShown(data.marker == "down")
+          -- data.marker = "coin": the gold coin of the profession window's recipe list (it pays)
+          if not button.m4Coin then
+            button.m4Coin = button:CreateTexture(nil, "OVERLAY")
+            button.m4Coin:SetSize(11, 11)
+            button.m4Coin:SetTexture("Interface\\MoneyFrame\\UI-GoldIcon")
+          end
+          if type(label) == "table" then
+            button.m4Coin:ClearAllPoints()
+            button.m4Coin:SetPoint("RIGHT", label, "LEFT", -4, 0)
+          end
+          button.m4Coin:SetShown(data.marker == "coin")
+          if type(label) == "table" and label.SetTextColor then
+            -- the template's own color unless the entry brings one (buttons are recycled)
+            if not button.m4LabelColor and label.GetTextColor then button.m4LabelColor = { label:GetTextColor() } end
+            local c = data.color or button.m4LabelColor
+            if c then label:SetTextColor(c[1], c[2], c[3]) end
+          end
           -- the name ends before the value (cut with "…" instead of running into it)
           if type(label) == "table" then
             local vw = (data.value and data.value ~= "") and ((button.m4Value:GetStringWidth() or 0) + 14) or 6
@@ -460,7 +529,27 @@ function NW.Split(page, opts)
     end)
   end
   local filter = rawget(list, "FilterDropdown") or rawget(list, "FilterButton")
-  if type(filter) == "table" and filter.Hide then filter:Hide() end
+  if type(filter) == "table" then
+    local f = opts.filter
+    if f and filter.SetupMenu then
+      filter:SetupMenu(function(_, root)
+        for _, o in ipairs(f.options) do
+          root:CreateRadio(o.label, function() return f.get() == o.key end, function() f.set(o.key) end)
+        end
+      end)
+      -- Blizzard's reset button next to the filter (a non-default filter): not used here
+      local reset = rawget(filter, "ResetButton")
+      if type(reset) == "table" and reset.Hide then reset:Hide() end
+    elseif f then
+      filter:SetScript("OnClick", function()
+        for i, o in ipairs(f.options) do
+          if o.key == f.get() then f.set(f.options[i % #f.options + 1].key) break end
+        end
+      end)
+    elseif filter.Hide then
+      filter:Hide()
+    end
+  end
   split.empty = card:CreateFontString(nil, "OVERLAY", "GameFontDisable")
   split.empty:SetPoint("CENTER")
   if opts.entries then split.SetEntries(opts.entries) end

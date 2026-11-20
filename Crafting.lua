@@ -60,7 +60,7 @@ local function rows(filter, professionID)
   local data = ns.RecipeData and ns.RecipeData[professionID]
   if not data then return list end
   local mine = ownScans()[professionID]
-  for _, rec in pairs(data.recipes) do
+  for rid, rec in pairs(data.recipes) do
     local out, quantity, reagentList = rec[2], rec[3] or 1, rec[4] or {}
     local known = mine and out and mine.byItem[out]
     local learned = known and known.r.learned and true or false
@@ -82,6 +82,7 @@ local function rows(filter, professionID)
           -- 0 learned, 1 learnable now, 2 later: what can be made now comes first.
           local group = learned and 0 or (tooHigh and 2 or 1)
           table.insert(list, { itemID = out, recipe = rec[1], profession = data.name,
+            cat = known and known.r.cat, spell = known and known.id or rid, pid = professionID,
             score = (2 - group) * 1e12 + profit, learned = learned, learn = learn, tooHigh = tooHigh,
             unsure = ns.Item.Unsure(ns.Item(out)), nowPrice = ns.Item(out).now,
             cost = cost, unitCost = cost / quantity, value = value, profit = profit, onAH = onAH, demand = ns.Item(out).demand or 0,
@@ -486,6 +487,323 @@ function ns.RecipeEconomics(recipeID)
   return { cost = cost, value = value, profit = value - cost, onAH = onAH, reagents = reagents, out = r.out }
 end
 
+-- "Attraktiv": the cloud's rule for a recipe that brings gold sustainably (collector,
+-- ahprofessions.py): at least 5 silver profit per craft via the auction house and demand of at
+-- least "mittel"; ranked by profit x demand (capped at 20) - a ranking aid, not gold per day.
+local MIN_PROFIT, MIN_DEMAND, DEMAND_CAP = 500, 1, 20
+function ns.CraftAttractive(e)
+  if not e.onAH then return false, "verkauft sich nur an Händler" end
+  if (e.profit or 0) < MIN_PROFIT then
+    return false, (e.profit or 0) > 0 and "Gewinn unter 5 Silber" or "kein Gewinn"
+  end
+  if (e.demand or 0) < MIN_DEMAND then return false, "Nachfrage zu gering" end
+  return true, nil, e.profit * math.min(e.demand, DEMAND_CAP)
+end
+
+-- "Alle Produkte": every recipe of the open profession (Data_Recipes.lua: all recipes the game
+-- knows, drops and rare ones included), in the profession window's look. Left the recipes
+-- (filter: attractive / with profit / learned / all), right the card with reagents and figures.
+-- Same figures as the coin in the profession window and the old professions page (rows()).
+local Products = {}
+ns.Products = Products
+local GREY = { 0.5, 0.5, 0.5 }
+local FILTERS = {
+  { key = "attractive", label = "Attraktiv (Gewinn + Nachfrage)" },
+  { key = "profit", label = "Mit Gewinn" },
+  { key = "learned", label = "Nur gelernte" },
+  { key = "all", label = "Alle Rezepte" },
+}
+local MAX_REAGENTS = 8
+local productsWindow, productsSplit, productsPID
+
+local function signedMoney(c)
+  c = math.floor((c or 0) + 0.5)
+  return c >= 0 and ("|cff5fd38d+" .. money(c) .. "|r") or ("|cffff6b6b-" .. money(-c) .. "|r")
+end
+
+local function itemIcon(id)
+  local get = (C_Item and C_Item.GetItemIconByID) or GetItemIcon
+  return id and get and get(id) or nil
+end
+
+local function filterKey()
+  local ui = ns.db and ns.db.ui
+  return ui and ui.productsFilter or "attractive"
+end
+
+-- Category name and order of the game (asked while the profession is open, kept for later).
+local function category(cat)
+  if not cat then return nil end
+  ns.db.recipeCats = ns.db.recipeCats or {}
+  local known = ns.db.recipeCats[cat]
+  local api = C_TradeSkillUI and C_TradeSkillUI.GetCategoryInfo
+  if api then
+    local ok, info = pcall(api, cat)
+    if ok and type(info) == "table" and info.name then
+      known = { n = info.name, o = info.uiOrder or 0 }
+      ns.db.recipeCats[cat] = known
+    end
+  end
+  return known
+end
+
+local function productEntries(pid)
+  local key = filterKey()
+  local list = rows(key == "learned" and "learned" or "all", pid)
+  local out = {}
+  local function entry(e)
+    return { key = tostring(e.spell or e.itemID), name = e.recipe, icon = itemIcon(e.itemID), itemID = e.itemID,
+      value = signedMoney(e.profit), marker = (e.profit > 0 and e.onAH) and "coin" or nil,
+      color = not e.learned and GREY or nil, e = e }
+  end
+  for _, e in ipairs(list) do e.attractive, e.why, e.rank = ns.CraftAttractive(e) end
+  if key == "attractive" or key == "profit" then
+    local picked = {}
+    for _, e in ipairs(list) do
+      if (key == "attractive" and e.attractive) or (key == "profit" and e.profit > 0 and e.onAH) then picked[#picked + 1] = e end
+    end
+    table.sort(picked, function(a, b)
+      local x, y = a.rank or a.profit, b.rank or b.profit
+      if key == "profit" then x, y = a.profit, b.profit end
+      if x ~= y then return x > y end
+      return (a.recipe or "") < (b.recipe or "")
+    end)
+    out[1] = { key = "h:" .. key, header = key == "attractive" and "Attraktiv – Gewinn × Nachfrage" or "Mit Gewinn" }
+    for _, e in ipairs(picked) do out[#out + 1] = entry(e) end
+    return out
+  end
+  local groups, order = {}, {}
+  for _, e in ipairs(list) do
+    local c = category(e.cat)
+    local name = c and c.n or "Weitere"
+    local g = groups[name]
+    if not g then
+      g = { name = name, o = c and c.o or 1e9, items = {} }
+      groups[name] = g
+      order[#order + 1] = g
+    end
+    g.items[#g.items + 1] = e
+  end
+  table.sort(order, function(a, b)
+    if a.o ~= b.o then return a.o < b.o end
+    return a.name < b.name
+  end)
+  for _, g in ipairs(order) do
+    out[#out + 1] = { key = "h:" .. g.name, header = g.name }
+    table.sort(g.items, function(a, b)
+      if a.learned ~= b.learned then return a.learned end
+      return (a.recipe or "") < (b.recipe or "")
+    end)
+    for _, e in ipairs(g.items) do out[#out + 1] = entry(e) end
+  end
+  return out
+end
+
+-- How a recipe is learned, from the Forever recipe sources (Data_RecipeSources.lua): trainer,
+-- vendors of the own faction (NPC, zone), reputation, Merchant's Favor, drop, quest; a tradeable
+-- recipe item with its price at the auction house right now. nil when the sources do not know it.
+local KIND = { vendor = "Händler", limited = "Händler (begrenzt)", rep = "Ruf-Händler", favor = "Händlergunst",
+  cond = "Händler (Bedingung)", unknown = "Händler (unbekannt)" }
+local function sourceText(pid, spell)
+  local srcs = ns.RecipeSources and ns.RecipeSources[pid]
+  local entry = srcs and srcs.recipes and srcs.recipes[spell]
+  if not entry then return nil end
+  local mine = (UnitFactionGroup and UnitFactionGroup("player")) == "Alliance" and "A" or "H"
+  local parts = {}
+  if entry.auto then parts[#parts + 1] = "beim Erlernen des Berufs" end
+  if entry.t then parts[#parts + 1] = "Lehrer" .. (entry.rank and (" (" .. entry.rank .. ")") or "") end
+  for _, s in ipairs(entry) do
+    local npc = s[2] and s[2] > 0 and srcs.npcs and srcs.npcs[s[2]] or nil
+    if not npc or npc[5] == "B" or npc[5] == mine or npc[5] == nil then
+      local text = KIND[s[1]] or s[1]
+      if npc then text = text .. " " .. npc[1] .. " (" .. (npc[2] or "?") .. ")" end
+      if s.rf then text = text .. ", Ruf " .. s.rf .. " " .. (s.rs or "") end
+      if s.favor then text = text .. ", " .. s.favor .. " Gunst" end
+      if (s[3] or 0) > 0 then text = text .. ", " .. money(s[3]) end
+      if s.c == 1 then text = text .. " |cff999999(Classic-Daten)|r" end
+      parts[#parts + 1] = text
+    end
+  end
+  if entry.d then parts[#parts + 1] = "Drop" end
+  if entry.q then parts[#parts + 1] = "Quest „" .. entry.q .. "“" end
+  local text = table.concat(parts, " · ")
+  if entry.item then
+    local p = ns.Item(entry.item).now
+    text = text .. (text ~= "" and " · " or "") .. (p and ("Rezept im AH: " .. money(p)) or "Rezept handelbar, gerade nicht im AH")
+  end
+  return text ~= "" and text or nil
+end
+
+local function productCard(c)
+  local NW = ns.NativeWindow
+  local v = NW.CardHead(c)
+  -- how the recipe is learned (unlearned ones), two lines under the head
+  v.Source = c:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  v.Source:SetPoint("TOPLEFT", v.Icon, "BOTTOMLEFT", 0, -14)
+  v.Source:SetPoint("RIGHT", c, "RIGHT", -24, 0)
+  v.Source:SetJustifyH("LEFT")
+  v.Source:SetMaxLines(3)
+  v.Head:SetText("Reagenzien:")
+  v.reagents = {}
+  for i = 1, MAX_REAGENTS do
+    local r = {}
+    r.Icon = c:CreateTexture(nil, "ARTWORK")
+    r.Icon:SetSize(18, 18)
+    r.Icon:SetPoint("TOPLEFT", v.Head, "BOTTOMLEFT", 0, -6 - (i - 1) * 22)
+    r.Name = c:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    r.Name:SetPoint("LEFT", r.Icon, "RIGHT", 6, 0)
+    r.Name:SetJustifyH("LEFT")
+    r.Name:SetWordWrap(false)
+    r.Price = c:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    r.Price:SetPoint("RIGHT", c, "RIGHT", -24, 0)
+    r.Price:SetPoint("TOP", r.Icon, "TOP", 0, -3)
+    r.Price:SetJustifyH("RIGHT")
+    r.Name:SetPoint("RIGHT", r.Price, "LEFT", -8, 0)
+    local hit = CreateFrame("Button", nil, c)
+    hit:SetAllPoints(r.Icon)
+    hit:SetScript("OnEnter", function(self)
+      if not r.itemID then return end
+      GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+      GameTooltip:SetItemByID(r.itemID)
+      GameTooltip:Show()
+    end)
+    hit:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    hit:SetScript("OnClick", function() if r.itemID and ns.ItemDetail then ns.ItemDetail.AltClick(r.itemID) end end)
+    r.Hit = hit
+    v.reagents[i] = r
+  end
+  v.FigHead = c:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+  v.FigHead:SetText("Kennzahlen:")
+  v.Figures = NW.Figures(c, v.FigHead, { "Herstellkosten", "Preis jetzt", "Erlös (nach Gebühr)", "Nachfrage", "Attraktiv", "Gewinn" })
+  local function widths(fr) v.Figures.SetWidth(math.max(100, (fr:GetWidth() or 340) - 46)) end
+  widths(c)
+  c:HookScript("OnSizeChanged", widths)
+  return v
+end
+
+local function showProduct(entry, c)
+  if not rawget(c, "m4Product") then c.m4Product = productCard(c) end
+  local v = c.m4Product
+  local e = entry and entry.e
+  local shown = e ~= nil
+  for _, part in ipairs({ v.Icon, v.Ring, v.Name, v.Sub, v.Head, v.FigHead, v.Source }) do part:SetShown(shown) end
+  for i, fs in ipairs(v.Figures.values) do fs:SetShown(shown); v.Figures.labels[i]:SetShown(shown) end
+  if v.Figures.line then v.Figures.line:SetShown(shown) end
+  if productsSplit and productsSplit.empty then
+    productsSplit.empty:SetText(shown and "" or "Keine Rezepte für diesen Filter.")
+  end
+  for _, r in ipairs(v.reagents) do r.Icon:Hide(); r.Name:Hide(); r.Price:Hide(); r.Hit:Hide(); r.itemID = nil end
+  if not shown then return end
+  v.Icon:SetTexture(itemIcon(e.itemID))
+  v.itemID = e.itemID
+  v.Name:SetText(e.recipe .. (e.produced > 1 and string.format("  |cff999999x%g|r", e.produced) or ""))
+  v.Sub:SetText(e.learned and "gelernt"
+    or ((e.tooHigh and "|cffff6b6b" or "|cffffb547") .. "nicht gelernt" .. (e.learn and (": " .. e.learn:gsub("^Quelle %? ", "")) or "") .. "|r"))
+  local src = not e.learned and sourceText(e.pid, e.spell) or nil
+  v.Source:SetText(src and ("|cffffd100Erlernen:|r " .. src) or "")
+  v.Source:SetShown(src ~= nil)
+  v.Head:ClearAllPoints()
+  if src then
+    v.Head:SetPoint("TOPLEFT", v.Source, "BOTTOMLEFT", 0, -12)
+  else
+    v.Head:SetPoint("TOPLEFT", v.Icon, "BOTTOMLEFT", 0, -20)
+  end
+  local last = v.Head
+  for i, g in ipairs(e.reagents or {}) do
+    local r = v.reagents[i]
+    if not r then break end
+    local unit, vendor = buy(g.i)
+    local have = ns.Costs and ns.Costs.Owned and ns.Costs.Owned(g.i) or 0
+    r.itemID = g.i
+    r.Icon:SetTexture(itemIcon(g.i))
+    r.Name:SetText(string.format("%s%d/%d|r  %s", have >= g.n and "|cff5fd38d" or "|cffffffff", have, g.n,
+      ns.ItemName(g.i) or ("#" .. g.i)))
+    r.Price:SetText(unit and (money(unit * g.n) .. (vendor and " |cff999999H|r" or "")) or "–")
+    r.Icon:Show(); r.Name:Show(); r.Price:Show(); r.Hit:Show()
+    last = r.Icon
+  end
+  v.FigHead:ClearAllPoints()
+  v.FigHead:SetPoint("TOPLEFT", last, "BOTTOMLEFT", 0, -18)
+  local vals = {
+    money(e.cost),
+    e.nowPrice and (e.unsure and ("|cffffb547" .. money(e.nowPrice) .. " (unsicher)|r") or money(e.nowPrice)) or "nicht im Angebot",
+    (e.onAH and "" or "|cff999999Händler |r") .. money(e.value),
+    ns.Item.DemandText(e) or "–",
+    e.attractive and "|cff5fd38dja|r" or ("|cff999999nein – " .. (e.why or "?") .. "|r"),
+    signedMoney(e.profit),
+  }
+  for i, fs in ipairs(v.Figures.values) do fs:SetText(vals[i] or "–") end
+end
+
+local function refreshProducts()
+  if not (productsWindow and productsSplit and productsPID) then return end
+  local data = ns.RecipeData and ns.RecipeData[productsPID]
+  local title = "Alle Produkte" .. (data and (" – " .. data.name) or "")
+  local f = productsWindow.frame
+  if f.SetTitle then pcall(f.SetTitle, f, title) end
+  if data and data.icon and f.SetPortraitToAsset then pcall(f.SetPortraitToAsset, f, data.icon) end
+  productsSplit.SetEntries(data and productEntries(productsPID) or {})
+  if not data and productsSplit.empty then productsSplit.empty:SetText("Dieser Beruf stellt keine Produkte her.") end
+end
+
+local function createProducts()
+  local NW = ns.NativeWindow
+  productsWindow = NW.New({ name = "M4CompanionProducts", title = "Alle Produkte", icon = "Interface\\Icons\\INV_Misc_Coin_02" })
+  productsWindow:AddTab({ key = "products", title = "Alle Produkte", hidden = true, build = function(page)
+    productsSplit = NW.Split(page, {
+      onSelect = showProduct,
+      filter = { options = FILTERS, get = filterKey, set = function(key)
+        ns.db.ui = ns.db.ui or {}
+        ns.db.ui.productsFilter = key
+        refreshProducts()
+      end },
+    })
+  end, onShow = function() refreshProducts() end })
+end
+
+-- The open profession's id (Data_Recipes keys: the skill line, e.g. 165 Lederverarbeitung).
+local function openProfessionID()
+  local api = C_TradeSkillUI
+  if api and api.GetBaseProfessionInfo then
+    local ok, info = pcall(api.GetBaseProfessionInfo)
+    if ok and type(info) == "table" and info.professionID then return info.professionID end
+  end
+  if api and api.GetTradeSkillLine then
+    local ok, id = pcall(api.GetTradeSkillLine)
+    if ok then return id end
+  end
+  return nil
+end
+
+Products.Entries = productEntries -- for tests
+Products.SourceText = sourceText
+
+function Products.Show(pid)
+  if not productsWindow then createProducts() end
+  productsPID = pid or openProfessionID() or productsPID
+  productsWindow:Show()
+  productsWindow:SelectTab("products")
+end
+
+-- The button: closes the window, unless it shows another profession (then it switches).
+function Products.Toggle(pid)
+  pid = pid or openProfessionID()
+  if productsWindow and productsWindow.frame:IsShown() and (not pid or pid == productsPID) then
+    productsWindow.frame:Hide()
+  else
+    Products.Show(pid)
+  end
+end
+
+-- New live prices: the open list follows.
+ns.OnReady(function()
+  if ns.AuctionScan and ns.AuctionScan.OnDone then
+    ns.AuctionScan.OnDone(function()
+      if productsWindow and productsWindow.frame:IsShown() then ns.Safe(refreshProducts) end
+    end)
+  end
+end)
+
 local function profTrace(key, value)
   if ns.db then ns.db.professionsTrace = ns.db.professionsTrace or {}; ns.db.professionsTrace[key] = value end
 end
@@ -655,6 +973,19 @@ local function attachProfessions()
   profTrace("frame", "list=" .. type(list) .. " form=" .. type(form))
   local layer = CreateFrame("Frame", nil, page)
   page.m4Info = layer
+  -- "Alle Produkte" above Blizzard's "Alle erstellen" (bottom left of the recipe card)
+  local okB, btn = pcall(CreateFrame, "Button", nil, page, "UIPanelButtonTemplate")
+  if okB and btn then
+    btn:SetSize(112, 22)
+    btn:SetText("Alle Produkte")
+    local createAll = rawget(page, "CreateAllButton")
+    if type(createAll) == "table" then
+      btn:SetPoint("BOTTOMLEFT", createAll, "TOPLEFT", 0, 8)
+    elseif type(form) == "table" then
+      btn:SetPoint("BOTTOMLEFT", form, "BOTTOMLEFT", 10, 40)
+    end
+    btn:SetScript("OnClick", function() ns.Safe(Products.Toggle) end)
+  end
   local elapsed = 0
   layer:SetScript("OnUpdate", function(_, dt)
     elapsed = elapsed + (dt or 0)
