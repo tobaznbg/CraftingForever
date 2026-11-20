@@ -13,11 +13,16 @@ local CUT = 0.05
 
 local function money(c) return ns.FormatMoney(c, true) end
 
--- The item id in a sell frame, nil when the slot is empty.
+-- The item id in a sell frame, nil when the slot is empty: the location Blizzard put in with
+-- SetItem (hooked in attach), else the frame's GetItem where the client has it.
 local function itemOf(frame)
-  if not (frame and frame.GetItem) then return nil end
-  local ok, location = pcall(frame.GetItem, frame)
-  if not ok or not location then return nil end
+  if not frame then return nil end
+  local location = frame.m4Location
+  if location == nil and frame.GetItem then
+    local ok, loc = pcall(frame.GetItem, frame)
+    location = ok and loc or nil
+  end
+  if not location then return nil end
   if type(location) == "table" and location.IsValid and not location:IsValid() then return nil end
   local getID = C_Item and C_Item.GetItemID
   if not getID then return nil end
@@ -27,8 +32,14 @@ end
 
 -- The unit price entered in a sell frame (copper), nil when none.
 local function unitPriceOf(frame)
-  if frame and frame.GetUnitPrice then
+  if not frame then return nil end
+  if frame.GetUnitPrice then
     local ok, price = pcall(frame.GetUnitPrice, frame)
+    if ok and type(price) == "number" and price > 0 then return price end
+  end
+  local input = frame.PriceInput
+  if input and input.GetAmount then
+    local ok, price = pcall(input.GetAmount, input)
     if ok and type(price) == "number" and price > 0 then return price end
   end
   return nil
@@ -66,6 +77,16 @@ local function attach(frame)
     fs:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 20, 40)
   end
   frame.m4SellInfo = fs
+  if frame.SetItem then
+    hooksecurefunc(frame, "SetItem", function(self, itemLocation) self.m4Location = itemLocation end)
+  end
+  -- What this client offers (read once from the saved variables when something is missing).
+  if ns.db then
+    ns.db.sellInfoProbe = ns.db.sellInfoProbe or {}
+    ns.db.sellInfoProbe[tostring(frame:GetName() or (frame == (AuctionHouseFrame and AuctionHouseFrame.ItemSellFrame) and "item" or "commodity"))] = {
+      SetItem = frame.SetItem ~= nil, GetItem = frame.GetItem ~= nil, GetUnitPrice = frame.GetUnitPrice ~= nil,
+      PriceInput = frame.PriceInput ~= nil, PostButton = frame.PostButton ~= nil, t = time() }
+  end
   -- Price and item change while the frame is open: a light check five times a second.
   local elapsed, lastKey = 0, nil
   frame:HookScript("OnUpdate", function(self, dt)
@@ -82,11 +103,17 @@ local function attach(frame)
   frame:HookScript("OnHide", function() lastKey = nil; fs:SetText("") end)
 end
 
+local function attachAll()
+  local ah = AuctionHouseFrame
+  if not ah then return end
+  attach(ah.ItemSellFrame)
+  attach(ah.CommoditiesSellFrame)
+end
+
 if ns.On then
   ns.On("AUCTION_HOUSE_SHOW", function()
-    local ah = AuctionHouseFrame
-    if not ah then return end
-    attach(ah.ItemSellFrame)
-    attach(ah.CommoditiesSellFrame)
+    attachAll()
+    -- The auction house UI loads on demand: its frames may only exist a moment later.
+    if C_Timer then C_Timer.After(0.2, function() ns.Safe(attachAll) end) end
   end)
 end
