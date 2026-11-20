@@ -336,10 +336,12 @@ local function areaFigures(g, items)
   local top = {}
   local sorted = {}
   for _, r in ipairs(items or {}) do sorted[#sorted + 1] = r end
-  if g.name == P.FARMED then
+  if P.IsFarmed(g.name) then
     table.sort(sorted, function(a, b) return (a.revenue or 0) > (b.revenue or 0) end)
     for i = 1, math.min(5, #sorted) do top[i] = { sorted[i].name or ns.ItemName(sorted[i].itemId) or "?", money(sorted[i].revenue) } end
-    return { sub = "Beute – was du gefarmt oder gelootet und verkauft hast", topTitle = "Brachte am meisten:",
+    local sub = g.name == P.FARMED and "Beute – was du gelootet und verkauft hast"
+      or (g.name .. " – gesammelt und verkauft (kein Einkauf)")
+    return { sub = sub, topTitle = "Brachte am meisten:",
       labels = { "Erlös", "Gebühren", "Verlorene Einstellgebühren", "Verkauft", "Gewinn" },
       values = { money(g.revenue), money(g.fees), money(g.depositsLost), (g.sold or 0) .. " Stück", signed(g.profit) }, top = top }
   end
@@ -366,7 +368,7 @@ local PROFESSION_ICONS = {
   ["Alchemie"] = "Interface\\Icons\\Trade_Alchemy", ["Ingenieurskunst"] = "Interface\\Icons\\Trade_Engineering",
   ["Verzauberkunst"] = "Interface\\Icons\\Trade_Engraving", ["Kochkunst"] = "Interface\\Icons\\INV_Misc_Food_15",
   ["Erste Hilfe"] = "Interface\\Icons\\Spell_Holy_SealOfSacrifice", ["Bergbau"] = "Interface\\Icons\\Trade_Mining",
-  ["Kürschnerei"] = "Interface\\Icons\\INV_Misc_Pelt_Wolf_01",
+  ["Kürschnerei"] = "Interface\\Icons\\INV_Misc_Pelt_Wolf_01", ["Kräuterkunde"] = "Interface\\Icons\\Trade_Herbalism",
 }
 
 -- Card head: icon in a ring, name, a line below (shared by the area and the item view).
@@ -527,13 +529,15 @@ local function buildLedger(page)
     local ordered = {}
     for _, g in ipairs(report.groups) do if g.name == P.TRADE then ordered[#ordered + 1] = g end end
     for _, g in ipairs(report.groups) do if g.name == P.FARMED then ordered[#ordered + 1] = g end end
-    for _, g in ipairs(report.groups) do if g.name ~= P.TRADE and g.name ~= P.FARMED then ordered[#ordered + 1] = g end end
+    -- gathering professions next to the loot, then the crafting professions
+    for _, g in ipairs(report.groups) do if g.name ~= P.FARMED and P.IsFarmed(g.name) then ordered[#ordered + 1] = g end end
+    for _, g in ipairs(report.groups) do if g.name ~= P.TRADE and not P.IsFarmed(g.name) then ordered[#ordered + 1] = g end end
     local entries = { { key = "areas", header = "Bereiche" } }
     allItems = {}
     for _, g in ipairs(ordered) do
       local items = {}
       for _, r in ipairs(report.items[g.name] or {}) do items[#items + 1] = r; allItems[#allItems + 1] = r end
-      local isLoot = g.name == P.FARMED
+      local isLoot = P.IsFarmed(g.name)
       table.sort(items, function(a, b)
         if isLoot then return (a.revenue or 0) > (b.revenue or 0) end
         return (a.profit or 0) > (b.profit or 0)

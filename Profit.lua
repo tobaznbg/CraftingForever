@@ -73,6 +73,33 @@ local TRADE = "Handel (gekauft, verkauft)"
 local FARMED = "Gesammelt (Farm, Beute)"
 Profit.TRADE, Profit.FARMED = TRADE, FARMED
 
+-- Gathered goods count for their gathering profession, not as loot: leather, hides and scales
+-- for skinning, ore, stone and gems for mining, herbs for herbalism (ns.Gathering).
+local gatherOf
+local function farmGroup(itemID)
+  if not gatherOf then
+    gatherOf = {}
+    for _, g in ipairs(ns.Gathering or {}) do
+      if g.source and g.source ~= "" then
+        for _, it in ipairs(g.items or {}) do
+          if it[1] and not gatherOf[it[1]] then gatherOf[it[1]] = g.source end
+        end
+      end
+    end
+  end
+  return gatherOf[itemID] or FARMED
+end
+Profit.FarmGroup = farmGroup
+
+-- The areas without a purchase price (loot and the gathering professions).
+function Profit.IsFarmed(group)
+  if group == FARMED then return true end
+  for _, g in ipairs(ns.Gathering or {}) do
+    if g.source ~= "" and g.source == group then return true end
+  end
+  return false
+end
+
 -- itemID of a ledger event: its id, else looked up by name (older events).
 local byName
 local function idOf(e)
@@ -232,7 +259,7 @@ local function replay(since)
       else
         local maker = ns.CraftedBy and ns.CraftedBy(id)
         if maker and not profOf[id] then profOf[id] = maker end
-        book(rest, not maker and FARMED or nil, 0, 0)
+        book(rest, not maker and farmGroup(id) or nil, 0, 0)
       end
     elseif id and (e.k == "expired" or e.k == "cancelled") then
       local d = depo[id]
@@ -242,7 +269,7 @@ local function replay(since)
         -- Same area as its sales: an item of a learned recipe belongs to that profession.
         local maker = not profOf[id] and ns.CraftedBy and ns.CraftedBy(id)
         if maker then profOf[id] = maker end
-        local group = not profOf[id] and ((everBought[id] or manualCost(id)) and TRADE or FARMED) or nil
+        local group = not profOf[id] and ((everBought[id] or manualCost(id)) and TRADE or farmGroup(id)) or nil
         local f = figures(id, group)
         f[e.k] = f[e.k] + 1
         f.depositsLost, f.fees = f.depositsLost + amount, f.fees + amount
