@@ -21,17 +21,24 @@ local function household()
 end
 local function shownKeys() return charSel and { charSel } or household() end
 
--- A character's gold: live for the one playing, else the last stored value (Tracker snapshot,
--- updated on every change of money while that character plays).
+-- A character's gold and since when it is known: live for the one playing, else the last stored
+-- value (snapshot, kept on every change of money). Snapshots without moneyT are from before the
+-- logout fix (the client answers 0 at logout): then the gold seen at the auction house counts.
 local function goldOf(key)
-  if key == (ns.CharKey and ns.CharKey()) and GetMoney then return GetMoney() end
+  if key == (ns.CharKey and ns.CharKey()) and GetMoney then return GetMoney(), time() end
   local c = ns.db and ns.db.chars and ns.db.chars[key]
-  return c and c.money or 0
+  if c and c.moneyT then return c.money or 0, c.moneyT end
+  local owned = ns.db and ns.db.owned and ns.db.owned[key]
+  if owned and owned.g then return owned.g, owned.t end
+  return c and c.money or 0, c and c.updated
 end
+
+-- Name and realm, as the game writes it ("Lok-CAMWOW EU5 Realm 8 PvP").
+local function fullName(key) return key or "?" end
 
 function TradeBook.Gold()
   local sum = 0
-  for _, key in ipairs(shownKeys()) do sum = sum + goldOf(key) end
+  for _, key in ipairs(shownKeys()) do sum = sum + (goldOf(key)) end
   return sum
 end
 
@@ -981,22 +988,22 @@ local function buildGold(page)
     local list, total, bound = {}, 0, 0
     for _, key in ipairs(household()) do
       local c = ns.db and ns.db.chars and ns.db.chars[key] or {}
-      local gold = goldOf(key)
+      local gold, goldT = goldOf(key)
       local worth, n = auctionWorth(key)
       total, bound = total + gold, bound + worth
-      list[#list + 1] = { key = key, gold = gold, worth = worth, n = n, c = c }
+      list[#list + 1] = { key = key, gold = gold, goldT = goldT, worth = worth, n = n, c = c }
     end
     table.sort(list, function(x, y) return x.gold > y.gold end)
     local entries = { { key = "gold", header = "Charaktere" } }
     for _, x in ipairs(list) do
       local c = x.c
       local icon = c.class and (CLASS_ICON .. c.class:sub(1, 1) .. c.class:sub(2):lower()) or ICON
-      local stand = x.key == me and "jetzt (spielt)" or ago(c.moneyT or c.updated)
-      local ch = { icon = icon, name = charName(x.key),
+      local stand = x.key == me and "jetzt (spielt)" or ago(x.goldT)
+      local ch = { icon = icon, name = fullName(x.key),
         sub = string.format("Stufe %s %s", tostring(c.level or "?"), c.className or ""),
         values = { money(x.gold), total > 0 and string.format("%d %%", math.floor(x.gold / total * 100 + 0.5)) or "–",
           x.n > 0 and string.format("%s  " .. MUTED .. "(%d)|r", money(x.worth), x.n) or "–", money(x.gold + x.worth), stand } }
-      entries[#entries + 1] = { key = x.key, name = charName(x.key), icon = icon, value = money(x.gold), ch = ch }
+      entries[#entries + 1] = { key = x.key, name = fullName(x.key), icon = icon, value = money(x.gold), ch = ch }
     end
     split.SetEntries(entries)
     if balance then
@@ -1051,9 +1058,9 @@ local function buildChoices(w)
   local charLabel = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
   charLabel:SetPoint("TOPLEFT", 66, -36)
   charLabel:SetText("Charakter")
-  choices.char = chooser(f, 150, function()
+  choices.char = chooser(f, 240, function()
     local opts = { { key = "all", label = "Alle Charaktere" } }
-    for _, key in ipairs(household()) do opts[#opts + 1] = { key = key, label = charName(key) } end
+    for _, key in ipairs(household()) do opts[#opts + 1] = { key = key, label = fullName(key) } end
     return opts
   end, function() return charSel or "all" end, function(key)
     charSel = key ~= "all" and key or nil
