@@ -500,6 +500,14 @@ refreshMine = function()
   ns.ItemDetail.Refresh()
 end
 
+-- Status lines of the shown own-auction rows only ("geprüft vor 48 s").
+function Selling.RefreshMineTimes()
+  if not (panel and panel:IsShown() and mode == "mine" and mineView) then return end
+  for _, r in ipairs(mineView.items) do
+    if r:IsShown() and r.entry then r.info:SetText(Selling.MineStatus(r.entry)) end
+  end
+end
+
 -- Panel --------------------------------------------------------------------------
 
 local function createPanel(parent)
@@ -608,13 +616,16 @@ local function createPanel(parent)
     ns.Safe(Selling.Refresh)
   end, Style.C.accent)
   checkButton:SetPoint("BOTTOMRIGHT", -8, 8)
-  -- "geprüft vor 40 s" and the time left run on: refresh the sniper view once a second.
+  -- "geprüft vor 40 s" and the time left run on: once a second the sniper view is refreshed,
+  -- the own auctions only get their status lines rewritten (a full rebuild there happens on
+  -- new data: owned auctions, search results).
   local elapsed = 0
   panel:SetScript("OnUpdate", function(_, dt)
     elapsed = elapsed + (dt or 0)
     if elapsed < 1 then return end
     elapsed = 0
-    if mode == "sniper" or mode == "mine" then ns.Safe(Selling.Refresh) end
+    if mode == "sniper" then ns.Safe(Selling.Refresh)
+    elseif mode == "mine" then ns.Safe(Selling.RefreshMineTimes) end
   end)
   status = Style.Text(panel, 11)
   status:SetPoint("BOTTOMLEFT", 10, 10)

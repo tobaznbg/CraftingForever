@@ -26,8 +26,17 @@ local run = nil           -- { ids = { itemID = "waiting"|"done" }, total, done 
 local failed = {}         -- itemID -> time() of a search without an answer
 local onResult -- forward declared: the one callback for every search of this module
 
+-- Search results arrive one by one: several within a moment make one refresh.
+local refreshQueued = false
 local function changed()
-  if ns.Selling and ns.Selling.Refresh then ns.Safe(ns.Selling.Refresh) end
+  if not (ns.Selling and ns.Selling.Refresh) then return end
+  if not C_Timer then return ns.Safe(ns.Selling.Refresh) end
+  if refreshQueued then return end
+  refreshQueued = true
+  C_Timer.After(0.25, function()
+    refreshQueued = false
+    ns.Safe(ns.Selling.Refresh)
+  end)
 end
 
 local function ready()

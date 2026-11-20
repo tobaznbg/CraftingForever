@@ -62,6 +62,8 @@
 --   { t, k, u, c, cut, p, dep, lost } (lost: deposit lost by an expired/cancelled auction)
 local ADDON, ns = ...
 
+local cached, cachedKey, cachedAt = nil, nil, 0 -- whole-ledger replay cache, see replayAll
+
 local Profit = ns.Profit or {}
 ns.Profit = Profit
 
@@ -123,6 +125,7 @@ function Profit.SetManualCost(itemID, copper)
   ns.db.settings.manualCost = ns.db.settings.manualCost or {}
   ns.db.settings.manualCost[itemID] = copper and copper > 0 and math.floor(copper + 0.5) or nil
   ns.db.settings.manualCost[tostring(itemID)] = nil
+  cached = nil
 end
 
 -- "65g 20s", "65g", "20s 5c", "65" (gold), "65,5" (gold) -> copper, or nil.
@@ -267,6 +270,25 @@ local function row(id, group, f, p)
 end
 
 local NONE = { q = 0, v = 0 }
+
+-- The whole-ledger replay for the read-only lookups (UnitCost, Stock, ItemEvents), kept while
+-- the ledger is unchanged: the auction tab asks for every row once a second. Key: event count
+-- and newest event; in-place changes (a craft growing, a buy getting its mail) are picked up
+-- after CACHE_TTL at the latest; a hand-entered cost clears it (Profit.Invalidate).
+local CACHE_TTL = 5
+local function clock() return (GetTime and GetTime()) or os.clock() end
+local function replayAll()
+  local events = ns.Ledger and ns.Ledger.Events and ns.Ledger.Events() or {}
+  local last = events[#events]
+  local key = tostring(#events) .. ":" .. tostring(last)
+  local now = clock()
+  if not cached or key ~= cachedKey or now - cachedAt > CACHE_TTL then
+    cached, cachedKey, cachedAt = { replay(nil) }, key, now
+  end
+  return unpack(cached)
+end
+
+function Profit.Invalidate() cached = nil end
 
 -- Per item rows: crafted items under their profession (stock = crafted pool), TRADE rows
 -- for bought items that were sold, came back or are still there (stock = bought pool, also
@@ -432,7 +454,7 @@ local function stock(crafted, bought)
 end
 
 function Profit.Stock()
-  local _, crafted, _, _, bought = replay(nil)
+  local _, crafted, _, _, bought = replayAll()
   return stock(crafted, bought)
 end
 
@@ -492,7 +514,7 @@ function Profit.Report(since)
 end
 
 function Profit.ItemEvents(itemID, since)
-  local _, _, _, _, _, lost = replay(nil)
+  local _, _, _, _, _, lost = replayAll()
   local events = ns.Ledger and ns.Ledger.Events and ns.Ledger.Events() or {}
   local out = {}
   for i = #events, 1, -1 do
@@ -512,7 +534,7 @@ end
 --     (farmed material counts at its market value here: selling it would bring that much)
 -- Returns copper per unit and the source text, or nil.
 function Profit.UnitCost(itemID)
-  local _, crafted, _, _, bought = replay(nil)
+  local _, crafted, _, _, bought = replayAll()
   local p = crafted[itemID]
   if p and p.q > 0 and p.v > 0 then return p.v / p.q, "hergestellt" end
   p = bought[itemID]
