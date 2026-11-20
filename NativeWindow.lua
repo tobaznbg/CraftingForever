@@ -347,7 +347,8 @@ function NW.CardHead(layer)
   d.Name:SetPoint("LEFT", d.Icon, "RIGHT", 14, 6)
   d.Name:SetPoint("RIGHT", layer, "RIGHT", -20, 0)
   d.Name:SetJustifyH("LEFT")
-  d.Name:SetWordWrap(false)
+  d.Name:SetWordWrap(true) -- long names on two lines instead of cut
+  if d.Name.SetMaxLines then d.Name:SetMaxLines(2) end
   d.Sub = layer:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
   d.Sub:SetPoint("TOPLEFT", d.Name, "BOTTOMLEFT", 0, -3)
   d.Sub:SetPoint("RIGHT", layer, "RIGHT", -20, 0)

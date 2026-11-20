@@ -852,13 +852,16 @@ local function sourceLines(pid, spell)
   for _, s in ipairs(entry) do
     local npc = s[2] and s[2] > 0 and srcs.npcs and srcs.npcs[s[2]] or nil
     if not npc or npc[5] == "B" or npc[5] == mine or npc[5] == nil then
+      -- who and where on the first line (with the map button), the conditions under it
       local text = KIND[s[1]] or s[1]
       if npc then text = text .. ": " .. npc[1] .. " (" .. (npc[2] or "?") .. ")" end
-      if s.rf then text = text .. ", Ruf " .. s.rf .. " " .. (s.rs or "") end
-      if s.favor then text = text .. ", " .. s.favor .. " Gunst" end
-      if (s[3] or 0) > 0 then text = text .. ", " .. money(s[3]) end
-      if s.c == 1 then text = text .. " |cff999999(Classic-Daten)|r" end
       add(text, npc and npc[3] and { name = npc[1], zone = npc[2], x = npc[3], y = npc[4] } or nil)
+      local detail = {}
+      if s.rf then detail[#detail + 1] = "Ruf " .. s.rf .. " " .. (s.rs or "") end
+      if s.favor then detail[#detail + 1] = s.favor .. " Händlergunst" end
+      if (s[3] or 0) > 0 then detail[#detail + 1] = money(s[3]) end
+      if s.c == 1 then detail[#detail + 1] = "Classic-Daten" end
+      if #detail > 0 then add("|cff999999    " .. table.concat(detail, " · ") .. "|r") end
     end
   end
   if entry.d then
