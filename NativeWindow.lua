@@ -16,6 +16,7 @@
 --     coins (1..3 gold coins left of the name), color ({ r, g, b } of the name), locked (Blizzard's lock icon), itemID
 --     (tooltip, Alt+click market data);
 --     opts.filter = { options = { { key, label }… }, get(), set(key) }: Blizzard's filter button
+--       (several radio groups: opts.filter = { groups = { { title, options, get, set }… } })
 --   ns.NativeWindow.CardHead(layer) -> { Icon, Name, Sub, Head, itemID }: the card's head (icon in
 --     a ring, name, a small line, "Kennzahlen:"); the icon shows the item tooltip of .itemID
 --   ns.NativeWindow.Panel(parent, title)  -> an inset panel with a gold title (overview pages)
@@ -565,20 +566,27 @@ function NW.Split(page, opts)
   end
   local filter = rawget(list, "FilterDropdown") or rawget(list, "FilterButton")
   if type(filter) == "table" then
+    -- one group ({ options, get, set }) or several ({ groups = { { title, options, get, set }… } })
     local f = opts.filter
+    local groups = f and (f.groups or { f })
     if f and filter.SetupMenu then
       filter:SetupMenu(function(_, root)
-        for _, o in ipairs(f.options) do
-          root:CreateRadio(o.label, function() return f.get() == o.key end, function() f.set(o.key) end)
+        for gi, g in ipairs(groups) do
+          if gi > 1 and root.CreateDivider then root:CreateDivider() end
+          if g.title and root.CreateTitle then root:CreateTitle(g.title) end
+          for _, o in ipairs(g.options) do
+            root:CreateRadio(o.label, function() return g.get() == o.key end, function() g.set(o.key) end)
+          end
         end
       end)
       -- Blizzard's reset button next to the filter (a non-default filter): not used here
       local reset = rawget(filter, "ResetButton")
       if type(reset) == "table" and reset.Hide then reset:Hide() end
     elseif f then
+      local g = groups[1]
       filter:SetScript("OnClick", function()
-        for i, o in ipairs(f.options) do
-          if o.key == f.get() then f.set(f.options[i % #f.options + 1].key) break end
+        for i, o in ipairs(g.options) do
+          if o.key == g.get() then g.set(g.options[i % #g.options + 1].key) break end
         end
       end)
     elseif filter.Hide then

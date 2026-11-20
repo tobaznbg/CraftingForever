@@ -521,6 +521,17 @@ local FILTERS = {
   { key = "learned", label = "Nur gelernte" },
   { key = "all", label = "Alle Rezepte" },
 }
+-- Level of the product (the level needed to use it): everything, "for me" (the character's level
+-- and the 9 below), or a range. Unknown levels (item not loaded yet) count once they arrive.
+local LEVELS = {
+  { key = "all", label = "Alle Stufen" },
+  { key = "me", label = "Für mich" },
+  { key = "1-19", label = "Stufe 1–19" },
+  { key = "20-29", label = "Stufe 20–29" },
+  { key = "30-39", label = "Stufe 30–39" },
+  { key = "40-49", label = "Stufe 40–49" },
+  { key = "50-60", label = "Stufe 50–60" },
+}
 local MAX_REAGENTS = 8
 local productsWindow, productsSplit, productsPID
 
@@ -537,6 +548,38 @@ end
 local function filterKey()
   local ui = ns.db and ns.db.ui
   return ui and ui.productsFilter or "attractive"
+end
+
+local function levelKey()
+  local ui = ns.db and ns.db.ui
+  return ui and ui.productsLevel or "all"
+end
+
+-- The level needed to use an item (0 = none), nil while the client has not loaded it (asked for).
+local pendingLevels = false
+local function useLevel(itemID)
+  local get = (C_Item and C_Item.GetItemInfo) or GetItemInfo
+  if not get then return 0 end
+  local name, _, _, _, minLevel = get(itemID) -- not "get and get(…)": that keeps only the name
+  if name then return minLevel or 0 end
+  if C_Item and C_Item.RequestLoadItemDataByID then pcall(C_Item.RequestLoadItemDataByID, itemID) end
+  pendingLevels = true
+  return nil
+end
+
+local function levelRange(key)
+  if key == "me" then
+    local lv = UnitLevel and UnitLevel("player") or 60
+    return math.max(1, lv - 9), lv
+  end
+  local lo, hi = tostring(key):match("^(%d+)%-(%d+)$")
+  return tonumber(lo), tonumber(hi)
+end
+
+local function levelOK(e, lo, hi)
+  if not lo then return true end
+  local lv = useLevel(e.itemID)
+  return lv ~= nil and lv > 0 and lv >= lo and lv <= hi
 end
 
 -- Category name and order of the game (asked while the profession is open, kept for later).
@@ -565,9 +608,11 @@ local function productEntries(pid)
   end
   -- the filter only leaves recipes out; the game's categories stay as in "Alle Rezepte"
   local kept = {}
+  local lo, hi = levelRange(levelKey())
   for _, e in ipairs(list) do
     e.attractive, e.why, e.rank = ns.CraftAttractive(e)
-    if (key ~= "attractive" or e.attractive) and (key ~= "profit" or (e.profit > 0 and e.onAH)) then
+    if (key ~= "attractive" or e.attractive) and (key ~= "profit" or (e.profit > 0 and e.onAH))
+      and levelOK(e, lo, hi) then
       kept[#kept + 1] = e
     end
   end
@@ -711,8 +756,6 @@ local function productCard(c)
   v.Line = c:CreateTexture(nil, "ARTWORK")
   v.Line:SetColorTexture(1, 0.82, 0, 0.25)
   v.Line:SetHeight(1)
-  v.Verdict = c:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-  v.Verdict:SetJustifyH("LEFT")
   return v
 end
 
@@ -721,7 +764,7 @@ local function showProduct(entry, c)
   local v = c.m4Product
   local e = entry and entry.e
   local shown = e ~= nil
-  for _, part in ipairs({ v.Icon, v.Ring, v.Name, v.Sub, v.Head, v.LearnHead, v.Source, v.Line, v.Verdict }) do part:SetShown(shown) end
+  for _, part in ipairs({ v.Icon, v.Ring, v.Name, v.Sub, v.Head, v.LearnHead, v.Source, v.Line }) do part:SetShown(shown) end
   for _, row in ipairs(v.rows) do row.label:SetShown(shown); row.value:SetShown(shown) end
   for _, r in ipairs(v.reagents) do r.Slot:Hide(); r.Name:Hide(); r.Price:Hide(); r.itemID = nil end
   if productsSplit and productsSplit.empty then
@@ -771,10 +814,6 @@ local function showProduct(entry, c)
   v.Line:ClearAllPoints()
   v.Line:SetPoint("BOTTOMLEFT", gewinn, "TOPLEFT", 0, 3)
   v.Line:SetPoint("RIGHT", c, "RIGHT", -RIGHT_EDGE + 2, 0)
-  v.Verdict:ClearAllPoints()
-  v.Verdict:SetPoint("TOPLEFT", gewinn, "BOTTOMLEFT", 0, -10)
-  v.Verdict:SetText(e.attractive and "|cff5fd38dattraktiv: Gewinn und Nachfrage stimmen|r"
-    or ("nicht attraktiv: " .. (e.why or "?")))
 end
 
 local function refreshProducts()
@@ -784,6 +823,8 @@ local function refreshProducts()
   local f = productsWindow.frame
   if f.SetTitle then pcall(f.SetTitle, f, title) end
   if data and data.icon and f.SetPortraitToAsset then pcall(f.SetPortraitToAsset, f, data.icon) end
+  LEVELS[2].label = string.format("Für mich (Stufe %d–%d)", levelRange("me"))
+  pendingLevels = false
   productsSplit.SetEntries(data and productEntries(productsPID) or {})
   if not data and productsSplit.empty then productsSplit.empty:SetText("Dieser Beruf stellt keine Produkte her.") end
 end
@@ -796,11 +837,18 @@ local function createProducts()
   productsWindow:AddTab({ key = "products", title = "Alle Produkte", hidden = true, build = function(page)
     productsSplit = NW.Split(page, {
       onSelect = showProduct,
-      filter = { options = FILTERS, get = filterKey, set = function(key)
-        ns.db.ui = ns.db.ui or {}
-        ns.db.ui.productsFilter = key
-        refreshProducts()
-      end },
+      filter = { groups = {
+        { title = "Rezepte", options = FILTERS, get = filterKey, set = function(key)
+          ns.db.ui = ns.db.ui or {}
+          ns.db.ui.productsFilter = key
+          refreshProducts()
+        end },
+        { title = "Stufe", options = LEVELS, get = levelKey, set = function(key)
+          ns.db.ui = ns.db.ui or {}
+          ns.db.ui.productsLevel = key
+          refreshProducts()
+        end },
+      } },
     })
   end, onShow = function() refreshProducts() end })
 end
@@ -847,6 +895,18 @@ function Products.Toggle(pid)
     Products.Show(pid)
   end
 end
+
+-- Item data arrives (the levels asked for by the level filter): the open list follows, once
+-- per burst.
+local levelRefresh = false
+ns.On("GET_ITEM_INFO_RECEIVED", function()
+  if not (pendingLevels and productsWindow and productsWindow.frame:IsShown()) or levelRefresh then return end
+  levelRefresh = true
+  C_Timer.After(0.5, function()
+    levelRefresh = false
+    ns.Safe(refreshProducts)
+  end)
+end)
 
 -- New live prices: the open list follows.
 ns.OnReady(function()
