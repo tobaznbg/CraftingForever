@@ -75,8 +75,15 @@ Profit.TRADE, Profit.FARMED = TRADE, FARMED
 
 -- Gathered goods count for their gathering profession, not as loot: leather, hides and scales
 -- for skinning, ore, stone and gems for mining, herbs for herbalism (ns.Gathering).
+-- Made with a profession's tool rather than a recipe (no craft in the ledger): its profession.
+local TOOL_PRODUCTS = {
+  [15409] = "Lederverarbeitung", -- Raffiniertes Tiefsteinsalz (Salzstreuer, Lederverarbeitung 250)
+}
+Profit.TOOL_PRODUCTS = TOOL_PRODUCTS
+
 local gatherOf
 local function farmGroup(itemID)
+  if TOOL_PRODUCTS[itemID] then return TOOL_PRODUCTS[itemID] end
   if not gatherOf then
     gatherOf = {}
     for _, g in ipairs(ns.Gathering or {}) do
