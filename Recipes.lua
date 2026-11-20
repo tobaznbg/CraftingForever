@@ -129,7 +129,8 @@ function Recipes.Scan()
     end
   end
 
-  if profName then
+  -- The window can report an empty name while it is still loading: no scan without one.
+  if type(profName) == "string" and profName ~= "" then
     ns.db.recipes = ns.db.recipes or {}
     ns.db.recipes[ns.CharKey() .. ":" .. profName] = scan
     Recipes.SnapshotPrices(scan)
@@ -170,3 +171,13 @@ end
 
 ns.On("TRADE_SKILL_SHOW", scheduleScan)
 ns.On("TRADE_SKILL_LIST_UPDATE", scheduleScan)
+
+-- Scans stored without a profession name ("Name-Realm:") by older versions are dropped:
+-- the cloud sync rejects them, and the next scan of the window stores the named one.
+if ns.OnReady then
+  ns.OnReady(function()
+    for key in pairs(ns.db.recipes or {}) do
+      if type(key) == "string" and key:sub(-1) == ":" then ns.db.recipes[key] = nil end
+    end
+  end)
+end
