@@ -572,7 +572,8 @@ function Ledger.Household()
   local me = ns.CharKey()
   local realm = me:match("^[^-]+%-(.+)$")
   local mine = ns.db.chars and ns.db.chars[me]
-  local faction = mine and mine.faction
+  -- the own faction live from the game (a new character's snapshot may not be written yet)
+  local faction = (UnitFactionGroup and UnitFactionGroup("player")) or (mine and mine.faction)
   local keys, seen = { me }, { [me] = true }
   local function consider(key)
     if seen[key] or type(key) ~= "string" then return end
@@ -641,12 +642,18 @@ ns.OnReady(function()
   table.sort(events, function(x, y) return (x.t or 0) < (y.t or 0) end)
 end)
 
--- One-time import of purchases the sniper logged before the ledger existed (16 Nov 2026).
--- Those were item purchases of one auction each (the sniper then miscounted the units).
+-- One-time import of purchases the sniper logged before the ledger existed (16 Nov 2026), once
+-- per account: the log is the account's, its purchases were the first character's. (Until
+-- 20 Nov 2026 every new character imported them again; those copies are removed below.)
 ns.OnReady(function()
   local b = book()
   if b.imported then return end
   b.imported = true
+  local anyImported = false
+  for key, other in pairs(ns.db.ledger or {}) do
+    if key ~= ns.CharKey() and type(other) == "table" and other.imported then anyImported = true end
+  end
+  if anyImported then return end
   local log = ns.db.sniper and ns.db.sniper.log or {}
   for _, e in ipairs(log) do
     if e.k == "buy" and e.c then
@@ -655,3 +662,31 @@ ns.OnReady(function()
   end
   table.sort(b.events, function(x, y) return x.t < y.t end)
 end)
+
+-- Clean-up (20 Nov 2026): the sniper log's purchases copied into later characters. A purchase of
+-- the log stays only in the book that has the most events (the character that really bought
+-- them). Runs every session, also after the cloud sync merged its copies back in.
+local function removeSniperCopies()
+  local log = ns.db.sniper and ns.db.sniper.log or {}
+  local fromLog = {}
+  for _, e in ipairs(log) do
+    if e.k == "buy" and e.c then fromLog[tostring(e.t) .. ":" .. tostring(e.i) .. ":" .. tostring(e.c)] = true end
+  end
+  if not next(fromLog) then return end
+  local owner, most = nil, -1
+  for key, b in pairs(ns.db.ledger or {}) do
+    if type(b) == "table" and #(b.events or {}) > most then owner, most = key, #(b.events or {}) end
+  end
+  for key, b in pairs(ns.db.ledger or {}) do
+    if key ~= owner and type(b) == "table" and b.events then
+      local keep = {}
+      for _, e in ipairs(b.events) do
+        local k = tostring(e.t) .. ":" .. tostring(e.i) .. ":" .. tostring(e.c)
+        if not (e.k == "buy" and fromLog[k] and not e.m) then keep[#keep + 1] = e end
+      end
+      b.events = keep
+    end
+  end
+end
+ns.OnReady(function() ns.Safe(removeSniperCopies) end)
+ns.On("PLAYER_LOGIN", function() ns.Safe(removeSniperCopies) end)
