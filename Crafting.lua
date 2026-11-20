@@ -592,6 +592,7 @@ end
 -- An item's quality (0 poor … 5 legendary), nil while the client has not loaded it (asked for;
 -- the window follows when it arrives).
 local function quality(itemID)
+  if not itemID then return nil end
   local q = C_Item and C_Item.GetItemQualityByID and C_Item.GetItemQualityByID(itemID)
   if q == nil and GetItemInfo then q = select(3, GetItemInfo(itemID)) end
   if q == nil then

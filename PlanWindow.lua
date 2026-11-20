@@ -811,6 +811,19 @@ ns.OnReady(function()
   end
 end)
 
+-- A new profession scan (the skill rose while crafting): plan from the new skill. A kept plan
+-- stays kept, its done points fall away (Planner.Replay).
+local lastRank
+if ns.Recipes and ns.Recipes.OnScanned then
+  ns.Recipes.OnScanned(function(scan)
+    if not (window and window.frame:IsShown() and pid and scan.professionID == pid) then return end
+    if scan.rank == lastRank then return end
+    lastRank = scan.rank
+    dirty = true
+    ns.Safe(refresh)
+  end)
+end
+
 -- Bags change (bought, crafted, taken from the bank): the card's stock follows, the plan stays.
 local pending = false
 ns.On("BAG_UPDATE_DELAYED", function()

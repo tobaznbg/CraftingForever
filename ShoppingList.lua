@@ -33,7 +33,7 @@ local function itemIcon(id)
   return id and get and get(id) or nil
 end
 local function qualityName(id, name)
-  local q = C_Item and C_Item.GetItemQualityByID and C_Item.GetItemQualityByID(id)
+  local q = id and C_Item and C_Item.GetItemQualityByID and C_Item.GetItemQualityByID(id) -- no id: a pattern without item
   local c = q and ITEM_QUALITY_COLORS and ITEM_QUALITY_COLORS[q]
   return c and c.hex and (c.hex .. name .. "|r") or name
 end
@@ -621,6 +621,24 @@ function List.Toggle()
 end
 
 function List.Frame() return window and window.frame end
+
+-- A craft of a recipe on the list counts it down (by what one craft makes); done, it leaves the
+-- list. The recipe id of the trade skill is the spell id of the cast.
+ns.On("UNIT_SPELLCAST_SUCCEEDED", function(_, unit, _, spellID)
+  if unit ~= "player" or not spellID then return end
+  local list = wishes()
+  for i, w in ipairs(list) do
+    if w.rid == spellID and w.kind ~= "pattern" then
+      local r = scanRecipe(w.rid)
+      local per = r and made(r) or w.q or 1
+      w.n = w.n - per
+      if w.n <= 0 then table.remove(list, i) end
+      changed()
+      if window and window.frame:IsShown() then ns.Safe(refresh) end
+      return
+    end
+  end
+end)
 
 -- Bags change (bought, crafted, taken from the bank): the open window follows, once per burst.
 local pending = false

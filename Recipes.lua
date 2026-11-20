@@ -134,8 +134,14 @@ function Recipes.Scan()
     ns.db.recipes = ns.db.recipes or {}
     ns.db.recipes[ns.CharKey() .. ":" .. profName] = scan
     Recipes.SnapshotPrices(scan)
+    -- the skill may have changed (a skill-up while crafting): windows that plan follow
+    for _, fn in ipairs(Recipes.listeners) do ns.Safe(fn, scan) end
   end
 end
+
+-- fn(scan) after every stored scan (PlanWindow: plan from the new skill).
+Recipes.listeners = {}
+function Recipes.OnScanned(fn) table.insert(Recipes.listeners, fn) end
 
 -- Stores current auction and vendor-sell prices for every reagent and product,
 -- so the path planner can also run outside the game.
