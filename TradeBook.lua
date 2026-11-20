@@ -209,9 +209,10 @@ end
 local KINDS = { buy = "Kauf", sale = "Verkauf", vendor = "Händler", post = "Eingestellt", expired = "Abgelaufen",
   cancelled = "Abgebrochen", craft = "Hergestellt" }
 
+-- The last 20 trades (all of them: the "Handelsbuch" tab).
 local function tradeRows()
   local out = {}
-  for _, e in ipairs(ns.Ledger and ns.Ledger.Recent and ns.Ledger.Recent(300) or {}) do
+  for _, e in ipairs(ns.Ledger and ns.Ledger.Recent and ns.Ledger.Recent(20) or {}) do
     local amount = ""
     if e.k == "buy" then amount = RED .. "-" .. money(e.c) .. "|r"
     elseif e.k == "sale" then amount = GREEN .. "+" .. money((e.c or 0) - (e.cut or 0)) .. "|r"
@@ -277,14 +278,14 @@ local function buildOverview(page, w)
   local auc = card(page, w, 5, -41 - TOP_H + 4, 664, AH, "Laufende Auktionen")
   local aucInfo = auc:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
   aucInfo:SetPoint("TOPRIGHT", -20, -18)
-  local setAuctions = scrollTable(auc, { { "Gegenstand", 20, "LEFT", 330 }, { "Preis", 470, "RIGHT" },
-    { "Status", 580, "RIGHT" }, { "Zeit", 640, "RIGHT" } }, -42)
+  local setAuctions = scrollTable(auc, { { "Gegenstand", 20, "LEFT", 330 }, { "Preis", 450, "RIGHT" },
+    { "Status", 565, "RIGHT" }, { "Zeit", 612, "RIGHT" } }, -42)
 
   -- 4. recent trades (full width), scrollable
   local trTop = -41 - TOP_H + 4 - AH + 4
   local tr = card(page, w, 5, trTop, 664, 594 + trTop - 10, "Letzte Vorgänge")
-  local setTrades = scrollTable(tr, { { "Item", 20, "LEFT", 270 }, { "Wann · Art", 330, "LEFT", 170 },
-    { "Menge", 540, "RIGHT" }, { "Betrag", 640, "RIGHT" } }, -42)
+  local setTrades = scrollTable(tr, { { "Item", 20, "LEFT", 270 }, { "Wann · Art", 320, "LEFT", 170 },
+    { "Menge", 520, "RIGHT" }, { "Betrag", 612, "RIGHT" } }, -42)
 
   function page.Refresh()
     local label
