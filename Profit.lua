@@ -63,6 +63,7 @@
 local ADDON, ns = ...
 
 local cached, cachedKey, cachedAt = nil, nil, 0 -- whole-ledger replay cache, see replayAll
+local heldCache, heldAt = nil, 0 -- what the character holds, for UnitCost (refreshed every 2 s)
 
 local Profit = ns.Profit or {}
 ns.Profit = Profit
@@ -535,10 +536,19 @@ end
 -- Returns copper per unit and the source text, or nil.
 function Profit.UnitCost(itemID)
   local _, crafted, _, _, bought = replayAll()
+  -- Holding more than the ledger's pool (e.g. 1 crate bought, 1674 looted): the extra units are
+  -- loot and cost nothing, the average is spread over all units held.
+  local now = clock()
+  if not heldCache or now - heldAt > 2 then heldCache, heldAt = heldCounts() or false, now end
+  local have = heldCache and heldCache[itemID] or 0
+  local function average(pool, source)
+    if have > pool.q then return pool.v / have, source .. " + Beute" end
+    return pool.v / pool.q, source
+  end
   local p = crafted[itemID]
-  if p and p.q > 0 and p.v > 0 then return p.v / p.q, "hergestellt" end
+  if p and p.q > 0 and p.v > 0 then return average(p, "hergestellt") end
   p = bought[itemID]
-  if p and p.q > 0 then return p.v / p.q, "gekauft" end
+  if p and p.q > 0 then return average(p, "gekauft") end
   local m = manualCost(itemID)
   if m then return m, "von Hand eingetragen" end
   local c = ns.CraftingCost and ns.CraftingCost(itemID)
