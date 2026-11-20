@@ -781,7 +781,7 @@ local function collectAuctions()
     local profit = cost and r.unit and math.floor((r.unit * 0.95 - cost) * qty) or nil
     local name = ns.ItemName(r.itemID) or ("#" .. tostring(r.itemID))
     g.items[#g.items + 1] = { key = bucket .. ":" .. tostring(r.itemID), itemID = r.itemID, icon = iconOf(r.itemID),
-      name = name, sub = status, profit = profit or -1e12,
+      name = name, sub = status, profit = profit or -1e12, worth = (r.unit or 0) * qty,
       cols = { name, r.unit and money(r.unit) or "–", profit and signed(profit) or "–" },
       values = { tostring(qty), r.unit and money(r.unit) or "–", r.foreign and money(r.foreign) or "–", status,
         r.timeLeft and string.format("%d h", math.ceil(r.timeLeft / 3600)) or "–",
@@ -820,15 +820,57 @@ local function collectAuctions()
   return { groups = out, balance = { tostring(total.count), money(total.worth), signed(total.profit) } }
 end
 
+-- Auctions: left every running auction as a row, dearest first (price right), right its details;
+-- the balance under the list.
 local function buildAuctions(page)
-  buildGrouped(page, {
-    title = "Status",
-    groupLabels = { "Auktionen", "Wert (Kaufpreis)", "Erlös nach Gebühr", "Gewinn" },
-    itemLabels = { "Stück", "Mein Preis", "Billigst fremd", "Status", "Restzeit", "Einkauf / Stk.", "Gewinn" },
-    listCols = { { "Item", 20, "LEFT", 170 }, { "Preis", 245, "RIGHT" }, { "Gewinn", 315, "RIGHT" } },
-    balanceLabels = { "Auktionen", "Wert", "Gewinn" },
-    collect = collectAuctions,
+  local NW = ns.NativeWindow
+  local LABELS = { "Stück", "Mein Preis", "Billigst fremd", "Status", "Restzeit", "Einkauf / Stk.", "Gewinn" }
+  local view
+  local split = NW.Split(page, {
+    footer = 22 + 3 * 15 + 16,
+    onSelect = function(entry, c)
+      if not view then
+        view = head(c)
+        view.Figures = NW.Figures(c, view.Head, LABELS)
+        local function widths(fr) view.Figures.SetWidth(math.max(100, (fr:GetWidth() or 340) - 46)) end
+        widths(c)
+        c:HookScript("OnSizeChanged", widths)
+      end
+      local it = entry and entry.it
+      for _, part in ipairs({ view.Icon, view.Name, view.Sub, view.Head }) do part:SetShown(it ~= nil) end
+      for i, fs in ipairs(view.Figures.values) do fs:SetShown(it ~= nil); view.Figures.labels[i]:SetShown(it ~= nil) end
+      if view.Figures.line then view.Figures.line:SetShown(it ~= nil) end
+      if not it then return end
+      view.Icon:SetTexture(it.icon)
+      view.itemID = it.itemID
+      view.Name:SetText(it.name)
+      view.Sub:SetText(it.sub)
+      for i, fs in ipairs(view.Figures.values) do fs:SetText(it.values[i] or "–") end
+    end,
   })
+  local balance
+  if split.footer then
+    local title = split.footer:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    title:SetPoint("TOPLEFT", 6, -8)
+    title:SetText("Bilanz")
+    balance = NW.Figures(split.footer, title, { "Auktionen", "Wert", "Gewinn" }, { gap = 6, step = 15 })
+    balance.SetWidth(math.max(100, (split.footer:GetWidth() or 280) - 14))
+    split.footer:HookScript("OnSizeChanged", function(f) balance.SetWidth(math.max(100, (f:GetWidth() or 280) - 14)) end)
+  end
+  function page.Refresh()
+    local data = collectAuctions()
+    local items = {}
+    for _, g in ipairs(data.groups) do
+      for _, it in ipairs(g.items) do items[#items + 1] = it end
+    end
+    table.sort(items, function(x, y) return (x.worth or 0) > (y.worth or 0) end)
+    local entries = { { key = "auctions", header = "Laufende Auktionen" } }
+    for _, it in ipairs(items) do
+      entries[#entries + 1] = { key = it.key, name = it.name, icon = it.icon, itemID = it.itemID, value = it.cols[2], it = it }
+    end
+    split.SetEntries(entries)
+    if balance then for i, fs in ipairs(balance.values) do fs:SetText(data.balance[i] or "–") end end
+  end
 end
 
 local function refreshPage(page) if page.Refresh then page.Refresh() end end
