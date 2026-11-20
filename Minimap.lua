@@ -38,12 +38,13 @@ local function create()
   border:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
 
   button:SetScript("OnClick", function(_, mouse)
+    -- for now (pilot): left click the ledger window in Blizzard's look, right click the main window
     if mouse == "RightButton" then
-      ns.Safe(ns.PlannerUI.Show, "ledger")
+      if ns.MainUI then ns.Safe(ns.MainUI.Toggle) else ns.Safe(ns.PlannerUI.Toggle) end
+    elseif ns.TradeBook then
+      ns.Safe(ns.TradeBook.Toggle)
     elseif ns.MainUI then
       ns.Safe(ns.MainUI.Toggle)
-    else
-      ns.Safe(ns.PlannerUI.Toggle)
     end
   end)
   button:SetScript("OnDragStart", function(self)
@@ -60,7 +61,7 @@ local function create()
     GameTooltip:SetOwner(self, "ANCHOR_LEFT")
     GameTooltip:AddLine("m4-companion")
     GameTooltip:AddLine(ns.Status.Text(), 0.8, 0.8, 0.8)
-    GameTooltip:AddLine("Linksklick: Fenster  ·  Rechtsklick: Handelsbuch", 0.6, 0.6, 0.6)
+    GameTooltip:AddLine("Linksklick: Handelsbuch  ·  Rechtsklick: Fenster", 0.6, 0.6, 0.6)
     GameTooltip:Show()
   end)
   button:SetScript("OnLeave", function() GameTooltip:Hide() end)
