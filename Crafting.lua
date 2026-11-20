@@ -1185,6 +1185,7 @@ end
 
 Products.Entries = productEntries -- for tests
 Products.SourceLines = sourceLines
+Products.OpenProfessionID = openProfessionID
 
 function Products.Show(pid)
   if not productsWindow then createProducts() end
@@ -1203,6 +1204,29 @@ function Products.SyncTab()
   set(Products.tab, productsWindow and productsWindow.frame:IsShown())
   local shop = ns.ShoppingList and ns.ShoppingList.Frame and ns.ShoppingList.Frame()
   set(Products.shopTab, shop and shop:IsShown())
+  local plan = ns.PlanWindow and ns.PlanWindow.Frame and ns.PlanWindow.Frame()
+  set(Products.planTab, plan and plan:IsShown())
+end
+
+-- "Planer" leftmost under the profession window, only for crafting professions (PlanWindow.lua);
+-- without it "Alle Produkte" moves to its place. Follows the open profession (TRADE_SKILL_SHOW,
+-- and a switch inside the window: checked by the page's update).
+function Products.UpdateTabs()
+  local tab, plan = Products.tab, Products.planTab
+  local pf = rawget(_G, "ProfessionsFrame")
+  if not (tab and type(pf) == "table") then return end
+  local pid = openProfessionID()
+  Products.tabPID = pid or false
+  local showPlan = plan ~= nil and ns.PlanWindow ~= nil and ns.PlanWindow.ForProfession(pid)
+  tab:ClearAllPoints()
+  if showPlan then
+    plan:Show()
+    tab:SetPoint("LEFT", plan, "RIGHT", 4, 0)
+  else
+    if plan then plan:Hide() end
+    tab:SetPoint("TOPLEFT", pf, "BOTTOMLEFT", 12, 2)
+  end
+  Products.SyncTab()
 end
 
 -- The tab: closes the window, unless it shows another profession (then it switches).
@@ -1437,6 +1461,15 @@ local function attachProfessions()
     if PanelTemplates_TabResize then pcall(PanelTemplates_TabResize, tab, 0) end
     tab:SetPoint("TOPLEFT", pf, "BOTTOMLEFT", 12, 2)
     Products.tab = tab
+    -- "Planer" left of it (PlanWindow.lua), for crafting professions (Products.UpdateTabs)
+    local okP, plan = pcall(CreateFrame, "Button", "M4CompanionPlannerTab", pf, "PanelTabButtonTemplate")
+    if okP and plan then
+      plan:SetText("Planer")
+      if PanelTemplates_TabResize then pcall(PanelTemplates_TabResize, plan, 0) end
+      plan:SetPoint("TOPLEFT", pf, "BOTTOMLEFT", 12, 2)
+      plan:SetScript("OnClick", function() if ns.PlanWindow then ns.Safe(ns.PlanWindow.Toggle) end end)
+      Products.planTab = plan
+    end
     tab:SetScript("OnClick", function() ns.Safe(Products.Toggle) end)
     -- "Einkaufsliste" next to it (ShoppingList.lua): the list is always one click away
     local okS, shop = pcall(CreateFrame, "Button", "M4CompanionShoppingTab", pf, "PanelTabButtonTemplate")
@@ -1447,13 +1480,15 @@ local function attachProfessions()
       shop:SetScript("OnClick", function() if ns.ShoppingList then ns.Safe(ns.ShoppingList.Toggle) end end)
       Products.shopTab = shop
     end
-    Products.SyncTab()
+    Products.UpdateTabs()
   end
   local elapsed = 0
   layer:SetScript("OnUpdate", function(_, dt)
     elapsed = elapsed + (dt or 0)
     if elapsed < 0.4 then return end
     elapsed = 0
+    -- another profession opened inside the window: the planner tab follows
+    if Products.tab and (openProfessionID() or false) ~= Products.tabPID then ns.Safe(Products.UpdateTabs) end
     if type(list) == "table" then ns.Safe(updateList, list) end
     if type(form) == "table" and form:IsShown() then ns.Safe(updateForm, form) end
   end)
@@ -1462,6 +1497,12 @@ end
 if ns.On then
   ns.On("TRADE_SKILL_SHOW", function()
     ns.Safe(attachProfessions)
-    if C_Timer then C_Timer.After(0.3, function() ns.Safe(attachProfessions) end) end
+    ns.Safe(Products.UpdateTabs)
+    if C_Timer then
+      C_Timer.After(0.3, function()
+        ns.Safe(attachProfessions)
+        ns.Safe(Products.UpdateTabs)
+      end)
+    end
   end)
 end

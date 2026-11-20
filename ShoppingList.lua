@@ -57,13 +57,35 @@ local function ownScans()
   return out
 end
 
--- A recipe (spell id) of the scans: recipe { r = { { i, n }… }, out, qmin, qmax }, its scan.
+-- A recipe not in any scan (not learned yet, e.g. a step of the planner, PlanWindow.lua) from
+-- the skill data (ns.SkillData[pid].recipes[spellID]: flat r = { itemID, count, … }, out, qty)
+-- in the scan's shape; never learned, so it is no maker of intermediates. Cached by spell id.
+local skillRecipes = {}
+local function skillRecipe(rid)
+  local hit = skillRecipes[rid]
+  if hit then return hit.recipe, hit.scan end
+  for pid, skill in pairs(ns.SkillData or {}) do
+    local d = type(skill) == "table" and type(skill.recipes) == "table" and skill.recipes[rid]
+    if d and d.out then
+      local reagents, flat = {}, d.r or {}
+      for i = 1, #flat - 1, 2 do reagents[#reagents + 1] = { i = flat[i], n = flat[i + 1] } end
+      hit = { recipe = { r = reagents, out = d.out, qmin = d.qty or 1, qmax = d.qty or 1, name = d.name },
+        scan = { professionID = pid, recipes = {} } }
+      skillRecipes[rid] = hit
+      return hit.recipe, hit.scan
+    end
+  end
+  return nil
+end
+
+-- A recipe (spell id) of the scans: recipe { r = { { i, n }… }, out, qmin, qmax }, its scan;
+-- a recipe no scan has comes from the skill data (skillRecipe).
 local function scanRecipe(rid)
   for _, scan in ipairs(ownScans()) do
     local r = scan.recipes[rid]
     if r then return r, scan end
   end
-  return nil
+  return skillRecipe(rid)
 end
 
 -- The learned recipe that makes an item (an intermediate), or nil.

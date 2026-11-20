@@ -49,6 +49,7 @@ Invest.lua
 Trends.lua
 Crafting.lua
 ShoppingList.lua
+PlanWindow.lua
 Vendor.lua
 BagMarks.lua
 Patterns.lua
