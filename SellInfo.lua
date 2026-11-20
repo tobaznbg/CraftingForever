@@ -262,6 +262,100 @@ function SellInfo.AuctionText(id, unit, qty)
     .. (profit >= 0 and ("|cff5fd38dGewinn +" .. short(profit)) or ("|cffff6b6bGewinn -" .. short(-profit))) .. "|r"
 end
 
+-- Own columns: Blizzard builds the table from a layout function (AuctionHouseTableBuilder.
+-- GetAllAuctionsLayout). It runs on a stand-in for the table builder that adds two text columns
+-- "Einkauf" and "Gewinn" where Blizzard adds the bid price column (always empty when posting
+-- with buyout only). The cells are filled from the rows' data (updateAuctionRows).
+local BID_TEMPLATE, TEXT_TEMPLATE = "AuctionHouseTableCellAuctionsBidTemplate", "AuctionHouseTableCellTextTemplate"
+local OWN_WIDTH = 92
+SellInfo.columns = false -- true once the own columns are in the table
+
+local function silentColumn(col)
+  -- the caller names the replaced column "Gebotspreis": that text is ignored, ours stays
+  return setmetatable({ GetHeaderFrame = function()
+    local header = col:GetHeaderFrame()
+    return setmetatable({ SetText = function() end }, { __index = function(_, k)
+      local v = header[k]
+      if type(v) == "function" then return function(_, ...) return v(header, ...) end end
+      return v
+    end })
+  end }, { __index = function(_, k)
+    local v = col[k]
+    if type(v) == "function" then return function(_, ...) return v(col, ...) end end
+    return v
+  end })
+end
+
+local function wrapLayout(original)
+  return function(tableBuilder)
+    local replaced = false
+    local function addOwn(method, ...)
+      local args = { ... }
+      local n = select("#", ...)
+      for i = 1, n do
+        if args[i] == BID_TEMPLATE then
+          for k = 1, n do
+            if type(args[k]) == "number" and args[k] > 60 then args[k] = OWN_WIDTH break end -- the width
+          end
+          args[i] = TEXT_TEMPLATE
+          local cost = method(tableBuilder, unpack(args, 1, n))
+          local profit = method(tableBuilder, unpack(args, 1, n))
+          cost:GetHeaderFrame():SetText("Einkauf")
+          profit:GetHeaderFrame():SetText("Gewinn")
+          replaced = true
+          return silentColumn(cost)
+        end
+      end
+      return method(tableBuilder, ...)
+    end
+    local proxy = setmetatable({}, { __index = function(_, k)
+      local v = tableBuilder[k]
+      if type(v) ~= "function" then return v end
+      if k == "AddFixedWidthColumn" or k == "AddUnsortableFixedWidthColumn" then
+        return function(_, ...) return addOwn(v, ...) end
+      end
+      return function(_, ...) return v(tableBuilder, ...) end
+    end })
+    original(proxy)
+    SellInfo.columns = replaced
+  end
+end
+
+local function installColumns(af)
+  local tb = rawget(_G, "AuctionHouseTableBuilder")
+  local list = auctionsList(af)
+  if not (type(tb) == "table" and tb.GetAllAuctionsLayout and list and list.SetTableBuilderLayout) then return end
+  local ok = pcall(function()
+    list:SetTableBuilderLayout(wrapLayout(tb.GetAllAuctionsLayout(af, list)))
+    if list.RefreshScrollFrame then list:RefreshScrollFrame() end
+  end)
+  if not ok then SellInfo.columns = false end
+end
+
+-- The text of a cell of the own columns.
+local function cellText(cell)
+  local t = rawget(cell, "Text")
+  if type(t) == "table" and t.SetText then return t end
+  if not cell.m4Text then
+    cell.m4Text = cell:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    cell.m4Text:SetPoint("RIGHT", cell, "RIGHT", -6, 0)
+    cell.m4Text:SetJustifyH("RIGHT")
+  end
+  return cell.m4Text
+end
+
+-- Values of the two columns: cost of the units, profit after the cut ("" without a cost).
+function SellInfo.AuctionValues(id, unit, qty)
+  if not (id and unit and unit > 0 and ns.Profit and ns.Profit.UnitCost) then return "", "" end
+  local cost = ns.Profit.UnitCost(id)
+  if not cost then return "|cff999999–|r", "|cff999999–|r" end
+  qty = qty or 1
+  local profit = math.floor((unit * (1 - CUT) - cost) * qty)
+  local fmt = function(c) return ns.FormatMoney(c, true) end
+  return fmt(math.floor(cost * qty + 0.5)),
+    profit >= 0 and ("|cff5fd38d+" .. fmt(profit) .. "|r") or ("|cffff6b6b-" .. fmt(-profit) .. "|r")
+end
+
 local probed = false
 local function updateAuctionRows(af)
   local list = auctionsList(af)
@@ -270,12 +364,21 @@ local function updateAuctionRows(af)
     local d = rowData(row)
     local key = d and d.itemKey
     local id = type(key) == "table" and key.itemID or nil
-    local text
-    if id and not ((d.bidAmount or 0) > 0) then
-      text = SellInfo.AuctionText(id, d.buyoutAmount, d.quantity)
+    local cells = rawget(row, "cells")
+    if SellInfo.columns and type(cells) == "table" and cells[2] and cells[3] then
+      local costText, profitText = "", ""
+      if id then costText, profitText = SellInfo.AuctionValues(id, d.buyoutAmount, d.quantity) end
+      cellText(cells[2]):SetText(costText or "")
+      cellText(cells[3]):SetText(profitText or "")
+      if row.m4Info then row.m4Info:SetText("") end
+    else
+      local text
+      if id and not ((d.bidAmount or 0) > 0) then
+        text = SellInfo.AuctionText(id, d.buyoutAmount, d.quantity)
+      end
+      local fs = row.m4Info
+      if text or fs then rowText(row):SetText(text or "") end
     end
-    local fs = row.m4Info
-    if text or fs then rowText(row):SetText(text or "") end
     if not probed and ns.db and d then
       probed = true
       local keys = {}
@@ -350,6 +453,9 @@ local function attachAuctions()
   if type(af) ~= "table" or af.m4Rows then return end
   local layer = CreateFrame("Frame", nil, af)
   af.m4Rows = layer
+  -- after Blizzard's own OnShow (which sets its layout): ours on top
+  af:HookScript("OnShow", function() ns.Safe(installColumns, af) end)
+  if af:IsShown() then ns.Safe(installColumns, af) end
   local elapsed = 0
   layer:SetScript("OnUpdate", function(_, dt)
     elapsed = elapsed + (dt or 0)
