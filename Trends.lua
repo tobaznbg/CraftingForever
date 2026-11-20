@@ -19,7 +19,7 @@ ns.AHTable.Add({
   columns = {
     { key = "name", title = "Item", width = 0, align = "LEFT" },
     { key = "now", title = "Preis jetzt", width = 95, filter = "money", fmt = function(e) return money(e.now) end },
-    { key = "change", title = "zu Median gestern", width = 115, filter = "pct", fmt = function(e) return pct(e.change) end },
+    { key = "change", title = "zu Marktwert gestern", width = 115, filter = "pct", fmt = function(e) return pct(e.change) end },
     { key = "trend", title = "Trend", width = 80, filter = "pct", fmt = function(e) return pct(e.trend) end },
     { key = "demand", title = "Nachfrage", width = 80, muted = true, filter = "num",
       fmt = function(e) return ns.Item.DemandText(e) or "–" end },

@@ -101,7 +101,7 @@ local function addLines(tooltip, itemID)
   -- The three medians of the hourly cheapest offers (German calendar days, ns.Item).
   local medians = on("range") and ns.Item.MedianText(item, true)
   if medians then
-    tooltip:AddDoubleLine(C .. "Median", (medians:gsub("^Median ", "")), 0.7, 0.7, 0.7, 1, 1, 1)
+    tooltip:AddDoubleLine(C .. "Marktwert", (medians:gsub("^Marktwert ", "")), 0.7, 0.7, 0.7, 1, 1, 1)
   end
   -- What guild members really sold it for (their ledgers, without names; ns.Item).
   local sold = on("guildSales") and ns.Item.GuildSaleText(item, true)

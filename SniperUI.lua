@@ -185,7 +185,7 @@ local function build(page, width, height)
   -- Watched recipes (Data_RecipeWatch.lua): own category on top of the watch list.
   table.insert(updates, toggle(settings, -216, "Rezepte beobachten",
     function() return S().recipeWatch end, function() set("recipeWatch", not S().recipeWatch) end))
-  table.insert(updates, stepper(settings, -242, "Rezepte kaufen bis (vom Median gestern)",
+  table.insert(updates, stepper(settings, -242, "Rezepte kaufen bis (vom Marktwert gestern)",
     function() return string.format("%d %%", math.floor(S().recipeMax * 100 + 0.5)) end,
     function() set("recipeMax", math.max(0.5, S().recipeMax - 0.05)) end,
     function() set("recipeMax", math.min(2, S().recipeMax + 0.05)) end))
@@ -256,7 +256,7 @@ local function build(page, width, height)
   watchInfo:SetTextColor(unpack(Style.C.muted))
   -- Column heads at the same right-aligned offsets as the list's cells (itemList).
   local WATCH_COLS = { 0, 95, 80, 70, 95 }
-  local WATCH_HEADS = { "", "Median gestern", "Vorauswahl", "Nachfrage", "Trend" }
+  local WATCH_HEADS = { "", "Marktwert gestern", "Vorauswahl", "Nachfrage", "Trend" }
   do
     local x = 0
     for c = #WATCH_COLS, 2, -1 do

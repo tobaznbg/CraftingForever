@@ -603,7 +603,7 @@ function Detail.ChartHover(x)
   elseif p == 0 then priceText = ORANGE .. "nicht im Angebot|r"
   else priceText = ns.Style.MUTED .. "kein Snapshot|r" end
   local m = v.median and v.median[i]
-  if m then priceText = "Median 24 h " .. money(m) .. "\n" .. priceText end
+  if m then priceText = "Marktwert 24 h " .. money(m) .. "\n" .. priceText end
   local text = stampRange(t0, t0 + v.step) .. "\n" .. priceText
     .. ((q and q > 0) and ("\n" .. count(q) .. " Stück") or "")
   c.cursor:ClearAllPoints()
@@ -748,17 +748,17 @@ render = function()
     line("Rezept für", (h.profession or "?") .. (h.skill and h.skill > 0 and (" " .. h.skill) or ""))
     if h.product and h.product > 0 then line("Ergibt", ns.ItemName(h.product) or ("#" .. h.product)) end
     line("Kaufen", string.format("%dx ab %s  (bis %s)", h.units, money(h.best), money(h.buyUpTo)))
-    line(h.usualLabel or "Median gestern", h.usual and money(h.usual) or "unbekannt")
+    line(h.usualLabel or "Marktwert gestern", h.usual and money(h.usual) or "unbekannt")
     if h.usual and h.best < h.usual then
       line("Darunter", GREEN .. money(h.usual - h.best) .. "|r  " .. Style.MUTED
-        .. string.format("(%d %% zu %s)", math.floor((h.best / h.usual - 1) * 100 + 0.5), h.usualLabel or "Median gestern") .. "|r")
+        .. string.format("(%d %% zu %s)", math.floor((h.best / h.usual - 1) * 100 + 0.5), h.usualLabel or "Marktwert gestern") .. "|r")
     end
     line("Treffer seit", ago(h.firstSeen or time()))
   elseif h then
     section("Warum Treffer")
     line("Kaufen", string.format("%dx bis %s  (zus. %s)", h.units, money(h.buyUpTo), money(h.cost)))
     line("Einstellen zu", money(h.sellAt) .. "  " .. Style.MUTED .. (h.sellSource or "") .. "|r")
-    line("Obergrenze (" .. (h.capLabel or "Median gestern") .. ")", h.cap and money(h.cap) or "–")
+    line("Obergrenze (" .. (h.capLabel or "Marktwert gestern") .. ")", h.cap and money(h.cap) or "–")
     line("Erwarteter Gewinn", GREEN .. "+" .. money(h.profit) .. "|r  " .. Style.MUTED .. "nach 5 % Gebühr|r")
     if h.days then
       line("Verkauft in", "~" .. Detail.Days(h.days) .. " Tagen  " .. Style.MUTED .. string.format("(%s / Tag, %s)|r",
@@ -791,9 +791,9 @@ render = function()
     nowText = "|cffff6b6b" .. nowText .. "|r"
   end
   line("AH jetzt", nowText)
-  line("Median heute", item.medToday and money(item.medToday) or "–")
-  line("Median gestern", item.medYesterday and money(item.medYesterday) or "–")
-  line("Median 7 Tage", item.med7 and money(item.med7) or "–")
+  line("Marktwert heute", item.medToday and money(item.medToday) or "–")
+  line("Marktwert gestern", item.medYesterday and money(item.medYesterday) or "–")
+  line("Marktwert 7 Tage", item.med7 and money(item.med7) or "–")
   local trend = ns.Item.TrendText(item)
   if trend and item.trend then
     if item.trend <= -0.03 then trend = "|cffff6b6b" .. trend .. "|r"

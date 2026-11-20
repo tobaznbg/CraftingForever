@@ -243,7 +243,7 @@ function Item.Reference(e)
   return nil, nil
 end
 
-Item.REF_LABELS = { yesterday = "Median gestern", week = "Median 7 Tage", today = "Median heute" }
+Item.REF_LABELS = { yesterday = "Marktwert gestern", week = "Marktwert 7 Tage", today = "Marktwert heute" }
 
 -- "Median gestern" etc.: what R of the item is; nil without R.
 function Item.RefLabel(e)
@@ -267,7 +267,7 @@ function Item.MedianText(e, short)
   if e.medYesterday then table.insert(parts, "gestern " .. fmt(e.medYesterday, short)) end
   if e.med7 then table.insert(parts, "7 Tage " .. fmt(e.med7, short)) end
   if #parts == 0 then return nil end
-  return "Median " .. table.concat(parts, " · ")
+  return "Marktwert " .. table.concat(parts, " · ")
 end
 
 -- "15g 20s (23×, 7 Tage)": what guild members sold it for (median unit price, number of

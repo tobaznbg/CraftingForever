@@ -152,7 +152,7 @@ local function sniperTooltip(self)
     GameTooltip:AddLine(" ")
     GameTooltip:AddLine(string.format("Rezept (%s %s)  ·  %dx ab %s", h.profession or "?", tostring(h.skill or "?"),
       h.units, money(h.best)), 1, 0.71, 0.28)
-    GameTooltip:AddLine((h.usualLabel or "Median gestern") .. " " .. (h.usual and money(h.usual) or "unbekannt"), 1, 0.71, 0.28)
+    GameTooltip:AddLine((h.usualLabel or "Marktwert gestern") .. " " .. (h.usual and money(h.usual) or "unbekannt"), 1, 0.71, 0.28)
     if h.best > GetMoney() then GameTooltip:AddLine("Gold reicht nicht.", 1, 0.71, 0.28) end
   elseif h then
     GameTooltip:AddLine(" ")

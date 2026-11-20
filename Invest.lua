@@ -12,7 +12,7 @@ ns.AHTable.Add({
     { key = "now", title = "Preis jetzt", width = 95, filter = "money", fmt = function(e)
       return (e.now and e.now > GetMoney()) and ("|cffffb547" .. money(e.now) .. "|r") or money(e.now)
     end },
-    { key = "ref", title = "Median gestern", width = 95, muted = true, filter = "money",
+    { key = "ref", title = "Marktwert gestern", width = 95, muted = true, filter = "money",
       fmt = function(e) return money(e.ref) end },
     { key = "classic", title = "Classic Era", width = 90, muted = true, filter = "money",
       fmt = function(e) return money(e.classic) end },
