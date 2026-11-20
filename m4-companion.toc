@@ -13,6 +13,7 @@ Status.lua
 Tracker.lua
 Data_Leatherworking.lua
 Data_Skill.lua
+Data_RecipeSources.lua
 Recipes.lua
 Merchant.lua
 Planner.lua
@@ -36,6 +37,7 @@ Selling.lua
 Data_RecipeWatch.lua
 Sniper.lua
 ItemDetail.lua
+Materials.lua
 Ledger.lua
 Sync.lua
 Profit.lua

@@ -1238,13 +1238,19 @@ PAGES.analysis = function(p)
   end
 end
 
--- Skill planner: choice of a crafting profession, then the cheapest path between two
--- skill levels (ns.Planner over ns.Costs; prices only via ns.Item) with trainer visits,
--- sums and a shopping list.
+-- Skill planner: choice of a crafting profession, then two ways between two skill levels
+-- (ns.Costs.Plan over ns.Planner; prices only via ns.Item):
+--   Standard-Weg   only what is certain right away: learned, trainer, unlimited vendor
+--   Dynamischer Weg  plus limited vendors, reputation and Merchant's Favor patterns the
+--                  character can use now, and patterns cheap at the auction house now
+-- Each step names the recipe, crafts, costs and where to learn it (NPC, zone, coordinates
+-- for the own faction); trainer visits for the ranks with skill and character level; a
+-- shopping list with what is in bags/bank and where to buy. Where the standard way ends,
+-- the page says so and lists the options.
 local AH_CAP = 3              -- units per product assumed to sell at auction (AH mode)
 local ORANGE, YELLOW, LGREEN, GREY = "|cffff8040", "|cffffff00", "|cff40bf40", "|cff808080"
-local SOURCE = { ["6"] = "Lehrer", ["2"] = "Drop", ["5"] = "Händler", ["4"] = "Quest" }
 local QUESTION_ICON = 134400
+local MAX_OPTIONS = 6         -- options listed where the standard way ends
 local plannerDirty = false    -- prices or recipes changed: compute the path again
 
 local function plannerState()
@@ -1261,19 +1267,88 @@ local function difficultyColor(colors, skill)
   return ORANGE
 end
 
-local function sourceText(code)
-  local parts = {}
-  for c in tostring(code or ""):gmatch("[^+]+") do table.insert(parts, SOURCE[c] or c) end
-  return table.concat(parts, "/")
+-- "41,4 / 42,6" (German decimal comma); "" without coordinates.
+local function coords(x, y)
+  if not (x and y) then return "" end
+  return (string.format("%.1f / %.1f", x, y):gsub("%.", ","))
 end
 
+-- "Una, Donnerfels 41,4 / 42,6" from an NPC row { name, zone, x, y, faction, roam }.
+local function npcText(npc)
+  if not npc then return "?" end
+  local text = npc[1] .. ", " .. npc[2]
+  local c = coords(npc[3], npc[4])
+  if c ~= "" then text = text .. " " .. c end
+  if npc.roam == 1 then text = text .. " (wandert)" end
+  return text
+end
+
+local function trainerText(t)
+  if not t then return "Lehrer" end
+  return npcText({ t.npc, t.zone, t.x, t.y })
+end
+
+local WAY_LABEL = { vendor = "Händler", limited = "Händler (begrenzt)", rep = "Ruf-Händler", favor = "Händlergunst",
+  ah = "Gelegenheit AH", cond = "Händler (Bedingung)", unknown = "Händler (unbekannt)" }
+
+-- Short "Lernen" cell of a step.
 local function learnText(c)
-  if c.learned then return GREEN .. "gelernt|r" end
+  local how = c.how or {}
+  if how.way == "learned" or c.learned then return GREEN .. "gelernt|r" end
   local fee = (c.learnCost or 0) > 0 and (" " .. money(c.learnCost)) or ""
-  if c.artisan then return ORANGE .. "Fachmann-Lehrer|r" .. fee end
-  if not c.needsPattern then return "Lehrer" .. fee end
-  local text = sourceText(c.source)
-  return (text ~= "" and text or "Muster") .. Style.MUTED .. " (Muster)|r"
+  if how.way == "trainer" then
+    if c.artisan then return ORANGE .. "Fachmann-Lehrer|r" .. fee end
+    return "Lehrer" .. fee
+  end
+  if how.way == "favor" then return ORANGE .. "Händlergunst|r " .. tostring(how.option and how.option.favor or "") end
+  if how.way == "ah" then return YELLOW .. "Gelegenheit AH|r" .. fee end
+  return (WAY_LABEL[how.way] or "Muster") .. fee
+end
+
+-- Detail line of a step: where to learn the recipe; nil for learned recipes.
+local function whereText(c, srcs, faction)
+  local how = c.how or {}
+  if how.way == "learned" or c.learned then return nil end
+  if how.way == "trainer" then
+    local rank = how.rank or ns.Planner.RankFor(c.learnAt or 0).name
+    if c.artisan then rank = "Fachmann" end
+    return string.format("Lehrer (%s): %s", rank, trainerText(ns.Planner.Trainer(srcs, rank, faction)))
+  end
+  local o = how.option or {}
+  if how.way == "ah" then
+    return string.format("Muster jetzt im AH für %s – Gelegenheit, kann morgen weg sein", money(o.cost or 0))
+  end
+  local text = string.format("%s: %s", WAY_LABEL[how.way] or "Händler", npcText(o.npc))
+  if how.way == "favor" then
+    text = text .. string.format(" – %d Händlergunst", o.favor or 0)
+  elseif (o.cost or 0) > 0 then
+    text = text .. " – Muster " .. money(o.cost)
+  end
+  if o.stock then text = text .. string.format(", nur %d auf Lager (füllt nach)", o.stock) end
+  if o.rep then text = text .. ", Ruf " .. o.rep.faction .. " " .. o.rep.standing end
+  if o.level then text = text .. ", ab Stufe " .. o.level end
+  if o.classic then text = text .. "  " .. GREY .. "(NPC aus Classic-Daten)|r" end
+  return text
+end
+
+-- One option line where the standard way ends.
+local function optionText(m, srcs, faction)
+  local parts = {}
+  for _, o in ipairs(m.options) do
+    local where = o.way == "ah" and ("im AH für " .. money(o.cost))
+      or ((WAY_LABEL[o.way] or "Händler") .. " " .. (o.npc and npcText(o.npc) or "?")
+        .. ((o.cost or 0) > 0 and (" – " .. money(o.cost)) or "")
+        .. (o.way == "favor" and (" – " .. (o.favor or 0) .. " Händlergunst") or "")
+        .. (o.classic and (GREY .. " (Classic-Daten)|r") or ""))
+    if o.why then where = where .. " (" .. o.why .. ")" end
+    if o.usable then where = where .. GREEN .. " → im dynamischen Weg|r" end
+    table.insert(parts, where)
+    if #parts >= 2 then break end
+  end
+  if #parts == 0 then
+    table.insert(parts, m.quest and ("Quest „" .. m.quest .. "“") or (m.drop and "nur Drop" or "keine Quelle bekannt"))
+  end
+  return string.format("  · %s (ab %d): %s", m.name, m.learnAt or 0, table.concat(parts, "; "))
 end
 
 -- A cost: positive is money spent, negative a gain (green).
@@ -1335,7 +1410,7 @@ end
 PAGES.planner = function(p)
   local title = pageTitle(p, "Skill-Planer")
   local ranges = {}   -- professionID -> { from, to } while the window lives
-  local cache         -- last computed path { key, ... }
+  local cache         -- last computed plans { key, ... }
 
   local back = Style.Button(p, "Andere Berufe", 110, 22, function()
     plannerState().pid = nil
@@ -1400,18 +1475,28 @@ PAGES.planner = function(p)
   fromStep = stepper(view, "von Skill", function(v) setRange(v, nil) end)
   fromStep:SetPoint("TOPLEFT", PAD, y)
   toStep = stepper(view, "bis Skill", function(v) setRange(nil, v) end)
-  toStep:SetPoint("TOPLEFT", PAD + 170, y)
-  local modeSafe = Style.Button(view, "nur Händlerverkauf (sicher)", 190, 22, function()
+  toStep:SetPoint("TOPLEFT", PAD + 160, y)
+  local wayStd = Style.Button(view, "Standard-Weg", 104, 22, function()
+    plannerState().way = "standard"
+    p:Refresh()
+  end)
+  wayStd:SetPoint("TOPLEFT", PAD + 318, y)
+  local wayDyn = Style.Button(view, "Dynamischer Weg", 124, 22, function()
+    plannerState().way = "dynamic"
+    p:Refresh()
+  end)
+  wayDyn:SetPoint("LEFT", wayStd, "RIGHT", 4, 0)
+  local modeSafe = Style.Button(view, "Händlerverkauf", 112, 22, function()
     plannerState().ah = false
     p:Refresh()
   end)
-  local modeAH = Style.Button(view, "AH-Verkauf (bis " .. AH_CAP .. " Stück pro Rezept)", 230, 22, function()
+  local modeAH = Style.Button(view, "AH-Verkauf (bis " .. AH_CAP .. ")", 124, 22, function()
     plannerState().ah = true
     p:Refresh()
   end)
   modeAH:SetPoint("TOPRIGHT", -PAD, y)
-  modeSafe:SetPoint("RIGHT", modeAH, "LEFT", -6, 0)
-  for _, b in ipairs({ modeSafe, modeAH }) do
+  modeSafe:SetPoint("RIGHT", modeAH, "LEFT", -4, 0)
+  for _, b in ipairs({ modeSafe, modeAH, wayStd, wayDyn }) do
     b:SetScript("OnLeave", function(self)
       self.bg:SetColorTexture(unpack(self.active and Style.C.buttonHi or Style.C.button))
     end)
@@ -1420,22 +1505,24 @@ PAGES.planner = function(p)
   y = y - 34
   local pathH = 262
   local path = grid(view, INNER_W, pathH, {
-    { "Skill", 72 }, { "Rezept", 0, nil, true }, { "Stück", 54, "RIGHT" }, { "Material", 96, "RIGHT" },
-    { "Lernen", 170 }, { "Kosten netto", 104, "RIGHT" } }, { scroll = true })
+    { "Skill", 72 }, { "Rezept", 0, nil, true }, { "Stück", 50, "RIGHT" }, { "Material", 92, "RIGHT" },
+    { "Lernen", 170 }, { "Kosten netto", 100, "RIGHT" } }, { scroll = true })
   path:SetPoint("TOPLEFT", PAD, y)
-  y = y - pathH - 8
+  y = y - pathH - 6
   local sums = Style.Text(view, 12)
   sums:SetPoint("TOPLEFT", PAD + 6, y)
+  local compare = Style.Text(view, 12)
+  compare:SetPoint("TOPLEFT", PAD + 6, y - 17)
   local reach = muted(Style.Text(view, 12))
-  reach:SetPoint("TOPLEFT", PAD + 6, y - 18)
-  y = y - 44
+  reach:SetPoint("TOPLEFT", PAD + 6, y - 34)
+  y = y - 56
   local shopLabel = Style.Text(view, 12)
   shopLabel:SetPoint("TOPLEFT", PAD, y)
   shopLabel:SetText(Style.HEAD .. "Einkaufsliste|r")
   y = y - 20
   local shop = grid(view, INNER_W, PAGE_H + y - PAD, {
-    { "Material", 0, nil, true }, { "brauchst", 70, "RIGHT" }, { "hast", 60, "RIGHT" }, { "kaufen", 64, "RIGHT" },
-    { "je Stück", 86, "RIGHT" }, { "Summe", 96, "RIGHT" }, { "wo", 70 }, { "", 76, nil, nil, button = true } },
+    { "Material", 0, nil, true }, { "brauchst", 66, "RIGHT" }, { "hast", 56, "RIGHT" }, { "kaufen", 60, "RIGHT" },
+    { "je Stück", 84, "RIGHT" }, { "Summe", 92, "RIGHT" }, { "wo", 90 }, { "", 70, nil, nil, button = true } },
     { scroll = true })
   shop:SetPoint("TOPLEFT", PAD, y)
 
@@ -1463,13 +1550,17 @@ PAGES.planner = function(p)
   local function compute(pid, from, to, ah)
     local prof, why = ns.Costs.Profession(pid)
     if not prof then return { why = why } end
-    local candidates, skipped = ns.Costs.Candidates(prof)
-    local segments, total, reached = ns.Planner.Path(candidates, from, to, ah and AH_CAP or 0)
+    prof.ctx = ns.Costs.Context()
+    local cap = ah and AH_CAP or 0
+    local plans = { standard = ns.Costs.Plan(prof, from, to, cap, "standard"),
+      dynamic = ns.Costs.Plan(prof, from, to, cap, "dynamic") }
     -- The own cap counts only when planning from the own skill range.
     local max = prof.max
     if not (max and from <= max and from >= max - 75) then max = nil end
-    return { prof = prof, segments = segments, total = total, reached = reached, skipped = #skipped,
-      steps = segments and ns.Planner.Steps(segments, from, max) }
+    for _, plan in pairs(plans) do
+      plan.steps = plan.segments and ns.Planner.Steps(plan.segments, from, max)
+    end
+    return { prof = prof, plans = plans, ctx = prof.ctx, srcs = ns.RecipeSources and ns.RecipeSources[pid] }
   end
 
   local function showPlan(pid)
@@ -1483,10 +1574,13 @@ PAGES.planner = function(p)
         to = ns.Planner.MAX_SKILL }
     end
     local r, ah = ranges[pid], plannerState().ah and true or false
+    local way = plannerState().way == "dynamic" and "dynamic" or "standard"
     fromStep:Set(r.from)
     toStep:Set(r.to)
     setButtonActive(modeSafe, not ah)
     setButtonActive(modeAH, ah)
+    setButtonActive(wayStd, way == "standard")
+    setButtonActive(wayDyn, way == "dynamic")
 
     local key = table.concat({ pid, r.from, r.to, tostring(ah) }, ":")
     if not cache or cache.key ~= key or plannerDirty then
@@ -1495,35 +1589,46 @@ PAGES.planner = function(p)
       plannerDirty = false
     end
     local result = cache
+    local plan = result.plans and result.plans[way]
     local message
     if result.why == "nodata" then
       message = "Für diesen Beruf fehlen noch Skilldaten."
     elseif result.why == "noscan" then
       message = "Berufsfenster einmal öffnen, dann plant m4-companion den Weg."
-    elseif not result.segments then
+    elseif not (plan and plan.segments) then
       message = "Kein Weg gefunden – für manche Zutaten fehlen Preise. Im AH einmal scannen."
     end
     view:SetShown(true)
-    for _, w in ipairs({ path, sums, reach, shopLabel, shop }) do w:SetShown(message == nil) end
+    for _, w in ipairs({ path, sums, compare, reach, shopLabel, shop }) do w:SetShown(message == nil) end
     hint:SetText(message or "")
     hint:SetShown(message ~= nil)
     if message then return end
 
+    local ctx, srcs = result.ctx or {}, result.srcs
     local rows = {}
     if not (entry and entry.own) and r.from <= 1 then
-      table.insert(rows, { span = ORANGE .. "Zuerst den Beruf beim Lehrer lernen (Lehrling, bis 75).|r" })
+      local t = ns.Planner.Trainer(srcs, "Lehrling", ctx.faction)
+      table.insert(rows, { span = ORANGE .. "Zuerst den Beruf beim Lehrer lernen (Lehrling, bis 75)"
+        .. (t and (": " .. trainerText(t)) or "") .. ".|r" })
     end
     local spend, learn, income = 0, 0, 0
     local gold, outlay, reachable = GetMoney(), 0, r.from
-    for _, step in ipairs(result.steps) do
+    for _, step in ipairs(plan.steps) do
       if step.rank then
         local rank = step.rank
-        table.insert(rows, { span = string.format("%sBei %d: %s beim Lehrer lernen (bis %d), ab Charakterstufe %d.|r",
-          ORANGE, rank.at, rank.name, rank.cap, rank.level) })
+        local t = ns.Planner.Trainer(srcs, rank.name, ctx.faction)
+        local levelNote = ""
+        if ctx.level and ctx.level < rank.level then
+          levelNote = string.format("  %s– du bist Stufe %d, erst ab %d möglich!|r", RED, ctx.level, rank.level)
+        end
+        table.insert(rows, { span = string.format("%sBei %d: %s lernen (bis %d) bei %s – ab Skill %d und Charakterstufe %d.|r%s",
+          ORANGE, rank.at, rank.name, rank.cap, trainerText(t), t and t.skill or rank.at, rank.level, levelNote) })
       else
         local seg, c = step.seg, step.seg.recipe
         table.insert(rows, { string.format("%d–%d", seg.from, seg.to), difficultyColor(c.colors, seg.from) .. c.name .. "|r",
           tostring(math.ceil(seg.crafts)), money(seg.spend), learnText(c), netCost(seg.cost), itemID = c.out })
+        local where = whereText(c, srcs, ctx.faction)
+        if where then table.insert(rows, { span = Style.MUTED .. "      " .. where .. "|r" }) end
         spend, learn, income = spend + seg.spend, learn + seg.learned, income + seg.income
         -- How far the gold reaches, paying everything up front.
         if reachable == seg.from and outlay + seg.spend + seg.learned <= gold then
@@ -1532,30 +1637,52 @@ PAGES.planner = function(p)
         end
       end
     end
-    if result.reached < r.to then
-      table.insert(rows, { span = string.format("%sAb Skill %d gibt kein bekanntes oder beim Lehrer erlernbares Rezept mehr Punkte – weiter nur mit Mustern (Händler, Drop, Quest, Ruf).|r",
-        ORANGE, result.reached) })
+    if plan.reached < r.to then
+      table.insert(rows, { span = string.format("%sDer %s endet bei Skill %d: kein %s Rezept gibt hier noch Punkte.|r",
+        ORANGE, way == "standard" and "Standard-Weg" or "dynamische Weg", plan.reached,
+        way == "standard" and "sicher verfügbares" or "jetzt erreichbares") })
+      local missing = plan.missing or {}
+      if #missing > 0 then
+        table.insert(rows, { span = ORANGE .. "Optionen für die nächsten Punkte:|r" })
+        for i = 1, math.min(MAX_OPTIONS, #missing) do
+          table.insert(rows, { span = optionText(missing[i], srcs, ctx.faction) })
+        end
+      end
     end
     path:SetRows(rows, "")
-    sums:SetText(string.format("Material %s   ·   Lehrer %s   ·   Rückverkauf %s   ·   unterm Strich %s",
-      money(spend), money(learn), GREEN .. money(income) .. "|r", netCost(result.total or 0)))
+    sums:SetText(string.format("Material %s   ·   Lernen %s   ·   Rückverkauf %s   ·   unterm Strich %s",
+      money(spend), money(learn), GREEN .. money(income) .. "|r", netCost(plan.total or 0)))
+
+    -- Standard against dynamic.
+    local std, dyn = result.plans.standard, result.plans.dynamic
+    local cmp
+    if dyn.reached > std.reached then
+      cmp = string.format("Dynamischer Weg kommt bis %d (Standard nur bis %d).", dyn.reached, std.reached)
+    elseif (std.total or 0) - (dyn.total or 0) > 0 and dyn.reached >= std.reached then
+      cmp = string.format("Dynamischer Weg spart %s gegenüber Standard.", money((std.total or 0) - (dyn.total or 0)))
+    else
+      cmp = "Dynamischer Weg bringt gerade nichts – Standard-Weg ist so günstig wie es geht."
+    end
+    compare:SetText((way == "standard" and Style.ACCENT or "") .. cmp .. (way == "standard" and "|r" or ""))
+
     local reachText
-    if reachable >= result.reached then
+    if reachable >= plan.reached then
       reachText = string.format("Dein Gold (%s) reicht für den ganzen Weg.", money(gold))
     else
       reachText = string.format("Mit deinem Gold (%s) erreichbar bis Skill %d – dann verkaufen und weiter.", money(gold), reachable)
     end
-    if result.skipped > 0 then
-      reachText = reachText .. string.format("   %d Rezepte ohne Preis für eine Zutat nicht eingeplant.", result.skipped)
+    if #(plan.skipped or {}) > 0 then
+      reachText = reachText .. string.format("   %d Rezepte ohne Preis für eine Zutat nicht eingeplant.", #plan.skipped)
     end
     reach:SetText(reachText)
 
     local list = {}
-    for itemID, count in pairs(ns.Planner.Shopping(result.segments)) do
+    for itemID, count in pairs(plan.need or {}) do
       local unit, where = ns.Costs.Buy(itemID)
+      local avg = ns.Costs.BuyMany(itemID, count)
       local owned = ns.Costs.Owned(itemID) or 0
       table.insert(list, { id = itemID, count = count, owned = owned, buy = math.max(0, count - owned),
-        unit = unit or 0, where = where })
+        unit = avg or unit or 0, where = where, scarce = plan.scarce and plan.scarce[itemID] })
     end
     table.sort(list, function(a, b)
       if a.buy * a.unit ~= b.buy * b.unit then return a.buy * a.unit > b.buy * b.unit end
@@ -1565,20 +1692,25 @@ PAGES.planner = function(p)
     for _, it in ipairs(list) do
       total = total + it.buy * it.unit
       local id = it.id
+      local where = it.where and (it.scarce and (RED .. "AH knapp|r") or it.where) or (Style.MUTED .. "kein Preis|r")
       table.insert(shopRows, { ns.ItemName(id) or ("Item " .. id), tostring(it.count), tostring(it.owned),
         it.buy > 0 and tostring(it.buy) or (GREEN .. "0|r"), it.where and money(it.unit) or "–",
-        it.where and money(it.buy * it.unit) or "–", it.where or (Style.MUTED .. "kein Preis|r"), itemID = id,
+        it.where and money(it.buy * it.unit) or "–", where, itemID = id,
         button = ahShown and it.buy > 0 and { label = "Suchen", fn = function() searchAH(id) end } or nil })
     end
     if #shopRows > 0 then
       table.insert(shopRows, { "Noch zu kaufen", "", "", "", "", money(total), "", color = Style.C.accent })
+    end
+    for itemID, m in pairs(plan.made or {}) do
+      table.insert(shopRows, { span = Style.MUTED .. string.format("Selbst herstellen: %d× %s mit %s (%d×) – Material oben enthalten|r",
+        m.count, ns.ItemName(itemID) or ("Item " .. itemID), m.recipe.name or "?", m.crafts) })
     end
     shop:SetRows(shopRows, "Nichts zu kaufen")
   end
 
   function p:Refresh()
     hint:SetShown(false)
-    if not (ns.Costs and ns.Costs.Profession and ns.Planner and ns.Planner.Steps) then
+    if not (ns.Costs and ns.Costs.Plan and ns.Planner and ns.Planner.Steps) then
       chooser:Hide()
       view:Hide()
       back:Hide()

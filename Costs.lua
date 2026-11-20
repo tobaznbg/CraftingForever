@@ -21,10 +21,106 @@ function Costs.AuctionSell(itemID)
   return viaAH and net or nil
 end
 
--- Units in bags and bank.
+-- Units in bags and bank: the larger of the game's count and the last bag/bank scan
+-- (ns.db.inventory; the bank only counts once it was opened).
 function Costs.Owned(itemID)
   local count = (C_Item and C_Item.GetItemCount) or GetItemCount
-  return count and count(itemID, true) or 0
+  local n = count and count(itemID, true) or 0
+  local inv = ns.db and ns.db.inventory and ns.CharKey and ns.db.inventory[ns.CharKey()]
+  if inv then
+    local stored = 0
+    for _, place in ipairs({ inv.bags or {}, inv.bank or {} }) do
+      local e = place[itemID]
+      stored = stored + (e and e.n or 0)
+    end
+    n = math.max(n, stored)
+  end
+  return n
+end
+
+-- Units on offer at the auction house now (listed quantity), or nil if not known.
+function Costs.Supply(itemID)
+  local e = ns.Item(itemID)
+  if e.vendorBuy then return nil end
+  local listings = ns.Item.Listings and ns.Item.Listings(itemID)
+  if listings and #listings > 0 then
+    local n = 0
+    for _, l in ipairs(listings) do n = n + l.count end
+    return n, listings
+  end
+  return e.quantity
+end
+
+-- Copper per unit when buying `count` units at the auction house: the cheapest offers
+-- first; units beyond the listed supply count at SCARCE_FACTOR times the dearest offer
+-- (they have to wait for new listings or be farmed). Second value: true when the supply
+-- is short. nil without a price.
+Costs.SCARCE_FACTOR = 2
+function Costs.BuyMany(itemID, count)
+  local unit, where = Costs.Buy(itemID)
+  if not unit or where == "Händler" or count <= 0 then return unit, false end
+  local supply, listings = Costs.Supply(itemID)
+  if not supply then return unit, false end
+  local have = Costs.Owned(itemID)
+  local buy = count - have
+  if buy <= 0 then return unit, false end
+  local total, left, top = 0, buy, unit
+  for _, l in ipairs(listings or {}) do
+    if left <= 0 then break end
+    local take = math.min(left, l.count)
+    total, left, top = total + take * l.unit, left - take, l.unit
+  end
+  if not listings then
+    local take = math.min(left, supply)
+    total, left = total + take * unit, left - take
+  end
+  local short = left > 0
+  total = total + left * top * Costs.SCARCE_FACTOR
+  -- Owned units count at the normal price (they could be sold instead).
+  return math.ceil((total + have * unit) / count), short
+end
+
+-- Character context for the planner's ways (Planner.Options): faction, level, Merchant's
+-- Favor (currency 3402) and reputation standings by faction name.
+Costs.FAVOR_CURRENCY = 3402
+function Costs.Context()
+  local char = ns.db and ns.db.chars and ns.CharKey and ns.db.chars[ns.CharKey()] or {}
+  local factionName = (UnitFactionGroup and UnitFactionGroup("player")) or char.faction
+  local ctx = {
+    faction = factionName == "Horde" and "H" or (factionName == "Alliance" and "A" or nil),
+    level = (UnitLevel and UnitLevel("player")) or char.level,
+  }
+  local info = C_CurrencyInfo and C_CurrencyInfo.GetCurrencyInfo and C_CurrencyInfo.GetCurrencyInfo(Costs.FAVOR_CURRENCY)
+  if info and info.quantity then ctx.favor = info.quantity end
+  local standings
+  local function readStandings()
+    standings = {}
+    if C_Reputation and C_Reputation.GetNumFactions and C_Reputation.GetFactionDataByIndex then
+      for i = 1, C_Reputation.GetNumFactions() do
+        local f = C_Reputation.GetFactionDataByIndex(i)
+        if f and f.name and not f.isHeader then standings[f.name] = f.reaction end
+      end
+    elseif GetNumFactions and GetFactionInfo then
+      for i = 1, GetNumFactions() do
+        local name, _, standingID, _, _, _, _, _, isHeader = GetFactionInfo(i)
+        if name and not isHeader then standings[name] = standingID end
+      end
+    end
+  end
+  function ctx.standing(name)
+    if not standings then readStandings() end
+    return standings[name]
+  end
+  return ctx
+end
+
+-- Copper of a tradeable pattern on offer at the auction house now, if not far above its
+-- usual price; nil otherwise.
+function Costs.PatternPrice(itemID)
+  local e = ns.Item(itemID)
+  if not e.now then return nil end
+  if e.ref and e.ref > 0 and e.now > e.ref * ns.Planner.AH_PATTERN_OVER_REF then return nil end
+  return e.now
 end
 
 -- Skill data of a profession from ns.SkillData, or nil (placeholder or not generated yet).
@@ -125,11 +221,65 @@ end
 
 -- Candidate recipes of a profession (Planner.Candidates): from ns.SkillData when there is
 -- an entry, else from the own scan with the old color/learn data.
-function Costs.Candidates(prof, all)
+--   way   true: every recipe (profit views); "standard" (default) or "dynamic" (see
+--         Planner.WAYS); with ns.RecipeSources for the profession the way decides which
+--         patterns count, without it only learned and trainer recipes do
+--   buy   copper per reagent unit (default Costs.Buy)
+function Costs.Candidates(prof, way, buy)
+  local opts = way == true or {
+    way = way or "standard",
+    sources = ns.RecipeSources and ns.RecipeSources[prof.pid],
+    ctx = prof.ctx or Costs.Context(),
+    patternPrice = Costs.PatternPrice,
+    rank = prof.rank,
+  }
+  buy = buy or Costs.Buy
   if prof.skill then
     return ns.Planner.Candidates(ns.Planner.SkillRecipes(prof.skill, prof.scan), prof.skill.recipes,
-      Costs.Buy, Costs.VendorSell, Costs.AuctionSell, all)
+      buy, Costs.VendorSell, Costs.AuctionSell, opts)
   end
   return ns.Planner.Candidates(prof.scan.recipes, prof.data,
-    Costs.Buy, Costs.VendorSell, Costs.AuctionSell, all)
+    buy, Costs.VendorSell, Costs.AuctionSell, opts)
+end
+
+-- Skill path of a profession in one way, with the material supply at the auction house
+-- taken into account: a reagent needed in larger numbers than offered gets the price of
+-- buying that many (Costs.BuyMany), and the path is planned again (up to PLAN_ROUNDS).
+-- Returns { segments, total, reached, skipped, need, made, scarce = { [itemID] = true },
+--           missing (Planner.Missing at the end of the way) }.
+Costs.PLAN_ROUNDS = 4
+function Costs.Plan(prof, from, to, ahCap, way)
+  local prices, scarce = {}, {}
+  local function buy(itemID)
+    if prices[itemID] then return prices[itemID] end
+    return (Costs.Buy(itemID))
+  end
+  local result
+  for _ = 1, Costs.PLAN_ROUNDS do
+    local candidates, skipped = Costs.Candidates(prof, way, buy)
+    local segments, total, reached = ns.Planner.Path(candidates, from, to, ahCap)
+    local need, made = {}, {}
+    if segments then need, made = ns.Planner.Shopping(segments) end
+    result = { segments = segments, total = total, reached = reached or from, skipped = skipped,
+      need = need, made = made, scarce = scarce }
+    local changed = false
+    for itemID, count in pairs(need) do
+      local unit, short = Costs.BuyMany(itemID, count)
+      local current = buy(itemID)
+      if short then scarce[itemID] = true end
+      if unit and current and unit > current * 1.02 then
+        prices[itemID] = unit
+        changed = true
+      end
+    end
+    if not changed then break end
+  end
+  local srcs = ns.RecipeSources and ns.RecipeSources[prof.pid]
+  if srcs and result.reached < to then
+    local recipes = prof.skill and ns.Planner.SkillRecipes(prof.skill, prof.scan) or prof.scan.recipes
+    result.missing = ns.Planner.Missing(recipes, prof.skill and prof.skill.recipes or prof.data, srcs,
+      prof.ctx or Costs.Context(), result.reached, way or "standard", Costs.PatternPrice)
+  end
+  result.prices = prices
+  return result
 end

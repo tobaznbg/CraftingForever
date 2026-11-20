@@ -217,7 +217,10 @@ local function showPath()
     local potential = outlay - segmentValue(seg, AH_CAP)
     local name = c.name
     if seg.learned > 0 then name = name .. GREY .. "  (lernen " .. money(seg.learned) .. ")|r" end
-    if c.needsPattern then name = name .. ORANGE .. "  (Muster vom Händler, Preis fehlt)|r" end
+    if c.needsPattern then
+      local npc = c.how and c.how.option and c.how.option.npc
+      name = name .. ORANGE .. (npc and ("  (Muster: " .. npc[1] .. ", " .. npc[2] .. ")|r") or "  (Muster vom Händler)|r")
+    end
     if c.artisan then name = name .. ORANGE .. "  (Fachmann-Lehrer, Horde: Hahrana Ironhide, Feralas)|r" end
     addItemCells(c.out, string.format("%d-%d", seg.from, seg.to), withIcon(c.out, name), tostring(math.ceil(seg.crafts)),
       money(outlay), cost(safe), cost(potential))

@@ -572,8 +572,7 @@ local function drawChart(c, history, limit, sellAt, viewKey)
   c.t1:SetText(stamp(axisStart))
   c.t2:SetText(stamp(axisStart + SPAN / 2))
   c.t3:SetText("jetzt")
-  c.legend:SetText((skin == "blizzard" and "|cffffd100" or ns.Style.ACCENT) .. "Linie|r Median 24 h  ·  grau billigstes  ·  Balken Stück  ·  " .. ORANGE .. "orange|r leer"
-    .. (limit and ("  ·  " .. GREEN .. "grün|r Kauf bis  ·  weiß Einstellen") or ""))
+  c.legend:SetText("") -- no legend: gold = median, grey = cheapest is clear from the hover
 end
 
 -- Hover at x pixels from the plot's left edge (nil: mouse left): line on the slot under the
@@ -776,7 +775,7 @@ render = function()
   chart:SetPoint("TOPLEFT", body, "TOPLEFT", 4, -y)
   chart:SetPoint("RIGHT", body, "RIGHT", -4, 0)
   drawChart(chart, ns.Item.History(itemID, VIEWS[view].hourly), h and h.buyUpTo, h and h.sellAt, view)
-  y = y + CHART_H + 44
+  y = y + CHART_H + 20
 
   -- 3. Market figures (ns.Item)
   section("Markt")
@@ -893,15 +892,16 @@ render = function()
 
   -- 6. Recipe items (at the end, below the market): what the recipe teaches, what making it costs and brings (Crafting.lua).
   local teach = ns.RecipeTeachInfo and ns.RecipeTeachInfo(itemID)
+  if not teach and ns.Materials then ns.Materials.Hide() end
   if teach then
     local t = teach.teaches
     local function m(c) return money(math.floor(c + 0.5)) end
-    section("Rezept lehrt")
+    section("Rezept")
     line("Beruf", t.profession .. (t.skill and (" ab " .. t.skill) or ""))
     local missing = teach.missing and (ORANGE .. "kein Preis: " .. (ns.ItemName(teach.missing) or "?") .. "|r")
     line(t.product and "Herstellkosten / Stück" or "Material", teach.cost and m(teach.cost) or missing or "–")
     if t.product then
-      line("Verkauf netto / Stück", m(teach.value) .. (teach.onAH and "" or ("  " .. Style.MUTED .. "Händler|r")))
+      line("Verkauf / Stück", m(teach.value) .. (teach.onAH and "" or ("  " .. Style.MUTED .. "Händler|r")))
       if teach.profit then
         line("Gewinn / Stück", (teach.profit >= 0 and (GREEN .. "+") or "|cffff6b6b-") .. m(math.abs(teach.profit)) .. "|r")
       end
@@ -912,14 +912,10 @@ render = function()
       end
       line("Nachfrage (Produkt)", demand or "–")
     end
-    line("Rezept selbst im AH", teach.recipeNow and money(teach.recipeNow) or (Style.MUTED .. "nicht im AH|r"))
     local list = t.reagents or {}
-    if #list > 0 then section("Material je Herstellung") end
-    for i = 1, #list, 2 do
-      local id, n = list[i], list[i + 1] or 1
-      local unit = ns.Item.BuyCost(ns.Item(id))
-      line(string.format("%g× %s", n, ns.ItemName(id) or ("#" .. id)),
-        unit and m(unit * n) or (ORANGE .. "kein Preis|r"))
+    -- The materials open in their own window right of this one (Materials.lua).
+    if ns.Materials then
+      if #list > 0 then ns.Materials.Show(itemID, t, frame, skin) else ns.Materials.Hide() end
     end
   end
 
@@ -1005,7 +1001,10 @@ local function create()
   end
   -- ESC closes the window (Blizzard's CloseSpecialWindows).
   if UISpecialFrames then tinsert(UISpecialFrames, FRAME_NAME) end
-  frame:SetScript("OnHide", function() origin = nil end)
+  frame:SetScript("OnHide", function()
+    origin = nil
+    if ns.Materials then ns.Materials.Hide() end
+  end)
   local close = Style.Close(frame, function() Detail.Hide() end)
   close:SetPoint("TOPRIGHT", -4, -4)
   frame.close = close
