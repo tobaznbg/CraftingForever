@@ -360,16 +360,25 @@ local function describe(f, depth, out, prefix)
 end
 
 function TradeBook.ProbeBook()
-  local pf = rawget(_G, "ProfessionsFrame")
-  local book = type(pf) == "table" and rawget(pf, "BookPage")
-  if type(book) ~= "table" or not ns.db then return end
+  local book = rawget(_G, "ProfessionsBookFrame")
+  if type(book) ~= "table" or not ns.db or not book:IsShown() then return end
   local out = {}
-  describe(book, 3, out, "")
+  describe(book, 4, out, "")
   ns.db.tradeBookProbe2 = { t = time(), lines = out }
 end
 
-if ns.On then
-  ns.On("TRADE_SKILL_SHOW", function()
-    if C_Timer then C_Timer.After(1, function() ns.Safe(TradeBook.ProbeBook) end) end
+-- The professions book ("Berufe", K) loads on demand: hook its OnShow once it exists.
+local bookHooked = false
+local function hookBook()
+  local book = rawget(_G, "ProfessionsBookFrame")
+  if bookHooked or type(book) ~= "table" then return end
+  bookHooked = true
+  book:HookScript("OnShow", function()
+    if C_Timer then C_Timer.After(0.5, function() ns.Safe(TradeBook.ProbeBook) end) end
   end)
+  if book:IsShown() then ns.Safe(TradeBook.ProbeBook) end
+end
+if ns.On then
+  ns.On("ADDON_LOADED", function(_, name) if name == "Blizzard_ProfessionsBook" then ns.Safe(hookBook) end end)
+  ns.On("PLAYER_LOGIN", function() ns.Safe(hookBook) end)
 end
