@@ -18,7 +18,7 @@ local List = {}
 ns.ShoppingList = List
 
 local MAX_DEPTH = 3
-local MAX_ROWS = 14
+local MAX_ROWS = 18
 local RIGHT_EDGE = 24
 local GREEN, RED, MUTED = "|cff5fd38d", "|cffff6b6b", "|cff999999"
 
@@ -167,9 +167,12 @@ function List.Plan(list)
     end
     return l
   end
-  local function want(id, n, depth)
+  -- pid: the profession of the wish the reagent is for (grouping in "Alles zusammen")
+  local function want(id, n, depth, pid)
     local l = line(id)
     l.need = l.need + n
+    l.profs = l.profs or {}
+    l.profs[pid or 0] = true
     if pool[id] == nil then pool[id], l.parts = holdings(id) end
     local use = math.min(pool[id], n)
     pool[id] = pool[id] - use
@@ -183,7 +186,7 @@ function List.Plan(list)
       l.crafts = l.crafts + crafts
       l.made = l.made + crafts * made(m.r)
       for _, g in ipairs(m.r.r) do
-        if g.i then want(g.i, (g.n or 1) * crafts, depth + 1) end
+        if g.i then want(g.i, (g.n or 1) * crafts, depth + 1, pid) end
       end
     else
       l.buy = l.buy + rest
@@ -196,7 +199,7 @@ function List.Plan(list)
     if r and r.r then
       local crafts = math.ceil((w.n or 1) / made(r))
       for _, g in ipairs(r.r) do
-        if g.i then want(g.i, (g.n or 1) * crafts, 1) end
+        if g.i then want(g.i, (g.n or 1) * crafts, 1, w.pid or 0) end
       end
       local unit, onAH = ns.Item.SellNet(ns.Item(w.out))
       if unit and unit > 0 then plan.revenue = plan.revenue + unit * (w.n or 1) end
@@ -231,7 +234,13 @@ function List.Add(rid, n)
       return w
     end
   end
-  local w = { rid = rid, out = r.out, name = r.name or ns.ItemName(r.out), pid = scan and scan.professionID, n = n }
+  local pid = scan and scan.professionID
+  if not pid and C_TradeSkillUI and C_TradeSkillUI.GetBaseProfessionInfo then
+    -- a recipe of the open window (also another player's): its profession for the grouping
+    local ok, info = pcall(C_TradeSkillUI.GetBaseProfessionInfo)
+    pid = ok and type(info) == "table" and info.professionID or nil
+  end
+  local w = { rid = rid, out = r.out, name = r.name or ns.ItemName(r.out), pid = pid, n = n }
   -- a recipe no household scan has (another player's window): keep its reagents with the wish
   if not scan then
     w.r, w.q = {}, made(r)
@@ -245,18 +254,55 @@ end
 
 local window, split, selected
 
+-- Name of a wish's profession (grouping), "Sonstiges" when unknown.
+local function profName(pid)
+  local d = pid and ns.RecipeData and ns.RecipeData[pid]
+  if d and d.name then return d.name end
+  for _, scan in ipairs(ownScans()) do
+    if scan.professionID == pid and scan.profession then return scan.profession end
+  end
+  return "Sonstiges"
+end
+
+-- The wishes by profession: { { pid, name, wishes }… } sorted by name.
+local function byProfession(list)
+  local groups, out = {}, {}
+  for _, w in ipairs(list) do
+    local pid = w.pid or 0
+    local g = groups[pid]
+    if not g then
+      g = { pid = pid, name = profName(w.pid), wishes = {} }
+      groups[pid] = g
+      out[#out + 1] = g
+    end
+    g.wishes[#g.wishes + 1] = w
+  end
+  table.sort(out, function(a, b) return a.name < b.name end)
+  return out
+end
+
+local function toBuyText(plan) return plan.toBuy > 0 and money(plan.toBuy) or (GREEN .. "alles da|r") end
+
 local function refresh()
   if not (window and split) then return end
   local list = wishes()
   local entries = {}
   if #list > 0 then
-    local plan = List.Plan(list)
+    -- on top everything, then per profession its total and its wishes: what is bought for
+    -- which profession stays apart
     entries[#entries + 1] = { key = "h:list", header = "Einkaufsliste" }
     entries[#entries + 1] = { key = "all", name = "Alles zusammen", icon = "Interface\\Icons\\INV_Misc_Bag_10",
-      value = plan.toBuy > 0 and money(plan.toBuy) or (GREEN .. "alles da|r"), all = true }
-    for _, w in ipairs(list) do
-      entries[#entries + 1] = { key = "w:" .. w.rid, name = w.name or ns.ItemName(w.out) or "?", icon = itemIcon(w.out),
-        itemID = w.out, value = "×" .. w.n, wish = w }
+      value = toBuyText(List.Plan(list)), all = true }
+    for _, g in ipairs(byProfession(list)) do
+      entries[#entries + 1] = { key = "h:p" .. g.pid, header = g.name }
+      if #g.wishes > 1 then
+        entries[#entries + 1] = { key = "p:" .. g.pid, name = "Alles für " .. g.name, icon = "Interface\\Icons\\INV_Misc_Bag_10",
+          value = toBuyText(List.Plan(g.wishes)), prof = g }
+      end
+      for _, w in ipairs(g.wishes) do
+        entries[#entries + 1] = { key = "w:" .. w.rid, name = w.name or ns.ItemName(w.out) or "?", icon = itemIcon(w.out),
+          itemID = w.out, value = "×" .. w.n, wish = w }
+      end
     end
   end
   split.SetEntries(entries)
@@ -403,9 +449,15 @@ local function show(entry, c)
   local w = entry and entry.wish
   for _, b in ipairs({ v.Minus, v.Plus, v.Remove }) do b:SetShown(w ~= nil) end
   if not shown then return end
-  local list = w and { w } or wishes()
+  local prof = entry and entry.prof
+  local list = w and { w } or (prof and prof.wishes) or wishes()
   local plan = List.Plan(list)
-  if w then
+  if prof then
+    v.Icon:SetTexture("Interface\\Icons\\INV_Misc_Bag_10")
+    v.itemID = nil
+    v.Name:SetText("Alles für " .. prof.name)
+    v.Sub:SetText(string.format("%d %s", #list, #list == 1 and "Rezept" or "Rezepte"))
+  elseif w then
     v.Icon:SetTexture(itemIcon(w.out))
     v.itemID = w.out
     v.Name:SetText(qualityName(w.out, w.name or ns.ItemName(w.out) or "?"))
@@ -419,9 +471,39 @@ local function show(entry, c)
   v.Head:ClearAllPoints()
   v.Head:SetPoint("TOPLEFT", v.Icon, "BOTTOMLEFT", 0, w and -30 or -20)
   local last = v.Head
-  for i, l in ipairs(plan.lines) do
+  -- "Alles zusammen": the material under the profession it is for (several: own group)
+  local shownLines = plan.lines
+  if not w and not prof then
+    local groups, order = {}, {}
+    for _, l in ipairs(plan.lines) do
+      local only, n = nil, 0
+      for pid in pairs(l.profs or {}) do only, n = pid, n + 1 end
+      local name = n == 1 and profName(only ~= 0 and only or nil) or "Für mehrere Berufe"
+      if not groups[name] then groups[name] = {}; order[#order + 1] = name end
+      table.insert(groups[name], l)
+    end
+    table.sort(order, function(a, b)
+      if (a == "Für mehrere Berufe") ~= (b == "Für mehrere Berufe") then return b == "Für mehrere Berufe" end
+      return a < b
+    end)
+    shownLines = {}
+    for _, name in ipairs(order) do
+      shownLines[#shownLines + 1] = { header = name }
+      for _, l in ipairs(groups[name]) do shownLines[#shownLines + 1] = l end
+    end
+  end
+  for i, l in ipairs(shownLines) do
     local row = v.rows[i]
     if not row then break end
+    if l.header then
+      row.line = nil
+      row.Icon:SetTexture(nil)
+      row.Name:SetText("|cffffd100" .. l.header .. "|r")
+      for _, cell in ipairs(row.cells) do cell:SetText("") end
+      row.Cost:SetText("")
+      row:Show()
+      last = row
+    else
     row.line = l
     row.Icon:SetTexture(itemIcon(l.itemID))
     row.Name:SetText((ns.ItemName(l.itemID) or ("#" .. l.itemID)) .. (l.crafts > 0 and (MUTED .. "  herst.|r") or ""))
@@ -444,11 +526,12 @@ local function show(entry, c)
     end
     row:Show()
     last = row
+    end
   end
   v.more:ClearAllPoints()
   v.more:SetPoint("TOPLEFT", last, "BOTTOMLEFT", 2, -4)
-  v.more:SetText(#plan.lines > MAX_ROWS and string.format("… und %d weitere", #plan.lines - MAX_ROWS) or "")
-  local anchor = #plan.lines > MAX_ROWS and v.more or last
+  v.more:SetText(#shownLines > MAX_ROWS and string.format("… und %d weitere", #shownLines - MAX_ROWS) or "")
+  local anchor = #shownLines > MAX_ROWS and v.more or last
   local values = {
     money(plan.cost),
     plan.toBuy > 0 and (money(plan.toBuy) .. (plan.missing > 0 and (RED .. " + " .. plan.missing .. " ohne Preis|r") or ""))
