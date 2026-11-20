@@ -24,14 +24,14 @@ ns.AHTable.Add({
     for itemID in pairs(ns.Item.ScannedItems()) do
       local item = ns.Item(itemID)
       local vendor = item.vendorSell
-      if vendor and item.cheapest and item.cheapest < vendor then
+      if vendor and item.now and item.now < vendor then
         local units, cost, total = 0, 0, 0
         for _, l in ipairs(ns.Item.Listings(itemID) or {}) do
           if l.unit >= vendor then break end
           units, cost, total = units + l.count, cost + l.unit * l.count, total + (vendor - l.unit) * l.count
         end
         if total > 0 then
-          table.insert(list, { itemID = itemID, cheapest = item.cheapest, vendor = vendor, units = units,
+          table.insert(list, { itemID = itemID, cheapest = item.now, vendor = vendor, units = units,
             cost = cost, total = total })
         end
       end

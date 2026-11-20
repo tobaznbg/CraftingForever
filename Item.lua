@@ -5,7 +5,6 @@
 --   now        "AH jetzt" in every view: the price it can be bought for right now, i.e. the
 --              cheapest offer (copper per unit), nil if not on offer; from the newest of
 --              collector snapshot, own full scan and single item search
---   cheapest   the same value (kept for the single-offer views: sniper, merchant flips)
 --   offers, quantity   auctions / units listed at that time (internal, not shown)
 --   medToday, medTodayHours  median of the hourly cheapest offers today (Berlin calendar
 --                      day, 0:00-23:59 German time) so far, and the hours behind it (internal,
@@ -104,21 +103,20 @@ function Item.Get(itemID)
   local bestT = -1
   if row then
     bestT = epoch(house.updated) or 0
-    e.cheapest, e.offers, e.quantity = row[1], row[7], row[8]
+    e.now, e.offers, e.quantity = row[1], row[7], row[8]
   end
   local ah = ns.db and ns.db.ah
   if ah and ah.currentT and ah.currentT > bestT then
     local live = ah.current and ah.current[itemID]
     -- own scan row: { min, marketValue, quantity, offers, sellers }
-    e.cheapest = live and live[1] and live[1] > 0 and live[1] or nil
+    e.now = live and live[1] and live[1] > 0 and live[1] or nil
     e.quantity, e.offers = live and live[3] or 0, live and live[4] or 0
     bestT = ah.currentT
   end
   local o = observed[itemID]
   if o and o.t > bestT then
-    e.cheapest = o.now
+    e.now = o.now
   end
-  e.now = e.cheapest
   if row then
     e.demand, e.certain = row[18], row[19]
     e.trend, e.direction = row[16], row[17]

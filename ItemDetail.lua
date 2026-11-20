@@ -763,7 +763,7 @@ render = function()
         if not o.own then other = o.unit break end
       end
     else
-      other = item.cheapest
+      other = item.now
     end
     if other then
       local room = math.floor((other - 1) * 0.95 - cost)
