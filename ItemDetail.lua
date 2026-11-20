@@ -187,9 +187,17 @@ local function section(title)
     s.text:SetText(Style.HEAD .. title .. "|r")
     s.rule:SetColorTexture(unpack(Style.C.border))
   end
+  -- the 1 px rule on whole screen pixels: with a scaled UI a plain 1 px line rounds to nothing
+  -- at some heights (one section showed none)
   s.rule:ClearAllPoints()
-  s.rule:SetPoint("TOPLEFT", body, "TOPLEFT", 4, -(y + 15))
-  s.rule:SetPoint("TOPRIGHT", body, "TOPRIGHT", -4, -(y + 15))
+  if PixelUtil and PixelUtil.SetPoint and PixelUtil.SetHeight then
+    PixelUtil.SetHeight(s.rule, 1, 1)
+    PixelUtil.SetPoint(s.rule, "TOPLEFT", body, "TOPLEFT", 4, -(y + 15))
+    PixelUtil.SetPoint(s.rule, "TOPRIGHT", body, "TOPRIGHT", -4, -(y + 15))
+  else
+    s.rule:SetPoint("TOPLEFT", body, "TOPLEFT", 4, -(y + 15))
+    s.rule:SetPoint("TOPRIGHT", body, "TOPRIGHT", -4, -(y + 15))
+  end
   s.text:Show()
   s.rule:Show()
   y = y + 19
