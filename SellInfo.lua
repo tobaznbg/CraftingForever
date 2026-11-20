@@ -16,14 +16,37 @@ local ROW_H = 24
 
 local function money(c) return ns.FormatMoney(c) end
 
--- The item id in a sell frame, nil when the slot is empty: the location Blizzard put in with
--- SetItem (hooked in attach), else the frame's GetItem.
-local function itemOf(frame)
+-- The item location in a sell frame: the one Blizzard put in with SetItem (hooked in attach),
+-- else the frame's GetItem; nil when the slot is empty.
+local function locationOf(frame)
   local location = frame.m4Location
   if location == nil and frame.GetItem then
     local ok, loc = pcall(frame.GetItem, frame)
     location = ok and loc or nil
   end
+  return location
+end
+
+-- The item link of a location (keeps a random suffix such as "des arkanen Zorns").
+local function linkOf(location)
+  if type(location) ~= "table" then return nil end
+  if C_Item and C_Item.GetItemLink then
+    local ok, link = pcall(C_Item.GetItemLink, location)
+    if ok and link then return link end
+  end
+  if location.GetBagAndSlot then
+    local ok, bag, slot = pcall(location.GetBagAndSlot, location)
+    local get = (C_Container and C_Container.GetContainerItemLink) or GetContainerItemLink
+    if ok and bag and slot and get then
+      local ok2, link = pcall(get, bag, slot)
+      if ok2 then return link end
+    end
+  end
+end
+
+-- The item id in a sell frame, nil when the slot is empty.
+local function itemOf(frame)
+  local location = locationOf(frame)
   if not location then return nil end
   if type(location) == "table" and location.IsValid and not location:IsValid() then return nil end
   local getID = C_Item and C_Item.GetItemID
@@ -111,11 +134,8 @@ local function syncDetail(id, itemKey, location)
     if id == opened and not Detail.IsShown() then return end -- closed by the player
     opened = id
     -- the item's link carries the variant's full name ("… des arkanen Zorns")
-    local link
-    if location and C_Item and C_Item.GetItemLink then
-      local ok, l = pcall(C_Item.GetItemLink, location)
-      link = ok and l or nil
-    end
+    local link = linkOf(location)
+    if ns.db then ns.db.sellInfoLink = { id = id, link = link and link:gsub("|", "!") or "nil", t = time() } end
     Detail.Show(link or id, { anchor = AuctionHouseFrame, origin = DETAIL_ORIGIN, skin = "blizzard", itemKey = itemKey })
   else
     opened = nil
@@ -194,12 +214,12 @@ local function attach(frame)
     placeButton()
     sellingPanel(false)
     -- the full key of the item in the slot (a random suffix such as "des arkanen Zorns")
-    local key
-    if id and frame.m4Location and C_AuctionHouse and C_AuctionHouse.GetItemKeyFromItem then
-      local ok, k = pcall(C_AuctionHouse.GetItemKeyFromItem, frame.m4Location)
+    local key, location = nil, id and locationOf(frame)
+    if location and C_AuctionHouse and C_AuctionHouse.GetItemKeyFromItem then
+      local ok, k = pcall(C_AuctionHouse.GetItemKeyFromItem, location)
       key = ok and k or nil
     end
-    syncDetail(id, key, frame.m4Location)
+    syncDetail(id, key, location)
   end
   holder:SetScript("OnUpdate", function(_, dt)
     elapsed = elapsed + (dt or 0)
