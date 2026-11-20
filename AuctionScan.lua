@@ -337,13 +337,15 @@ local function createButton()
   if not Scan.BUTTON then return end
   local parent = AuctionHouseFrame
   if not parent or button then return end
+  -- Blizzard's last tab, read before creating ours: the template adds the new tab to
+  -- parent.Tabs itself, and anchoring it to itself fails
+  local tabs = rawget(parent, "Tabs")
+  local last = type(tabs) == "table" and tabs[#tabs]
   local ok, t = pcall(CreateFrame, "Button", "M4CompanionScanTab", parent, "AuctionHouseFrameDisplayModeTabTemplate")
   if not ok or not t then ok, t = pcall(CreateFrame, "Button", "M4CompanionScanTab", parent, "UIPanelButtonTemplate") end
   if not ok or not t then return end
   button = t
-  local tabs = rawget(parent, "Tabs")
-  local last = type(tabs) == "table" and tabs[#tabs]
-  if last then
+  if last and last ~= t then
     t:SetPoint("TOPLEFT", last, "TOPRIGHT", 3, 0)
   else
     t:SetPoint("TOPLEFT", parent, "BOTTOMLEFT", 300, 2)
