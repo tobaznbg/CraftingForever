@@ -287,8 +287,66 @@ local function updateAuctionRows(af)
   end)
 end
 
+-- One-time probe of Blizzard's table building blocks in this client (saved variables), for the
+-- own columns in the "Auktionen" tab.
+local function probeTable(af)
+  if not ns.db or (ns.db.tableProbe and ns.db.tableProbe.v == 1) then return end
+  local out = { v = 1, t = time() }
+  local tb = rawget(_G, "AuctionHouseTableBuilder")
+  out.builder = type(tb)
+  if type(tb) == "table" then
+    local fns = {}
+    for k, v in pairs(tb) do if type(v) == "function" then fns[#fns + 1] = k end end
+    table.sort(fns)
+    out.builderFns = table.concat(fns, ",")
+  end
+  local keys = {}
+  for k, v in pairs(af) do
+    if type(v) == "table" and v.GetObjectType then keys[#keys + 1] = tostring(k) end
+  end
+  table.sort(keys)
+  out.auctionsFrame = table.concat(keys, ",")
+  local list = auctionsList(af)
+  if list then
+    out.listSetLayout = list.SetTableBuilderLayout ~= nil
+    out.listRefresh = list.RefreshScrollFrame ~= nil
+    local lk = {}
+    for k, v in pairs(list) do lk[#lk + 1] = tostring(k) .. ":" .. type(v) end
+    table.sort(lk)
+    out.listKeys = table.concat(lk, ",")
+    local builder = rawget(list, "tableBuilder")
+    if type(builder) == "table" then
+      local bk = {}
+      for k, v in pairs(builder) do bk[#bk + 1] = tostring(k) .. ":" .. type(v) end
+      local mt = getmetatable(builder)
+      local idx = mt and mt.__index
+      if type(idx) == "table" then for k in pairs(idx) do bk[#bk + 1] = "mt." .. tostring(k) end end
+      table.sort(bk)
+      out.tableBuilder = table.concat(bk, ",")
+    end
+  end
+  local info = C_XMLUtil and C_XMLUtil.GetTemplateInfo
+  local templates = {}
+  for _, name in ipairs({ "AuctionHouseTableCellTemplate", "AuctionHouseTableCellTextTemplate",
+      "AuctionHouseTableCellAuctionsItemTemplate", "AuctionHouseTableCellAuctionsBidTemplate",
+      "AuctionHouseTableCellAuctionsBuyoutTemplate", "AuctionHouseTableCellTimeLeftTemplate",
+      "AuctionHouseTableCellAuctionsTimeLeftTemplate", "AuctionHouseTableHeaderStringTemplate",
+      "AuctionHousePriceDisplayTableCellTemplate", "AuctionHouseTableCellMoneyTemplate" }) do
+    local ok, ti = pcall(function() return info and info(name) end)
+    templates[#templates + 1] = name .. "=" .. tostring(ok and ti ~= nil)
+  end
+  out.templates = table.concat(templates, ",")
+  for _, name in ipairs({ "AuctionHouseTableCellMixin", "AuctionHouseTablePriceCellMixin",
+      "AuctionHouseTableCellAuctionsBidMixin", "AuctionHouseTableCellAuctionsBuyoutMixin",
+      "AuctionHouseTableCellTextMixin" }) do
+    out["mixin_" .. name] = type(rawget(_G, name))
+  end
+  ns.db.tableProbe = out
+end
+
 local function attachAuctions()
   local af = AuctionHouseFrame and rawget(AuctionHouseFrame, "AuctionsFrame")
+  if type(af) == "table" then ns.Safe(probeTable, af) end
   if type(af) ~= "table" or af.m4Rows then return end
   local layer = CreateFrame("Frame", nil, af)
   af.m4Rows = layer
