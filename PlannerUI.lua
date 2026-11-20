@@ -497,7 +497,7 @@ local function showInventory()
   addText(GREY .. "AH, wenn es pro Stück mindestens 20 % und für den ganzen Stapel mindestens 10s mehr als der Händler bringt.|r")
 end
 
-local KIND_TEXT = { buy = "gekauft", post = "eingestellt", sale = "verkauft", expired = "abgelaufen",
+local KIND_TEXT = { buy = "gekauft", post = "eingestellt", sale = "verkauft", vendor = "an Händler", expired = "abgelaufen",
   cancelled = "abgebrochen" }
 
 local function showLedger()
@@ -534,6 +534,7 @@ local function showLedger()
   for _, e in ipairs(ns.Ledger.Recent(25)) do
     local amount = e.k == "buy" and money(e.c or 0)
       or e.k == "sale" and (money((e.c or 0) - (e.cut or 0)) .. GREY .. " netto|r")
+      or e.k == "vendor" and money(e.c or 0)
       or e.k == "post" and e.p and (money(e.p) .. GREY .. (e.u and e.u > 1 and " /Stk|r" or "|r"))
       or ""
     local name = e.i and withIcon(e.i, ns.ItemName(e.i)) or (e.n or "?")

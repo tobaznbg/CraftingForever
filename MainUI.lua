@@ -55,7 +55,7 @@ local MARKET_SUBS = {
 local ALIASES = { handel = "ledger", berufe = "professions", markt = "market", analyse = "analysis",
   skill = "planner", planer = "planner" }
 
-local KINDS = { buy = "Kauf", post = "Eingestellt", sale = "Verkauf", expired = "Abgelaufen", cancelled = "Abgebrochen", craft = "Hergestellt" }
+local KINDS = { buy = "Kauf", post = "Eingestellt", sale = "Verkauf", vendor = "Händler", expired = "Abgelaufen", cancelled = "Abgebrochen", craft = "Hergestellt" }
 -- Auction durations of the post hooks (1/2/3) in seconds.
 local DURATIONS = { [1] = 12 * 3600, [2] = 24 * 3600, [3] = 48 * 3600 }
 
@@ -527,6 +527,8 @@ local function eventRow(e)
     amount = RED .. "-" .. money(e.c) .. "|r"
   elseif e.k == "sale" then
     amount = GREEN .. "+" .. money((e.c or 0) - (e.cut or 0)) .. "|r"
+  elseif e.k == "vendor" then
+    amount = GREEN .. "+" .. money(e.c or 0) .. "|r"
   elseif e.k == "post" and e.p then
     amount = Style.MUTED .. money(e.p * (e.u or 1)) .. "|r"
   end
@@ -793,7 +795,7 @@ local PERIODS = {
   { key = "all", label = "Alles", since = function() return 0 end },
 }
 local ITEM_KINDS = { buy = "gekauft", craft = "hergestellt", post = "eingestellt", cancelled = "abgebrochen",
-  expired = "abgelaufen", sale = "verkauft" }
+  expired = "abgelaufen", sale = "verkauft", vendor = "an Händler" }
 local AREA_COLOR = { 0.85, 0.79, 0.64, 1 }
 local FIG_H = 56
 
@@ -815,6 +817,9 @@ local function itemEventRow(e, itemID)
   elseif e.k == "sale" then
     amount = GREEN .. "+" .. money((e.c or 0) - (e.cut or 0)) .. "|r"
     detail = "brutto " .. money(e.c) .. ", AH-Gebühr " .. money(e.cut)
+  elseif e.k == "vendor" then
+    amount = GREEN .. "+" .. money(e.c or 0) .. "|r"
+    if (e.u or 0) > 0 and e.c then detail = "je " .. money(e.c / e.u) end
   elseif e.k == "post" then
     local parts = {}
     if e.p then table.insert(parts, "je " .. money(e.p)) end

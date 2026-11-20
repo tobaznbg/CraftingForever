@@ -198,7 +198,7 @@ local function replay(since)
         d.u, d.dep = d.u + u, d.dep + e.dep
         depo[id] = d
       end
-    elseif id and e.k == "sale" and u > 0 then
+    elseif id and (e.k == "sale" or e.k == "vendor") and u > 0 then
       local k, cv = take(crafted[id], u)
       local kb, bv = take(bought[id], u - k)
       local function book(n, group, cost, value)
@@ -344,7 +344,25 @@ function Profit.Totals(since)
   return totals(Profit.Professions(since))
 end
 
--- Stock now from the pools: crafted and bought units of an item together.
+-- What the character really holds of an item: bags, bank (once seen) and own running
+-- auctions. nil when the bank was never opened (then nothing is capped).
+local function heldCounts()
+  local key = ns.CharKey and ns.CharKey()
+  local inv = key and ns.db and ns.db.inventory and ns.db.inventory[key]
+  if not (inv and inv.bagsT and inv.bankT) then return nil end
+  local held = {}
+  for _, part in ipairs({ inv.bags or {}, inv.bank or {} }) do
+    for id, entry in pairs(part) do held[id] = (held[id] or 0) + (entry.n or 0) end
+  end
+  local owned = ns.db.owned and ns.db.owned[key]
+  for _, a in ipairs(owned and owned.list or {}) do
+    if a.i then held[a.i] = (held[a.i] or 0) + (a.q or 1) end
+  end
+  return held
+end
+
+-- Stock now from the pools: crafted and bought units of an item together, at most what the
+-- character holds (items used, equipped, destroyed or given away leave the stock).
 local function stock(crafted, bought)
   local by, list = {}, {}
   local function add(id, p, source)
@@ -360,6 +378,18 @@ local function stock(crafted, bought)
   end
   for id, p in pairs(crafted) do add(id, p, "hergestellt") end
   for id, p in pairs(bought) do add(id, p, "gekauft") end
+  local held = heldCounts()
+  if held then
+    for i = #list, 1, -1 do
+      local s = list[i]
+      local have = held[s.itemId] or 0
+      if have <= 0 then
+        table.remove(list, i)
+      elseif have < s.units then
+        s.cost, s.units = s.cost * have / s.units, have
+      end
+    end
+  end
   local t = { units = 0, cost = 0, market = 0, pricedCost = 0, diff = 0, unpriced = 0 }
   for _, s in ipairs(list) do
     s.cost = round(s.cost)

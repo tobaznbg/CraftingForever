@@ -4,6 +4,7 @@
 --   sale       "sold" mail with invoice: price and the auction house cut
 --   expired    "expired" mail, cancelled: "cancelled" mail
 --   craft      the player made an item (see "Crafting" below)
+--   vendor     sold to a merchant (c: what the merchant paid, no cut); a buyback removes it
 -- Mails stay in the inbox until taken, so every scan sees them again. A mail counts
 -- once: same kind, item, amount and count and a receive time within MAIL_SLACK of
 -- an entry already logged is the same mail.
@@ -406,6 +407,66 @@ function Ledger.Summary()
   end
   table.sort(list, function(a, b) return a.last > b.last end)
   return list, total
+end
+
+-- Merchant sales ---------------------------------------------------------------------
+-- A right click on a bag item with the merchant window open sells it. The hook runs after
+-- the call while the slot still holds the (locked) item. A buyback in the same visit takes
+-- the newest matching sale out again.
+
+local merchantOpen = false
+local visitSales = {}   -- events logged during this merchant visit, newest last
+
+local function sellPriceOf(itemID)
+  local getInfo = (C_Item and C_Item.GetItemInfo) or GetItemInfo
+  if not getInfo then return nil end
+  local price = select(11, getInfo(itemID))
+  return type(price) == "number" and price or nil
+end
+
+function Ledger.OnContainerUse(bag, slot)
+  if not merchantOpen then return end
+  if MerchantFrame and MerchantFrame.IsShown and not MerchantFrame:IsShown() then return end
+  local info = C_Container and C_Container.GetContainerItemInfo and C_Container.GetContainerItemInfo(bag, slot)
+  if not (info and info.itemID) or info.hasNoValue then return end
+  local price = sellPriceOf(info.itemID)
+  if not price or price <= 0 then return end
+  local u = info.stackCount or 1
+  local e = { k = "vendor", i = info.itemID, u = u, c = price * u }
+  add(e)
+  table.insert(visitSales, e)
+end
+
+function Ledger.OnBuyback(index)
+  local link = GetBuybackItemLink and GetBuybackItemLink(index)
+  local id = link and tonumber(link:match("item:(%d+)"))
+  if not id then return end
+  local events = book().events
+  for v = #visitSales, 1, -1 do
+    local e = visitSales[v]
+    if e.i == id then
+      table.remove(visitSales, v)
+      for i = #events, 1, -1 do
+        if events[i] == e then table.remove(events, i) break end
+      end
+      return
+    end
+  end
+end
+
+if hooksecurefunc then
+  if C_Container and C_Container.UseContainerItem then
+    hooksecurefunc(C_Container, "UseContainerItem", function(bag, slot) ns.Safe(Ledger.OnContainerUse, bag, slot) end)
+  elseif UseContainerItem then
+    hooksecurefunc("UseContainerItem", function(bag, slot) ns.Safe(Ledger.OnContainerUse, bag, slot) end)
+  end
+  if BuybackItem then
+    hooksecurefunc("BuybackItem", function(index) ns.Safe(Ledger.OnBuyback, index) end)
+  end
+end
+if ns.On then
+  ns.On("MERCHANT_SHOW", function() merchantOpen, visitSales = true, {} end)
+  ns.On("MERCHANT_CLOSED", function() merchantOpen, visitSales = false, {} end)
 end
 
 -- All events of this character, oldest first (read only; Profit.lua replays them).
