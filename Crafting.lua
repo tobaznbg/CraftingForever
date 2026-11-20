@@ -583,6 +583,8 @@ local function updateForm(form)
       if fy and sy then slot.m4Price:SetPoint("RIGHT", form, "RIGHT", -RIGHT_EDGE, sy - fy) end
     end
     local r = e and e.reagents and itemID and e.reagents[itemID]
+    -- Blizzard reuses the slot frames: a hidden one keeps no price on the form
+    slot.m4Price:SetShown(slot:IsShown() and slot:IsVisible())
     if itemID and r and r.unit then
       slot.m4Price:SetText(fmt(r.unit * (need or r.n)) .. "|cff999999  " .. (r.vendor and "H" or "AH") .. "|r")
     elseif itemID then
