@@ -298,9 +298,13 @@ local function wrapLayout(original)
   local fn
   fn = function(tableBuilder)
     local replaced = false
+    local seen = {}
     local function addOwn(method, ...)
       local args = { ... }
       local n = select("#", ...)
+      local sig = {}
+      for i = 1, n do sig[#sig + 1] = type(args[i]) == "string" and args[i] or type(args[i]) end
+      seen[#seen + 1] = table.concat(sig, " ")
       for i = 1, n do
         if args[i] == BID_TEMPLATE then
           for k = 1, n do
@@ -317,9 +321,11 @@ local function wrapLayout(original)
       end
       return method(tableBuilder, ...)
     end
+    local calls = {}
     local proxy = setmetatable({}, { __index = function(_, k)
       local v = tableBuilder[k]
       if type(v) ~= "function" then return v end
+      calls[#calls + 1] = tostring(k)
       if k == "AddFixedWidthColumn" or k == "AddUnsortableFixedWidthColumn" then
         return function(_, ...) return addOwn(v, ...) end
       end
@@ -329,6 +335,8 @@ local function wrapLayout(original)
     trace("layoutRan", time())
     trace("layoutOk", ok and true or tostring(err))
     trace("replaced", replaced)
+    trace("calls", table.concat(calls, ","))
+    trace("columns", table.concat(seen, " | "))
     if not ok then original(tableBuilder) end -- Blizzard's table as it was
     SellInfo.columns = ok and replaced
   end
