@@ -905,7 +905,9 @@ render = function()
     local missing = teach.missing and (ORANGE .. "kein Preis: " .. (ns.ItemName(teach.missing) or "?") .. "|r")
     line(t.product and "Herstellkosten / Stück" or "Material", teach.cost and m(teach.cost) or missing or "–")
     if t.product then
-      line("Verkauf / Stück", m(teach.value) .. (teach.onAH and "" or ("  " .. Style.MUTED .. "Händler|r")))
+      -- the product's market value (R, Marktwert gestern); the profit below is after the AH cut
+      local ref = teach.product and teach.product.ref
+      line("Marktwert / Stück", ref and m(ref) or (m(teach.value) .. (teach.onAH and "" or ("  " .. Style.MUTED .. "Händler|r"))))
       if teach.profit then
         line("Gewinn / Stück", (teach.profit >= 0 and (GREEN .. "+") or "|cffff6b6b-") .. m(math.abs(teach.profit)) .. "|r")
       end
