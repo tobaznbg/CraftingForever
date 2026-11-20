@@ -346,6 +346,7 @@ local function wrapLayout(original)
             if type(args[k]) == "number" and args[k] > 60 then args[k] = OWN_WIDTH break end -- the width
           end
           args[i] = TEXT_TEMPLATE
+          if i > 1 and type(args[i - 1]) == "number" then args[i - 1] = nil end -- not sortable
           local cost = method(tableBuilder, unpack(args, 1, n))
           local profit = method(tableBuilder, unpack(args, 1, n))
           cost:GetHeaderFrame():SetText("Einkauf")
@@ -547,7 +548,7 @@ end
 -- (cheapest offer against R, the market value of yesterday: green from -10 %, red from +10 %)
 -- and "Nachfrage" (ns.Item.DemandText). Same technique as the auction columns: every layout
 -- Blizzard sets on the list is wrapped and gets the two text columns after its price column.
-local BROWSE_WIDTH = 74
+local BROWSE_WIDTH = 52
 local browseWrapped = setmetatable({}, { __mode = "k" })
 
 local function wrapBrowseLayout(original, list)
@@ -568,7 +569,11 @@ local function wrapBrowseLayout(original, list)
       if isPrice then
         added = true
         for i = 1, n do
-          if type(args[i]) == "string" then args[i] = TEXT_TEMPLATE end
+          if type(args[i]) == "string" then
+            args[i] = TEXT_TEMPLATE
+            -- no sorting by these columns: the sort order before the template goes
+            if i > 1 and type(args[i - 1]) == "number" then args[i - 1] = nil end
+          end
         end
         local widthSet = false
         for i = 1, n do
@@ -579,8 +584,8 @@ local function wrapBrowseLayout(original, list)
         end
         local pct = method(tableBuilder, unpack(args, 1, n))
         local demand = method(tableBuilder, unpack(args, 1, n))
-        pct:GetHeaderFrame():SetText("zu Marktwert")
-        demand:GetHeaderFrame():SetText("Nachfrage")
+        pct:GetHeaderFrame():SetText("± MW")
+        demand:GetHeaderFrame():SetText("Nachfr.")
         count = count + 2
         cols.pct, cols.demand = count - 1, count
       end
