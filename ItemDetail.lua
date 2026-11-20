@@ -702,7 +702,7 @@ render = function()
     line("Obergrenze (" .. (h.capLabel or "Marktwert gestern") .. ")", h.cap and money(h.cap) or "–")
     line("Erwarteter Gewinn", GREEN .. "+" .. money(h.profit) .. "|r  " .. Style.MUTED .. "nach 5 % Gebühr|r")
     if h.days then
-      line("Verkauft in", "~" .. Detail.Days(h.days) .. " Tagen  " .. Style.MUTED .. string.format("(%s / Tag, %s)|r",
+      line("Verkauft in", "ca. " .. Detail.Days(h.days) .. " Tagen  " .. Style.MUTED .. string.format("(%s / Tag, %s)|r",
         Detail.Days(h.perDay), h.perDaySource or ""))
     end
     line("Treffer seit", ago(h.firstSeen or time()))
