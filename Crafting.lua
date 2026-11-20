@@ -702,14 +702,17 @@ local function farmSpots(e, max)
     for i = 1, math.min(max, #found) do
       local f = found[i]
       local loc = f.c and { name = f.name, zone = F.ZoneName(f.c[1]), x = f.c[2], y = f.c[3] } or nil
-      out[#out + 1] = { text = string.format("%s (Stufe %d–%d) · %s", f.name, f.lo, f.hi, loc and loc.zone or f.zone),
-        right = string.format("%d %%", math.floor(f.per * 100 + 0.5)), loc = loc, grey = not f.reach }
+      -- units per skinning: chance x average quantity (above 1 where a skin can bring several)
+      local right = f.per >= 0.995 and (string.format("%.1f", f.per):gsub("%.", ",") .. " pro Häuten")
+        or string.format("%d %% der Häutungen", math.floor(f.per * 100 + 0.5))
+      out[#out + 1] = { text = f.name, sub = string.format("Stufe %d–%d · %s", f.lo, f.hi, loc and loc.zone or f.zone),
+        right = right, loc = loc, grey = not f.reach }
     end
   else
     for _, n in ipairs(C and C.node and C.node[e.itemID] or {}) do
       if #out >= max then break end
       local zone = F.ZoneName(n[3])
-      out[#out + 1] = { text = string.format("%s · %s", n[2], zone), right = string.format("%d Fundorte", n[6]),
+      out[#out + 1] = { text = n[2], sub = string.format("%s · %d Fundorte", zone, n[6]), right = "",
         loc = { name = n[2], zone = zone, x = n[4], y = n[5] } }
     end
   end
@@ -951,22 +954,28 @@ local function productCard(c)
   v.SpotHead = c:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
   v.SpotHead:SetText("Beste Farmspots:")
   v.Spots = {}
-  for i = 1, 6 do
+  for i = 1, 5 do
+    -- two lines: the creature (or node) in white, under it level and zone small and grey
     local row = {}
-    row.Text = c:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    row.Text:SetPoint("TOPLEFT", i == 1 and v.SpotHead or v.Spots[i - 1].Text, "BOTTOMLEFT", 0, i == 1 and -7 or -6)
+    row.Text = c:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    row.Text:SetPoint("TOPLEFT", i == 1 and v.SpotHead or v.Spots[i - 1].Sub, "BOTTOMLEFT", 0, i == 1 and -8 or -9)
     row.Text:SetJustifyH("LEFT")
     row.Text:SetWordWrap(false)
-    row.Right = c:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    row.Right:SetPoint("RIGHT", c, "RIGHT", -RIGHT_EDGE - 20, 0)
-    row.Right:SetPoint("TOP", row.Text, "TOP", 0, 0)
+    row.Sub = c:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    row.Sub:SetPoint("TOPLEFT", row.Text, "BOTTOMLEFT", 0, -2)
+    row.Sub:SetJustifyH("LEFT")
+    row.Sub:SetWordWrap(false)
+    row.Sub:SetWidth(180)
+    row.Right = c:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    row.Right:SetPoint("RIGHT", c, "RIGHT", -RIGHT_EDGE - 26, 0)
+    row.Right:SetPoint("TOP", row.Sub, "TOP", 0, 0) -- on the second line, right of level and zone
     row.Right:SetJustifyH("RIGHT")
     -- a fixed width (not anchored to row.Right: that one hangs on the text, a loop for WoW)
     row.Text:SetWidth(222)
     local b = CreateFrame("Button", nil, c)
-    b:SetSize(16, 16)
+    b:SetSize(20, 20)
     b:SetPoint("RIGHT", c, "RIGHT", -RIGHT_EDGE + 2, 0)
-    b:SetPoint("TOP", row.Text, "TOP", 0, 3)
+    b:SetPoint("TOP", row.Text, "TOP", 0, 0)
     b:SetNormalTexture("Interface\\Icons\\INV_Misc_Map_01")
     b:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
     b:SetScript("OnEnter", function(self)
@@ -1004,7 +1013,7 @@ local function showProduct(entry, c)
   for _, part in ipairs({ v.Icon, v.Ring, v.Name, v.Sub, v.Head, v.LearnHead, v.Line }) do part:SetShown(shown) end
   if not shown then
     for i, fs in ipairs(v.SourceLines) do fs:Hide(); v.MapButtons[i]:Hide() end
-    for _, row in ipairs(v.Spots) do row.Text:Hide(); row.Right:Hide(); row.Map:Hide() end
+    for _, row in ipairs(v.Spots) do row.Text:Hide(); row.Sub:Hide(); row.Right:Hide(); row.Map:Hide() end
     v.SpotHead:Hide()
   end
   for _, row in ipairs(v.rows) do row.label:SetShown(shown); row.value:SetShown(shown) end
@@ -1025,7 +1034,7 @@ local function showProduct(entry, c)
     v.Sub:SetText(e.learned and "gelernt"
       or ((e.tooHigh and "|cffff6b6b" or "|cffffb547") .. "nicht gelernt" .. (e.learn and (": " .. e.learn:gsub("^Quelle %? ", "")) or "") .. "|r"))
   end
-  for _, row in ipairs(v.Spots) do row.Text:Hide(); row.Right:Hide(); row.Map:Hide() end
+  for _, row in ipairs(v.Spots) do row.Text:Hide(); row.Sub:Hide(); row.Right:Hide(); row.Map:Hide() end
   v.SpotHead:SetShown(e.gather == true)
   local src = not e.learned and not e.gather and sourceLines(e.pid, e.spell) or nil
   local lastSource
@@ -1051,10 +1060,11 @@ local function showProduct(entry, c)
     for i, sp in ipairs(spots) do
       local row = v.Spots[i]
       row.Text:SetText((sp.grey and "|cff999999" or "") .. sp.text .. (sp.grey and "|r" or ""))
+      row.Sub:SetText(sp.sub or "")
       row.Right:SetText((sp.grey and "|cff999999" or "") .. sp.right .. (sp.grey and "|r" or ""))
       row.Map.loc = sp.loc
-      row.Text:Show(); row.Right:Show(); row.Map:SetShown(sp.loc ~= nil)
-      last = row.Text
+      row.Text:Show(); row.Sub:Show(); row.Right:Show(); row.Map:SetShown(sp.loc ~= nil)
+      last = row.Sub
     end
     if #spots == 0 then
       local row = v.Spots[1]
