@@ -36,6 +36,8 @@
 --   onOpen = function(t) (runs inside the tab click, i.e. with a hardware event; embedded
 --            tables run it on show, only while the auction house is open),
 --   info = function() -> short text left of the entry count (e.g. price basis),
+--   ahTab = false (only embedded, no tab in the auction house),
+--   onClick = function(entry) (plain click on a row, for tables without `detail`),
 --   detail = function(entry, count) -> { title, subtitle, columns = { { title, width }... },
 --            rows = { { itemID, cells = { text... } }... },
 --            summary = { { label, value }... } (single-line rows at the bottom), hint = text }
@@ -499,7 +501,8 @@ local function createFrame(t, parent, embedded)
     r:SetScript("OnMouseUp", function(self, button)
       if button ~= "LeftButton" or not self.entry then return end
       if ns.ItemDetail and ns.ItemDetail.AltClick(self.entry.itemID) then return end
-      if t.detail then ns.Safe(showDetail, t, self.entry) end
+      if t.detail then ns.Safe(showDetail, t, self.entry)
+      elseif t.onClick then ns.Safe(t.onClick, self.entry) end
     end)
     t.rowFrames[i] = r
   end
@@ -841,17 +844,19 @@ local function createAll(parent)
   -- Forever uses the retail auction house frame: retail tab spacing.
   local offsetX = 3
   for _, def in ipairs(defs) do
-    local t = newInstance(def, { isAHTab = true, detailAnchor = parent })
-    createFrame(t, parent, false)
-    local tab = CreateFrame("Button", "M4CompanionAHTab" .. t.id, parent, "AuctionHouseFrameDisplayModeTabTemplate")
-    t.tab = tab
-    tab:SetText(t.label)
-    PanelTemplates_TabResize(tab, 20, nil, 70)
-    tab:SetPoint("TOPLEFT", anchor, "TOPRIGHT", offsetX, 0)
-    PanelTemplates_DeselectTab(tab)
-    tab:SetScript("OnClick", function() ns.Safe(selectTab, t) end)
-    table.insert(ahTabs, t)
-    anchor = tab
+    if def.ahTab ~= false then
+      local t = newInstance(def, { isAHTab = true, detailAnchor = parent })
+      createFrame(t, parent, false)
+      local tab = CreateFrame("Button", "M4CompanionAHTab" .. t.id, parent, "AuctionHouseFrameDisplayModeTabTemplate")
+      t.tab = tab
+      tab:SetText(t.label)
+      PanelTemplates_TabResize(tab, 20, nil, 70)
+      tab:SetPoint("TOPLEFT", anchor, "TOPRIGHT", offsetX, 0)
+      PanelTemplates_DeselectTab(tab)
+      tab:SetScript("OnClick", function() ns.Safe(selectTab, t) end)
+      table.insert(ahTabs, t)
+      anchor = tab
+    end
   end
   hooksecurefunc(parent, "SetDisplayMode", function(_, displayMode)
     if type(displayMode) == "table" and #displayMode > 0 then

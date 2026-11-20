@@ -861,6 +861,36 @@ local function figureCard(parent, cols)
   return f
 end
 
+-- Stock of the ledger page as a generic table (sortable, filterable); a click shows the
+-- item's trades on the ledger page (stockClick, set by the page).
+local stockClick
+if ns.AHTable and ns.AHTable.Add then
+  local function signed(c) return type(c) == "number" and signedMoney(c) or "–" end
+  ns.AHTable.Add({
+    id = "Stock", label = "Bestand", title = "Bestand", ahTab = false, sort = "market",
+    columns = {
+      { key = "name", title = "Item", width = 0, align = "LEFT" },
+      { key = "units", title = "Stück", width = 56, filter = "num", fmt = function(e) return units(e.units) end },
+      { key = "source", title = "Herkunft", width = 120, align = "LEFT", muted = true, optional = true,
+        fmt = function(e) return e.source or "" end },
+      { key = "unitCost", title = "Einstand/Stk", width = 96, filter = "money", fmt = function(e) return money(e.unitCost) end },
+      { key = "marketUnit", title = "AH jetzt/Stk", width = 100, filter = "money", fmt = function(e) return moneyOr(e.marketUnit) end },
+      { key = "cost", title = "Einstand", width = 96, filter = "money", muted = true, fmt = function(e) return money(e.cost) end },
+      { key = "market", title = "AH jetzt gesamt", width = 110, filter = "money", fmt = function(e) return moneyOr(e.market) end },
+      { key = "diff", title = "Unterschied", width = 106, filter = "money", fmt = function(e) return signed(e.diff) end },
+    },
+    rows = function()
+      local list = {}
+      for _, s in ipairs(ns.Profit and ns.Profit.Stock and ns.Profit.Stock() or {}) do
+        table.insert(list, { itemID = s.itemId, units = s.units, source = s.source, unitCost = s.unitCost,
+          marketUnit = s.marketUnit, cost = s.cost, market = s.market, diff = s.diff })
+      end
+      return list
+    end,
+    onClick = function(e) if stockClick then stockClick(e.itemID) end end,
+  })
+end
+
 PAGES.ledger = function(p)
   pageTitle(p, "Handelsbuch")
   local buttons = {}
@@ -934,11 +964,11 @@ PAGES.ledger = function(p)
     { "Datum", 110 }, { "Art", 100 }, { "Menge", 70, "RIGHT" }, { "Betrag", 120, "RIGHT" }, { "", 0 } },
     { scroll = true })
   trades:SetPoint("TOPLEFT", PAD, listTop)
-  local stockList = grid(p, INNER_W, listH, {
-    { "Item", 0, nil, true }, { "Stück", 56, "RIGHT" }, { "Herkunft", 130 }, { "Einstand/Stk", 96, "RIGHT" },
-    { "AH jetzt/Stk", 100, "RIGHT" }, { "Einstand", 96, "RIGHT" }, { "AH jetzt gesamt", 96, "RIGHT" },
-    { "Unterschied", 106, "RIGHT" } }, { scroll = true })
+  local stockList = CreateFrame("Frame", nil, p)
+  stockList:SetSize(INNER_W, listH)
   stockList:SetPoint("TOPLEFT", PAD, listTop)
+  stockList.missing = muted(Style.Text(stockList, 12))
+  stockList.missing:SetPoint("TOPLEFT", 6, -6)
 
   local report, since, periodLabel
 
@@ -946,6 +976,7 @@ PAGES.ledger = function(p)
     selected = itemID
     p:Refresh()
   end
+  stockClick = selectItem
 
   local function itemRow(r, area)
     local made = "–"
@@ -1023,14 +1054,7 @@ PAGES.ledger = function(p)
     elseif mode == "stock" then
       label:SetText(Style.HEAD .. "Bestand|r " .. Style.MUTED .. "(noch nicht verkauft)|r")
       summary:SetText("Einstand: Kaufpreis bzw. gekauftes Material; AH jetzt: billigstes Angebot gerade")
-      local rows = {}
-      for _, s in ipairs(report and report.stock or {}) do
-        table.insert(rows, { s.name or ns.ItemName(s.itemId) or ("Item " .. tostring(s.itemId)), units(s.units),
-          s.source or "", money(s.unitCost), moneyOr(s.marketUnit), money(s.cost), moneyOr(s.market),
-          type(s.diff) == "number" and signedMoney(s.diff) or "–", itemID = s.itemId,
-          onClick = function() selectItem(s.itemId) end })
-      end
-      stockList:SetRows(rows, report and "Kein Bestand" or "Gewinnrechnung noch nicht verfügbar")
+      embed(stockList, "Stock")
     else
       label:SetText(Style.HEAD .. "Letzte Vorgänge|r")
       local rows = {}
