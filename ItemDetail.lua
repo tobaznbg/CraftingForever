@@ -30,6 +30,7 @@ local docked   -- anchor frame while docked at the auction house, nil as a windo
 local lines, sections = {}, {}
 local chart
 local live     -- { itemID, state = "searching"|"done"|"failed", offers, t } of the search on opening
+local skin = "m4" -- "m4" (own flat look) or "blizzard" (native look, pilot: AH sell tab, SellInfo.lua)
 local render -- forward declared: used by Show/Toggle/Refresh, defined below
 local place  -- forward declared: used by create and the auction house events
 
@@ -112,6 +113,15 @@ local function line(label, value)
   l.label:SetPoint("TOPLEFT", body, "TOPLEFT", 4, -y)
   l.value:ClearAllPoints()
   l.value:SetPoint("TOPRIGHT", body, "TOPRIGHT", -4, -y)
+  if skin == "blizzard" then
+    l.label:SetFontObject(GameFontNormalSmall)
+    l.label:SetTextColor(1, 0.82, 0)
+    l.value:SetFontObject(GameFontHighlightSmall)
+  else
+    l.label:SetFontObject(Style.Font(12))
+    l.label:SetTextColor(unpack(Style.C.muted))
+    l.value:SetFontObject(Style.Font(12))
+  end
   l.label:SetText(label or "")
   l.value:SetText(value or "")
   l.label:Show()
@@ -135,7 +145,15 @@ local function section(title)
   y = y + (usedSections > 1 and 8 or 2)
   s.text:ClearAllPoints()
   s.text:SetPoint("TOPLEFT", body, "TOPLEFT", 4, -y)
-  s.text:SetText(Style.HEAD .. title .. "|r")
+  if skin == "blizzard" then
+    s.text:SetFontObject(GameFontNormal)
+    s.text:SetText(title)
+    s.rule:SetColorTexture(1, 0.82, 0, 0.22)
+  else
+    s.text:SetFontObject(Style.Font(12))
+    s.text:SetText(Style.HEAD .. title .. "|r")
+    s.rule:SetColorTexture(unpack(Style.C.border))
+  end
   s.rule:ClearAllPoints()
   s.rule:SetPoint("TOPLEFT", body, "TOPLEFT", 4, -(y + 15))
   s.rule:SetPoint("TOPRIGHT", body, "TOPRIGHT", -4, -(y + 15))
@@ -637,7 +655,14 @@ render = function()
   local Style = ns.Style
   local getIcon = (C_Item and C_Item.GetItemIconByID) or GetItemIcon
   frame.icon:SetTexture(getIcon and getIcon(itemID) or nil)
-  frame.name:SetText(ns.ItemName(itemID) or ("#" .. itemID))
+  local name = ns.ItemName(itemID) or ("#" .. itemID)
+  if skin == "blizzard" then
+    local getQuality = C_Item and C_Item.GetItemQualityByID
+    local q = getQuality and getQuality(itemID)
+    local color = q and ITEM_QUALITY_COLORS and ITEM_QUALITY_COLORS[q]
+    if color and color.hex then name = color.hex .. name .. "|r" end
+  end
+  frame.name:SetText(name)
   y, used, usedSections = 0, 0, 0
   local h = currentHit(itemID)
   local item = ns.Item(itemID)
@@ -854,7 +879,11 @@ place = function(anchor)
   anchor = anchor or dockAnchor()
   docked = anchor
   frame:ClearAllPoints()
-  if anchor then
+  if anchor and skin == "blizzard" then
+    -- right on the auction house frame's edge, same height: reads as part of it
+    frame:SetPoint("TOPLEFT", anchor, "TOPRIGHT", -2, 0)
+    frame:SetPoint("BOTTOMLEFT", anchor, "BOTTOMRIGHT", -2, 0)
+  elseif anchor then
     frame:SetPoint("TOPLEFT", anchor, "TOPRIGHT", 4, 0)
     frame:SetPoint("BOTTOMLEFT", anchor, "BOTTOMRIGHT", 4, 0)
   else
@@ -876,7 +905,30 @@ local function create()
   frame:EnableMouse(true)
   frame:SetMovable(true)
   frame:SetClampedToScreen(true)
-  Style.Panel(frame, 30)
+  -- Two looks on child layers below the content: the own flat panel and a native Blizzard
+  -- frame (applySkin shows one of them).
+  frame.m4deco = CreateFrame("Frame", nil, frame)
+  frame.m4deco:SetAllPoints()
+  Style.Panel(frame.m4deco, 30)
+  local okB, blizz = pcall(CreateFrame, "Frame", nil, frame, "ButtonFrameTemplate")
+  if not okB or not blizz then okB, blizz = pcall(CreateFrame, "Frame", nil, frame, "BasicFrameTemplateWithInset") end
+  if okB and blizz then
+    blizz:SetAllPoints()
+    if ButtonFrameTemplate_HidePortrait then pcall(ButtonFrameTemplate_HidePortrait, blizz) end
+    if ButtonFrameTemplate_HideButtonBar then pcall(ButtonFrameTemplate_HideButtonBar, blizz) end
+    local closeB = rawget(blizz, "CloseButton")
+    if type(closeB) == "table" then closeB:SetScript("OnClick", function() Detail.Hide() end) end
+    local container = rawget(blizz, "TitleContainer")
+    local title = rawget(blizz, "TitleText") or (type(container) == "table" and rawget(container, "TitleText"))
+    if type(title) == "table" then title:SetText("Marktdaten") end
+    if type(rawget(blizz, "Inset")) == "table" then
+      blizz.Inset:ClearAllPoints()
+      blizz.Inset:SetPoint("TOPLEFT", 4, -58)
+      blizz.Inset:SetPoint("BOTTOMRIGHT", -6, 6)
+    end
+    blizz:Hide()
+    frame.blizzdeco = blizz
+  end
   -- ESC closes the window (Blizzard's CloseSpecialWindows).
   if UISpecialFrames then tinsert(UISpecialFrames, FRAME_NAME) end
   frame:SetScript("OnHide", function() origin = nil end)
@@ -912,9 +964,40 @@ local function create()
   end)
   frame.head = head
   scroll, body = Style.Scroll(frame)
-  scroll:SetPoint("TOPLEFT", 8, -36)
-  scroll:SetPoint("BOTTOMRIGHT", -14, 8)
   frame:Hide()
+end
+
+-- Shows the look of `skin` and lays out head and list for it.
+local function applySkin()
+  local blizz = skin == "blizzard" and frame.blizzdeco ~= nil
+  frame.m4deco:SetShown(not blizz)
+  frame.close:SetShown(not blizz)
+  if frame.blizzdeco then frame.blizzdeco:SetShown(blizz) end
+  -- content above the decoration layers
+  local base = frame:GetFrameLevel() or 1
+  frame.m4deco:SetFrameLevel(base)
+  if frame.blizzdeco then frame.blizzdeco:SetFrameLevel(base) end
+  frame.head:SetFrameLevel(base + 5)
+  scroll:SetFrameLevel(base + 5)
+  frame.head:ClearAllPoints()
+  scroll:ClearAllPoints()
+  if blizz then
+    frame.head:SetPoint("TOPLEFT", 12, -26)
+    frame.head:SetPoint("RIGHT", frame, "RIGHT", -12, 0)
+    frame.head:SetHeight(28)
+    frame.icon:SetSize(24, 24)
+    frame.name:SetFontObject(GameFontHighlightLarge)
+    scroll:SetPoint("TOPLEFT", 12, -64)
+    scroll:SetPoint("BOTTOMRIGHT", -22, 12)
+  else
+    frame.head:SetPoint("TOPLEFT", 6, -4)
+    frame.head:SetPoint("RIGHT", frame, "RIGHT", -32, 0)
+    frame.head:SetHeight(24)
+    frame.icon:SetSize(20, 20)
+    frame.name:SetFontObject(ns.Style.Font(14))
+    scroll:SetPoint("TOPLEFT", 8, -36)
+    scroll:SetPoint("BOTTOMRIGHT", -14, 8)
+  end
 end
 
 -- Item id from an id, an item link or an item string; nil otherwise.
@@ -947,6 +1030,8 @@ function Detail.Show(item, opts)
   opts = opts or {}
   if not frame then create() end
   itemID, origin = id, opts.origin
+  skin = opts.skin or "m4"
+  applySkin()
   place(opts.anchor)
   frame:Show()
   searchLive(id)
@@ -975,6 +1060,7 @@ function Detail.HideSniper(keep)
 end
 
 function Detail.IsShown() return frame ~= nil and frame:IsShown() end
+function Detail.Origin() return frame and frame:IsShown() and origin or nil end
 function Detail.ItemID() return frame and frame:IsShown() and itemID or nil end
 
 function Detail.Refresh() render() end

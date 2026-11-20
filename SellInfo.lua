@@ -4,6 +4,8 @@
 --   Gewinn    -49s 80c             (total price after the 5 % cut minus that cost; green/red)
 -- Without a known cost: "Einstand  unbekannt", no profit row. The post button moves below the
 -- rows. Only reads Blizzard's frames, never posts or changes a price.
+-- Pilot: while the sell slot holds an item, the item detail window (ItemDetail.lua) docks at
+-- the auction house frame in the native Blizzard look, and the own Selling panel steps aside.
 local ADDON, ns = ...
 
 local SellInfo = {}
@@ -96,6 +98,38 @@ local function newRow(holder, frame, labelText, index)
   return { label = label, value = value }
 end
 
+-- The detail window of the item in the sell slot (nil: none), native look, docked at the AH.
+local DETAIL_ORIGIN = "ahsell"
+local opened -- item the window was opened for: closed with × it stays closed for that item
+local function syncDetail(id)
+  local Detail = ns.ItemDetail
+  if not Detail then return end
+  local mine = Detail.Origin and Detail.Origin() == DETAIL_ORIGIN
+  if id then
+    if mine and Detail.ItemID() == id then return end
+    if id == opened and not Detail.IsShown() then return end -- closed by the player
+    opened = id
+    Detail.Show(id, { anchor = AuctionHouseFrame, origin = DETAIL_ORIGIN, skin = "blizzard" })
+  else
+    opened = nil
+    if mine then Detail.Hide() end
+  end
+end
+
+-- The own Selling panel (Verkaufen/Sniper/Auktionen) steps aside while the sell frame shows.
+local function sellingPanel(show)
+  local panel = ns.Selling and ns.Selling.Frame and ns.Selling.Frame()
+  if not panel then return end
+  if show then
+    if AuctionHouseFrame and AuctionHouseFrame:IsShown() and not panel:IsShown() then
+      panel:Show()
+      if ns.Selling.Refresh then ns.Safe(ns.Selling.Refresh) end
+    end
+  elseif panel:IsShown() then
+    panel:Hide()
+  end
+end
+
 local function attach(frame)
   if not frame or frame.m4SellInfo then return end
   -- Own layer above Blizzard's inset frames (a text on the sell frame itself lies under them).
@@ -150,6 +184,8 @@ local function attach(frame)
       show(SellInfo.Values(id, price, qty))
     end
     placeButton()
+    sellingPanel(false)
+    syncDetail(id)
   end
   holder:SetScript("OnUpdate", function(_, dt)
     elapsed = elapsed + (dt or 0)
@@ -157,7 +193,11 @@ local function attach(frame)
     elapsed = 0
     ns.Safe(tick)
   end)
-  holder:SetScript("OnHide", function() lastKey = nil end)
+  holder:SetScript("OnHide", function()
+    lastKey = nil
+    ns.Safe(syncDetail, nil)
+    ns.Safe(sellingPanel, true)
+  end)
 end
 
 local function attachAll()
