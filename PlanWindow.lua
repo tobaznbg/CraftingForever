@@ -101,7 +101,18 @@ local function compute(professionID)
   local from = startKey() == "one" and 1 or math.max(1, out.rank)
   out.from, out.way = from, wayKey()
   if from >= maxSkill() then out.why = "max" return out end
-  local result = ns.Costs.Plan(prof, from, maxSkill(), ahCap(), out.way)
+  local result
+  local pin = ui().planPins and ui().planPins[professionID]
+  if pin and pin.way == out.way and pin.start == startKey() then
+    -- the kept plan: same steps, today's costs (Planner.Replay)
+    local candidates = ns.Costs.Candidates(prof, out.way)
+    local segments, total, reached = ns.Planner.Replay(candidates, pin.segs, from)
+    if #segments > 0 then
+      local need, made = ns.Planner.Shopping(segments)
+      result = { segments = segments, total = total, reached = reached, need = need, made = made, scarce = {}, pinned = pin }
+    end
+  end
+  result = result or ns.Costs.Plan(prof, from, maxSkill(), ahCap(), out.way)
   out.result = result
   if not result.segments then out.why = "noway" return out end
   -- the own cap counts only when planning from the own skill range (as MainUI does)
@@ -243,7 +254,21 @@ local function patternOf(c)
     price = c.learnCost, npc = npc }
 end
 
+-- Keeps the whole current plan of the profession (the steps it goes), so buying for it does not
+-- change it: stock valued at its sale price would otherwise make the path shift.
+local function pinPlan()
+  local r = cache and cache.result
+  if not (pid and r and r.segments) or r.pinned then return end
+  local segs = {}
+  for _, seg in ipairs(r.segments) do segs[#segs + 1] = { id = seg.recipe.id, from = seg.from, to = seg.to } end
+  ui().planPins = ui().planPins or {}
+  ui().planPins[pid] = { way = cache.way, start = startKey(), t = time(), segs = segs }
+  dirty = true
+end
+
 local function toShoppingList(segs, select)
+  pinPlan()
+  if C_Timer and Plan.Refresh then C_Timer.After(0, function() ns.Safe(Plan.Refresh) end) end
   local added, skipped, first, patterns = 0, 0, nil, 0
   for _, seg in ipairs(segs or {}) do
     local c = seg.recipe
@@ -426,12 +451,19 @@ local function buildCard(c)
     if cache and cache.result and cache.result.segments then toShoppingList(cache.result.segments, false) end
   end)
   v.PlanButton:SetPoint("BOTTOMLEFT", c, "BOTTOMLEFT", 18, 14)
+  -- the kept plan (put on the shopping list) stays until this is clicked
+  v.ReplanButton = button(c, "Neu planen", 120, function()
+    if pid and ui().planPins then ui().planPins[pid] = nil end
+    dirty = true
+    Plan.Refresh() -- refresh is defined further down
+  end)
+  v.ReplanButton:SetPoint("BOTTOMRIGHT", c, "BOTTOMRIGHT", -18, 14)
   return v
 end
 
 local function hideAll(v)
   for _, part in ipairs({ v.Icon, v.Ring, v.Name, v.Sub, v.Head, v.InfoHead, v.costHead, v.more, v.Line,
-    v.StepButton, v.SectionButton, v.PlanButton }) do part:Hide() end
+    v.StepButton, v.SectionButton, v.PlanButton, v.ReplanButton }) do part:Hide() end
   for _, h in ipairs(v.colHeads) do h:Hide() end
   for i, fs in ipairs(v.info) do fs:Hide(); v.maps[i]:Hide(); v.maps[i].loc = nil end
   for _, row in ipairs(v.rows) do row:Hide(); row.line = nil end
@@ -587,7 +619,8 @@ local function showOverview(v, st)
   local nSteps = #r.segments
   setHead(v, data and data.icon or ALL_ICON, nil, "Gesamter Plan",
     string.format("%s · Skill %d bis %d · %s · %d %s", profName, st.from, r.reached,
-      st.way == "dynamic" and "dynamischer Weg" or "Standard-Weg", nSteps, nSteps == 1 and "Schritt" or "Schritte"))
+      st.way == "dynamic" and "dynamischer Weg" or "Standard-Weg", nSteps, nSteps == 1 and "Schritt" or "Schritte")
+    .. (r.pinned and (" · " .. GREEN .. "festgehalten " .. date("%d.%m. %H:%M", r.pinned.t) .. "|r") or ""))
   local info
   if r.reached < maxSkill() then
     info = {}
@@ -613,6 +646,7 @@ local function showOverview(v, st)
     { "Kosten netto", net(b.net) },
   })
   v.PlanButton:Show()
+  v.ReplanButton:SetShown(r.pinned ~= nil)
 end
 
 local function showRank(v, st, rank, section)
@@ -692,7 +726,8 @@ local MESSAGES = {
 
 local function refresh()
   if not (window and split and pid) then return end
-  local key = table.concat({ pid, startKey(), wayKey(), ahCap() }, ":")
+  local pin = ui().planPins and ui().planPins[pid]
+  local key = table.concat({ pid, startKey(), wayKey(), ahCap(), pin and pin.t or 0 }, ":")
   if dirty or not cache or cache.key ~= key then
     cache = compute(pid)
     cache.key = key

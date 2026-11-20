@@ -505,6 +505,38 @@ function Planner.Path(candidates, from, to, ahCap, opts)
   return merged, total, to
 end
 
+-- A path kept by the player (PlanWindow "Plan festhalten"): the same recipes and skill ranges
+-- again, costed with today's candidates instead of searching a new path. pinned = { { id, from,
+-- to }… }; skill below `from` is done (cut off). Returns segments (as Planner.Path), the total
+-- and the skill reached (a recipe no longer among the candidates ends the path there).
+function Planner.Replay(candidates, pinned, from)
+  local byID = {}
+  for _, c in ipairs(candidates) do byID[c.id] = c end
+  local segments, total, reached, learnedOnce = {}, 0, from, {}
+  for _, p in ipairs(pinned or {}) do
+    local a, b = math.max(p.from, from), p.to
+    if b > a then
+      local c = byID[p.id]
+      if not c or a ~= reached then break end
+      local crafts = 0
+      for t = a, b - 1 do
+        local chance = Planner.Chance(c.colors, t)
+        if chance <= 0 then b = t break end
+        crafts = crafts + 1 / chance
+      end
+      if b <= a then break end
+      local learned = learnedOnce[c.id] and 0 or (c.learnCost or 0)
+      learnedOnce[c.id] = true
+      local spend, income = crafts * c.cost, crafts * c.vendorValue
+      local seg = { recipe = c, from = a, to = b, crafts = crafts, spend = spend, income = income, learned = learned,
+        cost = spend - income + learned }
+      segments[#segments + 1] = seg
+      total, reached = total + seg.cost, b
+    end
+  end
+  return segments, total, reached
+end
+
 -- Profit of one craft, for making gold rather than levelling.
 --   safe       products go to a vendor
 --   potential  products sell at the current auction price (after cut)
