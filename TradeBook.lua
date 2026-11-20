@@ -320,19 +320,156 @@ local function shortGroup(name)
   return name
 end
 
--- "Handelsbuch": every item of the period by area (professions, trade, loot), its figures and
--- its trades.
+-- "Handelsbuch": how economic each activity is. Left the areas (trade, loot, each profession),
+-- folded; a click on an area shows its figures right (they differ by kind of area), unfolding it
+-- shows its items by contribution; an item shows its profit and loss and its trades.
+local AREA_ROWS = 7
+
+-- Figures of one area: { labels, values, top = { { name, value }… }, sub }.
+local function areaFigures(g, items)
+  local P = ns.Profit
+  local function pct(a, b) return (b and b ~= 0) and string.format("%d %%", math.floor(a / b * 100 + 0.5)) or "–" end
+  local top = {}
+  local sorted = {}
+  for _, r in ipairs(items or {}) do sorted[#sorted + 1] = r end
+  if g.name == P.FARMED then
+    table.sort(sorted, function(a, b) return (a.revenue or 0) > (b.revenue or 0) end)
+    for i = 1, math.min(5, #sorted) do top[i] = { sorted[i].name or ns.ItemName(sorted[i].itemId) or "?", money(sorted[i].revenue) } end
+    return { sub = "Beute – was du gefarmt oder gelootet und verkauft hast", topTitle = "Brachte am meisten:",
+      labels = { "Erlös", "Gebühren", "Verlorene Einstellgebühren", "Verkauft", "Gewinn" },
+      values = { money(g.revenue), money(g.fees), money(g.depositsLost), (g.sold or 0) .. " Stück", signed(g.profit) }, top = top }
+  end
+  table.sort(sorted, function(a, b) return (a.profit or 0) > (b.profit or 0) end)
+  for i = 1, math.min(5, #sorted) do top[i] = { sorted[i].name or ns.ItemName(sorted[i].itemId) or "?", signed(sorted[i].profit) } end
+  if g.name == P.TRADE then
+    return { sub = "Handel – im AH oder beim Händler gekauft und wieder verkauft", topTitle = "Größter Beitrag:",
+      labels = { "Einkauf", "Verkauf", "Gebühren", "Marge", "Noch im Bestand (Einkauf)", "Abgelaufen / abgebrochen", "Gewinn" },
+      values = { money(g.spent), money(g.revenue), money(g.fees), pct(g.profit or 0, g.revenue), money(g.stockValue),
+        string.format("%d / %d  (%s Gebühr verloren)", g.expired or 0, g.cancelled or 0, money(g.depositsLost)), signed(g.profit) },
+      top = top }
+  end
+  return { sub = "Beruf – Material gekauft, hergestellt und verkauft", topTitle = "Größter Beitrag:",
+    labels = { "Materialkosten", "Erlös", "Gebühren", "Marge", "Hergestellt / verkauft", "Unverkauft (Material)", "Gewinn" },
+    values = { money(g.materials), money(g.revenue), money(g.fees), pct(g.profit or 0, g.revenue),
+      string.format("%d / %d Stück", g.crafted or 0, g.sold or 0),
+      string.format("%d Stück · %s", g.stockUnits or 0, money(g.stockValue)), signed(g.profit) }, top = top }
+end
+
+-- The area view of the card (its own layer, so the item view keeps its layout).
+local function areaLayer(card)
+  if card.m4Area then return card.m4Area end
+  local layer = CreateFrame("Frame", nil, card)
+  layer:SetAllPoints(card)
+  local d = {}
+  d.Icon = layer:CreateTexture(nil, "ARTWORK")
+  d.Icon:SetSize(44, 44)
+  d.Icon:SetPoint("TOPLEFT", 22, -22)
+  local okMask, mask = pcall(layer.CreateMaskTexture, layer)
+  if okMask and mask then
+    mask:SetTexture("Interface\\CharacterFrame\\TempPortraitAlphaMask", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+    mask:SetAllPoints(d.Icon)
+    d.Icon:AddMaskTexture(mask)
+  end
+  local ring = layer:CreateTexture(nil, "OVERLAY")
+  ring:SetSize(60, 60)
+  ring:SetPoint("CENTER", d.Icon, "CENTER", 0, 0)
+  ring:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
+  ring:SetTexCoord(0, 0.6, 0, 0.6)
+  d.Name = layer:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
+  d.Name:SetPoint("LEFT", d.Icon, "RIGHT", 14, 6)
+  d.Name:SetPoint("RIGHT", layer, "RIGHT", -20, 0)
+  d.Name:SetJustifyH("LEFT")
+  d.Sub = layer:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+  d.Sub:SetPoint("TOPLEFT", d.Name, "BOTTOMLEFT", 0, -3)
+  d.Sub:SetPoint("RIGHT", layer, "RIGHT", -20, 0)
+  d.Sub:SetJustifyH("LEFT")
+  d.Head = layer:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+  d.Head:SetPoint("TOPLEFT", d.Icon, "BOTTOMLEFT", 0, -20)
+  d.Head:SetText("Kennzahlen:")
+  local labels = {}
+  for i = 1, AREA_ROWS do labels[i] = "" end
+  d.Figures = ns.NativeWindow.Figures(layer, d.Head, labels)
+  d.TopTitle = layer:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+  d.TopTitle:SetPoint("TOPLEFT", d.Head, "BOTTOMLEFT", 0, -AREA_ROWS * 16 - 30)
+  d.Top = {}
+  for i = 1, 5 do
+    local n = layer:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    n:SetPoint("TOPLEFT", d.TopTitle, "BOTTOMLEFT", 0, -8 - (i - 1) * 16)
+    n:SetJustifyH("LEFT")
+    n:SetWordWrap(false)
+    local v = layer:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    v:SetPoint("TOPLEFT", n, "TOPLEFT", 0, 0)
+    v:SetJustifyH("RIGHT")
+    d.Top[i] = { name = n, value = v }
+  end
+  local function widths(c)
+    local w = math.max(100, (c:GetWidth() or 340) - 46)
+    d.Figures.SetWidth(w)
+    for _, t in ipairs(d.Top) do t.name:SetWidth(w - 80); t.value:SetWidth(w) end
+  end
+  widths(card)
+  card:HookScript("OnSizeChanged", widths)
+  card.m4Area = d
+  d.layer = layer
+  return d
+end
+
+local AREA_ICONS = { trade = "Interface\\Icons\\INV_Misc_Coin_02", farmed = "Interface\\Icons\\INV_Misc_Bag_10" }
+local PROFESSION_ICONS = {
+  ["Lederverarbeitung"] = "Interface\\Icons\\Trade_LeatherWorking", ["Schneiderei"] = "Interface\\Icons\\Trade_Tailoring",
+  ["Schmiedekunst"] = "Interface\\Icons\\Trade_BlackSmithing", ["Alchimie"] = "Interface\\Icons\\Trade_Alchemy",
+  ["Alchemie"] = "Interface\\Icons\\Trade_Alchemy", ["Ingenieurskunst"] = "Interface\\Icons\\Trade_Engineering",
+  ["Verzauberkunst"] = "Interface\\Icons\\Trade_Engraving", ["Kochkunst"] = "Interface\\Icons\\INV_Misc_Food_15",
+  ["Erste Hilfe"] = "Interface\\Icons\\Spell_Holy_SealOfSacrifice", ["Bergbau"] = "Interface\\Icons\\Trade_Mining",
+  ["Kürschnerei"] = "Interface\\Icons\\INV_Misc_Pelt_Wolf_01",
+}
+
 local function buildLedger(page)
   local NW = ns.NativeWindow
   local eventsSet
   local LABELS = { "Hergestellt / gekauft", "Verkauft", "Ø Verkaufspreis", "Umsatz", "Einkauf", "Gebühren", "Gewinn" }
-  local split = NW.Split(page, { onSelect = function(entry, card)
-    local d = cardFrame(card, LABELS)
+  local itemLayer
+  local split = NW.Split(page, { folded = true, selectHeaders = true, onSelect = function(entry, card)
+    if not itemLayer then
+      itemLayer = CreateFrame("Frame", nil, card)
+      itemLayer:SetAllPoints(card)
+    end
+    local area = areaLayer(card)
+    local isArea = entry and entry.header ~= nil
+    area.layer:SetShown(isArea)
+    itemLayer:SetShown(not isArea)
+    if isArea then
+      local f = entry.figures
+      area.Icon:SetTexture(entry.icon)
+      area.Name:SetText(entry.title)
+      area.Sub:SetText(f.sub)
+      for i = 1, AREA_ROWS do
+        local has = f.labels[i] ~= nil
+        area.Figures.labels[i]:SetShown(has)
+        area.Figures.values[i]:SetShown(has)
+        area.Figures.labels[i]:SetText(f.labels[i] or "")
+        area.Figures.values[i]:SetText(f.values[i] or "")
+      end
+      -- the line sits before the last shown row (the profit)
+      local last = #f.labels
+      if area.Figures.line then
+        area.Figures.line:ClearAllPoints()
+        area.Figures.line:SetPoint("BOTTOMLEFT", area.Figures.labels[last], "TOPLEFT", 0, 4)
+      end
+      area.TopTitle:SetText(#f.top > 0 and f.topTitle or "")
+      for i = 1, 5 do
+        local t = f.top[i]
+        area.Top[i].name:SetText(t and t[1] or "")
+        area.Top[i].value:SetText(t and t[2] or "")
+      end
+      return
+    end
+    local d = cardFrame(itemLayer, LABELS)
     if not eventsSet then
-      eventsSet = scrollTable(card, { { "Wann · Art", 20, "LEFT", 160 }, { "Menge", 225, "RIGHT" }, { "Betrag", 300, "RIGHT" } }, -250)
+      eventsSet = scrollTable(itemLayer, { { "Wann · Art", 20, "LEFT", 160 }, { "Menge", 225, "RIGHT" }, { "Betrag", 300, "RIGHT" } }, -250)
     end
     local r = entry and entry.row
-    showCard(card, d, entry, r and {
+    showCard(itemLayer, d, entry, r and {
       string.format("%d / %d", r.crafted or 0, r.bought or 0), tostring(r.sold or 0),
       r.avgPrice and money(r.avgPrice) or "–", money(r.revenue), money(r.materials), money(r.fees), signed(r.profit),
     }, entry and shortGroup(entry.row.prof))
@@ -350,11 +487,27 @@ local function buildLedger(page)
     eventsSet(rows)
   end })
   function page.Refresh()
-    local report = ns.Profit and ns.Profit.Report and ns.Profit.Report(since()) or { groups = {}, items = {} }
+    local P = ns.Profit
+    local report = P and P.Report and P.Report(since()) or { groups = {}, items = {} }
     local entries = {}
-    for _, g in ipairs(report.groups) do
-      entries[#entries + 1] = { key = g.name, header = shortGroup(g.name) .. "  " .. signed(g.profit) }
-      for _, r in ipairs(report.items[g.name] or {}) do
+    -- order: trade, loot, then the professions
+    local ordered = {}
+    for _, g in ipairs(report.groups) do if g.name == P.TRADE then ordered[#ordered + 1] = g end end
+    for _, g in ipairs(report.groups) do if g.name == P.FARMED then ordered[#ordered + 1] = g end end
+    for _, g in ipairs(report.groups) do if g.name ~= P.TRADE and g.name ~= P.FARMED then ordered[#ordered + 1] = g end end
+    for _, g in ipairs(ordered) do
+      local items = report.items[g.name] or {}
+      local icon = g.name == P.TRADE and AREA_ICONS.trade or (g.name == P.FARMED and AREA_ICONS.farmed)
+        or PROFESSION_ICONS[g.name] or "Interface\\Icons\\INV_Misc_QuestionMark"
+      entries[#entries + 1] = { key = g.name, header = shortGroup(g.name) .. "  " .. signed(g.profit),
+        title = shortGroup(g.name), icon = icon, figures = areaFigures(g, items) }
+      local sorted = {}
+      for _, r in ipairs(items) do sorted[#sorted + 1] = r end
+      table.sort(sorted, function(a, b)
+        if g.name == P.FARMED then return (a.revenue or 0) > (b.revenue or 0) end
+        return (a.profit or 0) > (b.profit or 0)
+      end)
+      for _, r in ipairs(sorted) do
         entries[#entries + 1] = { key = g.name .. ":" .. r.itemId, itemID = r.itemId, icon = iconOf(r.itemId),
           name = r.name or ns.ItemName(r.itemId) or ("#" .. r.itemId), row = r }
       end

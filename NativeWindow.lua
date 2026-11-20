@@ -277,6 +277,12 @@ end
 -- Left Blizzard's recipe list, right the recipe card.
 function NW.Split(page, opts)
   local split = { selected = nil, collapsed = {} }
+  -- folded: explicit state per header key, else opts.folded (true: all categories start folded)
+  local function isFolded(k)
+    local v = split.collapsed[k]
+    if v == nil then return opts.folded and true or false end
+    return v
+  end
   local list = try("Frame", page, "ProfessionsRecipeListTemplate") or try("Frame", page, "InsetFrameTemplate")
   list:ClearAllPoints()
   list:SetPoint("TOPLEFT", 0, -4)
@@ -305,14 +311,16 @@ function NW.Split(page, opts)
           local rank = rawget(button, "RankBar") -- the profession's skill bar of a category
           if type(rank) == "table" and rank.Hide then rank:Hide() end
           -- a click folds the category in and out (state per header key), like the profession list
-          local folded = split.collapsed[data.key or data.header] and true or false
+          local folded = isFolded(data.key or data.header)
           local collapse = rawget(button, "CollapseButton")
           if type(collapse) == "table" and collapse.UpdateCollapsedState then pcall(collapse.UpdateCollapsedState, collapse, folded) end
           button:SetScript("OnEnter", nil)
           button:SetScript("OnLeave", nil)
           button:SetScript("OnClick", function()
             local k = data.key or data.header
-            split.collapsed[k] = not split.collapsed[k] or nil
+            split.collapsed[k] = not isFolded(k)
+            -- opts.selectHeaders: a category is an entry of its own (its card shows on click)
+            if opts.selectHeaders then split.selected = data end
             if split.Rebuild then split.Rebuild() end
           end)
         end)
@@ -355,7 +363,7 @@ function NW.Split(page, opts)
     for _, e in ipairs(all) do
       if e.header then
         header = e
-        folded = split.collapsed[e.key or e.header] and true or false
+        folded = isFolded(e.key or e.header)
         if query == "" then out[#out + 1] = e; header = nil end
       elseif query == "" or (e.name or ""):lower():find(query, 1, true) then
         if header then out[#out + 1] = header; header = nil end
@@ -379,7 +387,7 @@ function NW.Split(page, opts)
     if not still then
       split.selected = nil
       for _, e in ipairs(list) do
-        if not e.header then split.selected = e break end
+        if opts.selectHeaders or not e.header then split.selected = e break end
       end
     end
     if opts.onSelect then ns.Safe(opts.onSelect, split.selected, card) end
