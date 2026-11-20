@@ -231,10 +231,25 @@ end
 
 -- Shopping list ------------------------------------------------------------------------------
 
+-- The pattern a step buys (vendor or auction house, not a trainer), for the shopping list.
+local function patternOf(c)
+  local how = c.how
+  if c.learned or not how or how.way == "trainer" or how.way == "learned" then return nil end
+  local o = how.option or {}
+  local srcs = ns.RecipeSources and ns.RecipeSources[pid]
+  local entry = srcs and srcs.recipes and srcs.recipes[c.id]
+  local npc = o.npc and { name = o.npc[1], zone = o.npc[2], x = o.npc[3], y = o.npc[4] } or nil
+  return { rid = c.id, pid = pid, item = o.item or (entry and entry.item), name = c.name, way = how.way,
+    price = c.learnCost, npc = npc }
+end
+
 local function toShoppingList(segs, select)
-  local added, skipped, first = 0, 0, nil
+  local added, skipped, first, patterns = 0, 0, nil, 0
   for _, seg in ipairs(segs or {}) do
     local c = seg.recipe
+    -- the pattern to buy first (vendor / auction house), then the step's material
+    local p = patternOf(c)
+    if p and ns.ShoppingList.AddPattern and ns.ShoppingList.AddPattern(p) then patterns = patterns + 1 end
     if c.out and ns.ShoppingList.Add(c.id, segmentItems(seg)) then
       added = added + 1
       first = first or c.id
@@ -243,7 +258,8 @@ local function toShoppingList(segs, select)
     end
   end
   if added > 0 then
-    print(string.format("|cff33ccffm4:|r %d %s auf die Einkaufsliste gelegt%s.", added, added == 1 and "Rezept" or "Rezepte",
+    print(string.format("|cff33ccffm4:|r %d %s auf die Einkaufsliste gelegt%s%s.", added, added == 1 and "Rezept" or "Rezepte",
+      patterns > 0 and string.format(", dazu %d %s", patterns, patterns == 1 and "Muster" or "Muster") or "",
       skipped > 0 and string.format(" (%d ohne Produkt übersprungen)", skipped) or ""))
     ns.ShoppingList.Show(select and first or nil)
   else

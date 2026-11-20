@@ -195,8 +195,17 @@ function List.Plan(list)
   end
   local plan = { lines = lines, cost = 0, toBuy = 0, revenue = 0, sellable = true, missing = 0 }
   for _, w in ipairs(list) do
-    local r = scanRecipe(w.rid) or (w.r and { r = w.r, qmin = w.q, qmax = w.q, out = w.out })
-    if r and r.r then
+    local r = w.kind ~= "pattern" and (scanRecipe(w.rid) or (w.r and { r = w.r, qmin = w.q, qmax = w.q, out = w.out }))
+    if w.kind == "pattern" then
+      -- a pattern to buy (planner): one unit, at the auction house or at its vendor
+      local have = w.out and math.min(1, (holdings(w.out))) or 0
+      local unit = w.price
+      if w.way == "ah" and w.out then unit = ns.Item(w.out).now or w.price end
+      local l = { itemID = w.out, pattern = w, need = 1, have = have, crafts = 0, made = 0, buy = 1 - have,
+        unit = unit, vendor = w.way ~= "ah", profs = { [w.pid or 0] = true } }
+      if w.out then l.parts = select(2, holdings(w.out)) end
+      lines[#lines + 1] = l
+    elseif r and r.r then
       local crafts = math.ceil((w.n or 1) / made(r))
       for _, g in ipairs(r.r) do
         if g.i then want(g.i, (g.n or 1) * crafts, 1, w.pid or 0) end
@@ -212,13 +221,27 @@ function List.Plan(list)
     end
     -- raw material at market value (what is bought plus what is taken from stock); made
     -- intermediates count through their own reagents
-    local unit = l.unit or ns.Item.BuyCost(ns.Item(l.itemID))
+    local unit = l.unit or (l.itemID and ns.Item.BuyCost(ns.Item(l.itemID)))
     if unit and l.crafts == 0 then plan.cost = plan.cost + (l.have + l.buy) * unit end
   end
   return plan
 end
 
 -- Adding from the profession window ----------------------------------------------------------
+
+-- A pattern the planner buys (vendor or auction house) as its own line of the list.
+-- p = { rid = spell id, pid, item = recipe item (nil: soulbound, not known), name, way
+-- ("vendor", "limited", "rep", "favor", "ah", …), price, npc = { name, zone, x, y } }.
+function List.AddPattern(p)
+  for _, w in ipairs(wishes()) do
+    if w.kind == "pattern" and w.rid == p.rid then return w end
+  end
+  local w = { kind = "pattern", rid = p.rid, pid = p.pid, out = p.item, n = 1, way = p.way, price = p.price, npc = p.npc,
+    name = (p.item and ns.ItemName(p.item)) or ("Muster: " .. (p.name or "?")) }
+  table.insert(wishes(), w)
+  changed()
+  return w
+end
 
 function List.Add(rid, n)
   local r, scan = scanRecipe(rid)
@@ -229,7 +252,7 @@ function List.Add(rid, n)
   n = math.max(1, math.floor(n or 1))
   changed()
   for _, w in ipairs(wishes()) do
-    if w.rid == rid then
+    if w.rid == rid and w.kind ~= "pattern" then -- a pattern of the same recipe is its own line
       w.n = w.n + n
       return w
     end
@@ -300,8 +323,8 @@ local function refresh()
           value = toBuyText(List.Plan(g.wishes)), prof = g }
       end
       for _, w in ipairs(g.wishes) do
-        entries[#entries + 1] = { key = "w:" .. w.rid, name = w.name or ns.ItemName(w.out) or "?", icon = itemIcon(w.out),
-          itemID = w.out, value = "×" .. w.n, wish = w }
+        entries[#entries + 1] = { key = (w.kind == "pattern" and "pat:" or "w:") .. w.rid, name = w.name or ns.ItemName(w.out) or "?", icon = itemIcon(w.out),
+          itemID = w.out, value = w.kind == "pattern" and (MUTED .. "Muster|r") or ("×" .. w.n), wish = w }
       end
     end
   end
@@ -406,8 +429,19 @@ local function card(c)
       local l = self.line
       if not l then return end
       GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-      GameTooltip:SetItemByID(l.itemID)
+      if l.itemID then GameTooltip:SetItemByID(l.itemID) else GameTooltip:SetText(l.pattern and l.pattern.name or "?") end
       GameTooltip:AddLine(" ")
+      local p = l.pattern
+      if p then
+        if p.way == "ah" then
+          GameTooltip:AddLine("Muster im Auktionshaus kaufen", 1, 1, 1)
+        elseif p.npc then
+          GameTooltip:AddLine(string.format("Beim Händler: %s (%s)", p.npc.name or "?", p.npc.zone or "?"), 1, 1, 1)
+          if p.npc.x then GameTooltip:AddLine("Klick: auf der Karte anzeigen", 0.31, 0.76, 0.63) end
+        else
+          GameTooltip:AddLine("Beim Händler kaufen", 1, 1, 1)
+        end
+      end
       for _, p in ipairs(l.parts or {}) do GameTooltip:AddDoubleLine("bei " .. p[1], tostring(p[2]), 1, 1, 1, 1, 1, 1) end
       if l.crafts > 0 then GameTooltip:AddLine(string.format("%d× selbst herstellen (günstiger als kaufen)", l.crafts), 0.37, 0.83, 0.55) end
       if l.buy > 0 and ahOpen() then GameTooltip:AddLine("Klick: im AH suchen", 0.31, 0.76, 0.63) end
@@ -417,8 +451,14 @@ local function card(c)
     row:SetScript("OnClick", function(self)
       local l = self.line
       if not l then return end
-      if ns.NativeWindow.AltClick(l.itemID, self) then return end
-      searchAH(l.itemID)
+      if l.itemID and ns.NativeWindow.AltClick(l.itemID, self) then return end
+      local p = l.pattern
+      if p and p.way ~= "ah" then
+        -- a vendor pattern: the vendor on the map
+        if p.npc and p.npc.x and ns.ShowOnMap then ns.ShowOnMap(p.npc) end
+        return
+      end
+      if l.itemID then searchAH(l.itemID) end
     end)
     row:Hide()
     v.rows[i] = row
@@ -448,6 +488,7 @@ local function show(entry, c)
   for _, row in ipairs(v.rows) do row:Hide(); row.line = nil end
   local w = entry and entry.wish
   for _, b in ipairs({ v.Minus, v.Plus, v.Remove }) do b:SetShown(w ~= nil) end
+  if w and w.kind == "pattern" then v.Minus:Hide(); v.Plus:Hide() end
   if not shown then return end
   local prof = entry and entry.prof
   local list = w and { w } or (prof and prof.wishes) or wishes()
@@ -479,10 +520,12 @@ local function show(entry, c)
       local only, n = nil, 0
       for pid in pairs(l.profs or {}) do only, n = pid, n + 1 end
       local name = n == 1 and profName(only ~= 0 and only or nil) or "Für mehrere Berufe"
+      if l.pattern then name = "Muster und Rezepte" end
       if not groups[name] then groups[name] = {}; order[#order + 1] = name end
       table.insert(groups[name], l)
     end
     table.sort(order, function(a, b)
+      if (a == "Muster und Rezepte") ~= (b == "Muster und Rezepte") then return a == "Muster und Rezepte" end
       if (a == "Für mehrere Berufe") ~= (b == "Für mehrere Berufe") then return b == "Für mehrere Berufe" end
       return a < b
     end)
@@ -505,8 +548,12 @@ local function show(entry, c)
       last = row
     else
     row.line = l
-    row.Icon:SetTexture(itemIcon(l.itemID))
-    row.Name:SetText((ns.ItemName(l.itemID) or ("#" .. l.itemID)) .. (l.crafts > 0 and (MUTED .. "  herst.|r") or ""))
+    row.Icon:SetTexture(l.itemID and itemIcon(l.itemID) or "Interface\\Icons\\INV_Scroll_03")
+    if l.pattern then
+      row.Name:SetText(l.pattern.name or "Muster")
+    else
+      row.Name:SetText((ns.ItemName(l.itemID) or ("#" .. l.itemID)) .. (l.crafts > 0 and (MUTED .. "  herst.|r") or ""))
+    end
     local missing = l.need - l.have
     row.cells[1]:SetText(tostring(l.need))
     row.cells[2]:SetText((l.have >= l.need and GREEN or "") .. l.have .. (l.have >= l.need and "|r" or ""))
