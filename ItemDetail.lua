@@ -32,6 +32,27 @@ local chart
 local live     -- { itemID, state = "searching"|"done"|"failed", offers, t } of the search on opening
 local skin = "m4" -- "m4" (own flat look) or "blizzard" (native look, pilot: AH sell tab, SellInfo.lua)
 local GOLD_RGB = { 1, 0.82, 0 }
+local MEDIAN_WINDOW = 24 * 3600 -- the chart's median line: median of the hourly cheapest of the last 24 h
+
+-- Trailing median of the cheapest offers per slot over `window` seconds (slots without an
+-- offer left out; nil where the window holds none). Same basis as "Median gestern".
+function Detail.RollingMedian(prices, step, window)
+  local n = math.max(1, math.floor(window / step + 0.5))
+  local out = {}
+  for i = 1, #prices do
+    local vals = {}
+    for j = math.max(1, i - n + 1), i do
+      local p = prices[j]
+      if p and p > 0 then vals[#vals + 1] = p end
+    end
+    if #vals > 0 then
+      table.sort(vals)
+      local m = #vals
+      out[i] = m % 2 == 1 and vals[(m + 1) / 2] or (vals[m / 2] + vals[m / 2 + 1]) / 2
+    end
+  end
+  return out
+end
 
 -- Width of the scroll body: the native frame has a wider border and inset.
 local function contentWidth() return skin == "blizzard" and WIDTH - 42 or WIDTH - 26 end
@@ -226,7 +247,7 @@ local function createChart()
   c.base:SetHeight(1)
   c.base:SetPoint("BOTTOMLEFT")
   c.base:SetPoint("BOTTOMRIGHT")
-  c.bars, c.lines, c.ticks, c.marks, c.markLabels = {}, {}, {}, {}, {}
+  c.bars, c.lines, c.ticks, c.marks, c.markLabels, c.medLines = {}, {}, {}, {}, {}, {}
   c.limit = Style.Solid(c.plot, { 0.37, 0.83, 0.55, 0.5 }, "ARTWORK")
   c.limit:SetHeight(1)
   c.sell = Style.Solid(c.plot, { 1, 1, 1, 0.45 }, "ARTWORK")
@@ -361,7 +382,7 @@ local function drawChart(c, history, limit, sellAt, viewKey)
   if #values == 0 then
     c.empty:SetText(history and view.empty or "Kein Verlauf für dieses Item")
     c.empty:Show()
-    hideFrom(c.bars, 1); hideFrom(c.lines, 1); hideFrom(c.ticks, 1)
+    hideFrom(c.bars, 1); hideFrom(c.lines, 1); hideFrom(c.ticks, 1); hideFrom(c.medLines, 1)
     hideFrom(c.marks, 1); hideFrom(c.markLabels, 1)
     c.limit:Hide()
     c.sell:Hide()
@@ -428,11 +449,11 @@ local function drawChart(c, history, limit, sellAt, viewKey)
       if plot.CreateLine then
         nl = nl + 1
         local l = pooled(c.lines, nl, function()
-          local ln = plot:CreateLine(nil, "OVERLAY")
-          ln:SetThickness(2)
+          local ln = plot:CreateLine(nil, "ARTWORK")
+          ln:SetThickness(1.5)
           return ln
         end)
-        l:SetColorTexture(unpack(lineColor()))
+        l:SetColorTexture(0.75, 0.75, 0.78, 0.55)
         l:SetStartPoint("BOTTOMLEFT", plot, x0, y0)
         l:SetEndPoint("BOTTOMLEFT", plot, x1, yy)
       end
@@ -450,6 +471,31 @@ local function drawChart(c, history, limit, sellAt, viewKey)
   end
   hideFrom(c.lines, nl + 1)
   hideFrom(c.ticks, nt + 1)
+  -- median line (24 h, the market value): drawn over the cheapest line
+  local med = Detail.RollingMedian(prices, step, MEDIAN_WINDOW)
+  c.view.median = med
+  local nm2, prev = 0, nil
+  for i = 1, SLOTS do
+    local m, x0 = med[i], sx(i)
+    if x0 and m then
+      local x, yy = x0 + slotW / 2, py(m)
+      if prev and prev[1] == i - 1 and plot.CreateLine then
+        nm2 = nm2 + 1
+        local l = pooled(c.medLines, nm2, function()
+          local ln = plot:CreateLine(nil, "OVERLAY")
+          ln:SetThickness(2)
+          return ln
+        end)
+        l:SetColorTexture(unpack(lineColor()))
+        l:SetStartPoint("BOTTOMLEFT", plot, prev[2], prev[3])
+        l:SetEndPoint("BOTTOMLEFT", plot, x, yy)
+      end
+      prev = { i, x, yy }
+    else
+      prev = nil
+    end
+  end
+  hideFrom(c.medLines, nm2 + 1)
   -- Outlier markers: a small cap on the edge and the price; the most extreme runs first, at
   -- most 3 labels and none overlapping another one (the caps are always drawn).
   table.sort(runs, function(a, b) return math.abs(a.p - (a.side > 0 and top or bottom)) > math.abs(b.p - (b.side > 0 and top or bottom)) end)
@@ -510,7 +556,7 @@ local function drawChart(c, history, limit, sellAt, viewKey)
   c.t1:SetText(stamp(axisStart))
   c.t2:SetText(stamp(axisStart + SPAN / 2))
   c.t3:SetText("jetzt")
-  c.legend:SetText((skin == "blizzard" and "|cffffd100" or ns.Style.ACCENT) .. "Linie|r billigstes  ·  Balken Menge  ·  " .. ORANGE .. "orange|r ausverkauft"
+  c.legend:SetText((skin == "blizzard" and "|cffffd100" or ns.Style.ACCENT) .. "Linie|r Median 24 h  ·  grau billigstes  ·  Balken Menge  ·  " .. ORANGE .. "orange|r ausverkauft"
     .. (limit and ("  ·  " .. GREEN .. "grün|r Kauf bis  ·  weiß Einstellen") or ""))
 end
 
@@ -541,6 +587,8 @@ function Detail.ChartHover(x)
   if p and p > 0 then priceText = "billigstes " .. money(p)
   elseif p == 0 then priceText = ORANGE .. "nicht im Angebot|r"
   else priceText = ns.Style.MUTED .. "kein Snapshot|r" end
+  local m = v.median and v.median[i]
+  if m then priceText = "Median 24 h " .. money(m) .. "\n" .. priceText end
   local text = stampRange(t0, t0 + v.step) .. "\n" .. priceText
     .. ((q and q > 0) and ("\n" .. count(q) .. " Stück") or "")
   c.cursor:ClearAllPoints()
@@ -929,7 +977,7 @@ local function create()
     if type(title) == "table" then title:SetText("Marktdaten") end
     if type(rawget(blizz, "Inset")) == "table" then
       blizz.Inset:ClearAllPoints()
-      blizz.Inset:SetPoint("TOPLEFT", 4, -58)
+      blizz.Inset:SetPoint("TOPLEFT", 4, -64)
       blizz.Inset:SetPoint("BOTTOMRIGHT", -6, 6)
     end
     blizz:Hide()
@@ -997,12 +1045,12 @@ local function applySkin()
   frame.head:ClearAllPoints()
   scroll:ClearAllPoints()
   if blizz then
-    frame.head:SetPoint("TOPLEFT", 12, -26)
+    frame.head:SetPoint("TOPLEFT", 12, -32)
     frame.head:SetPoint("RIGHT", frame, "RIGHT", -12, 0)
     frame.head:SetHeight(28)
     frame.icon:SetSize(24, 24)
     frame.name:SetFontObject(GameFontHighlightLarge)
-    scroll:SetPoint("TOPLEFT", 14, -66)
+    scroll:SetPoint("TOPLEFT", 14, -72)
     scroll:SetPoint("BOTTOMRIGHT", -24, 14)
   else
     frame.head:SetPoint("TOPLEFT", 6, -4)
