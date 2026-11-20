@@ -8,6 +8,7 @@
 --   chars     per character the snapshot with the newer updated; the gold (money) by its own
 --             moneyT, the last name (fullName) from the other copy when the newer has none
 --   inventory per character bags and bank each by its own time (bagsT, bankT)
+--   shopping  the shopping list (ShoppingList.lua) with the newer shoppingT, whole
 --   settings  ns.db.settings and ns.db.minimap, taken when the synced settingsT is newer than
 --             the local one (or there is none locally yet)
 -- Nothing local is lost, merging the same state again changes nothing. The same rules run on
@@ -188,7 +189,7 @@ end
 
 -- Merges a synced state into db. Returns what changed.
 function Sync.Apply(db, s)
-  local stats = { added = 0, recipes = 0, owned = 0, chars = 0, inventory = 0, settings = false }
+  local stats = { added = 0, recipes = 0, owned = 0, chars = 0, inventory = 0, settings = false, shopping = false }
   if type(db) ~= "table" or type(s) ~= "table" then return stats end
   local keep = ns.Ledger and ns.Ledger.KEEP or DEFAULT_KEEP
   if type(s.ledger) == "table" then
@@ -258,6 +259,12 @@ function Sync.Apply(db, s)
         if took then stats.inventory = stats.inventory + 1 end
       end
     end
+  end
+  -- the shopping list: the newest change wins, whole (an emptied list too)
+  if num(s.shoppingT) > num(db.shoppingT) then
+    db.shopping = type(s.shopping) == "table" and copy(s.shopping) or {}
+    db.shoppingT = num(s.shoppingT)
+    stats.shopping = true
   end
   if type(s.settings) == "table" and (db.settingsT == nil or num(s.settingsT) > num(db.settingsT)) then
     if type(db.settings) ~= "table" then db.settings = {} end

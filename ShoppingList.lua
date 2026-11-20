@@ -10,7 +10,8 @@
 -- cheaper than buying it (up to MAX_DEPTH levels), else it is bought (ns.Item.BuyCost: merchant,
 -- else the cheapest offer). The wished item's own stock is not counted (they are to be made).
 --
--- Saved in ns.db.shopping = { { rid = recipe (spell) id, out = item, name, pid, n = count }, … }.
+-- Saved in ns.db.shopping = { { rid = recipe (spell) id, out = item, name, pid, n = count }, … },
+-- ns.db.shoppingT = time of the last change: the state sync takes the newest list (Sync.lua).
 local ADDON, ns = ...
 
 local List = {}
@@ -26,6 +27,7 @@ local function wishes()
   ns.db.shopping = ns.db.shopping or {}
   return ns.db.shopping
 end
+local function changed() ns.db.shoppingT = time() end
 local function itemIcon(id)
   local get = (C_Item and C_Item.GetItemIconByID) or GetItemIcon
   return id and get and get(id) or nil
@@ -200,6 +202,7 @@ function List.Add(rid, n)
     return nil
   end
   n = math.max(1, math.floor(n or 1))
+  changed()
   for _, w in ipairs(wishes()) do
     if w.rid == rid then
       w.n = w.n + n
@@ -262,18 +265,21 @@ local function card(c)
     local w = selected and selected.wish
     if not w then return end
     w.n = math.max(1, w.n - (IsShiftKeyDown() and 10 or 1))
+    changed()
     refresh()
   end)
   v.Plus = smallButton(c, "+", 24, function()
     local w = selected and selected.wish
     if not w then return end
     w.n = w.n + (IsShiftKeyDown() and 10 or 1)
+    changed()
     refresh()
   end)
   v.Remove = smallButton(c, "Entfernen", 80, function()
     local w = selected and selected.wish
     if not w then return end
     for i, x in ipairs(wishes()) do if x == w then table.remove(wishes(), i) break end end
+    changed()
     refresh()
   end)
   v.Minus:SetPoint("TOPLEFT", v.Sub, "BOTTOMLEFT", 0, -6)
