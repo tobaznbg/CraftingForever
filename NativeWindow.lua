@@ -39,7 +39,7 @@ function NW.New(opts)
   local f = try("Frame", UIParent, "PortraitFrameTemplate", opts.name)
     or try("Frame", UIParent, "ButtonFrameTemplate", opts.name) or CreateFrame("Frame", opts.name, UIParent)
   self.frame = f
-  f:SetSize(opts.width or 760, opts.height or 560)
+  f:SetSize(opts.width or 673, opts.height or 594) -- the profession window's size
   f:SetToplevel(true)
   f:EnableMouse(true)
   f:SetMovable(true)
@@ -73,6 +73,13 @@ function NW.New(opts)
   bg:SetPoint("BOTTOMRIGHT", -3, 3)
   bg:SetAtlas("Profession-Background-Template2")
   self.background = bg
+  -- the overview pages' background (Blizzard's "Berufe" overview), shown per tab
+  local obg = f:CreateTexture(nil, "BACKGROUND", nil, -2)
+  obg:SetPoint("TOPLEFT", 2, -21)
+  obg:SetPoint("BOTTOMRIGHT", -2, 2)
+  obg:SetAtlas("Profession-Background-Overview")
+  obg:Hide()
+  self.overviewBackground = obg
   -- the content area the pages fill
   local area = CreateFrame("Frame", nil, f)
   area:SetPoint("TOPLEFT", 8, -60)
@@ -125,6 +132,8 @@ function NW:SelectTab(key)
     if tab.def.build then ns.Safe(tab.def.build, tab.page, self) end
   end
   tab.page:Show()
+  self.overviewBackground:SetShown(tab.def.overview and true or false)
+  self.background:SetShown(not tab.def.overview)
   self.current = key
   if tab.def.onShow then ns.Safe(tab.def.onShow, tab.page, self) end
 end
@@ -170,7 +179,87 @@ function NW.Figures(parent, anchor, labels, opts)
   return out
 end
 
--- An inset panel with a gold title, like the boxes of the profession overview.
+-- Overview building blocks, measured from Blizzard's "Berufe" overview in this client --------
+
+-- A wide card (664x142, "Profession-overview-Card") at y below the window's top.
+function NW.WideCard(window, page, y)
+  local c = CreateFrame("Frame", nil, page)
+  c:SetSize(664, 142)
+  c:SetPoint("TOPLEFT", window.frame, "TOPLEFT", 5, y)
+  local bg = c:CreateTexture(nil, "BACKGROUND")
+  bg:SetAllPoints()
+  bg:SetAtlas("Profession-overview-Card")
+  c.Title = c:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+  c.Title:SetPoint("TOPLEFT", 20, -16)
+  return c
+end
+
+-- A tall card (225x275, generic overview card art) - three of them in a row.
+function NW.TallCard(window, page, index, atlas, below)
+  local c = CreateFrame("Frame", nil, page)
+  c:SetSize(225, 275)
+  if index == 1 then
+    c:SetPoint("TOPLEFT", below, "BOTTOMLEFT", 0, 4)
+  else
+    c:SetPoint("TOPLEFT", below, "TOPRIGHT", -6, 0)
+  end
+  local bg = c:CreateTexture(nil, "BACKGROUND")
+  bg:SetAllPoints()
+  bg:SetAtlas(atlas)
+  c.Title = c:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+  c.Title:SetPoint("TOP", 0, -20)
+  return c
+end
+
+-- An icon slot like the overview's profession buttons: 40x40 icon, slot frame, name and a
+-- second line (NewSubSpellFont).
+function NW.Slot(parent, icon, name, sub)
+  local s = CreateFrame("Frame", nil, parent)
+  s:SetSize(40, 40)
+  s.Icon = s:CreateTexture(nil, "BORDER")
+  s.Icon:SetAllPoints()
+  s.Icon:SetTexture(icon)
+  local frameTex = s:CreateTexture(nil, "OVERLAY")
+  frameTex:SetAllPoints()
+  frameTex:SetAtlas("Professions-Slot-Frame")
+  s.Name = s:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+  s.Name:SetPoint("TOPLEFT", s, "TOPRIGHT", 8, -4)
+  s.Name:SetText(name or "")
+  s.Sub = s:CreateFontString(nil, "OVERLAY", rawget(_G, "NewSubSpellFont") and "NewSubSpellFont" or "GameFontHighlightSmall")
+  s.Sub:SetPoint("TOPLEFT", s.Name, "BOTTOMLEFT", 0, -2)
+  s.Sub:SetText(sub or "")
+  return s
+end
+
+-- A progress bar like the overview's skill bar (background, fill, frame, text in the middle).
+-- fill: an atlas of the skill bar fill ("Skillbar_Fill_Flipbook_<Profession>").
+function NW.Bar(parent, width, fill)
+  local b = CreateFrame("Frame", nil, parent)
+  b:SetSize(width, 18)
+  local bg = b:CreateTexture(nil, "ARTWORK", nil, 1)
+  bg:SetPoint("TOPLEFT", 0, 0)
+  bg:SetSize(width, 23)
+  bg:SetAtlas("Profession-ProgressBar-BG")
+  b.Fill = b:CreateTexture(nil, "ARTWORK", nil, 2)
+  b.Fill:SetPoint("TOPLEFT", 2, -3)
+  b.Fill:SetHeight(18)
+  b.Fill:SetAtlas(fill or "Skillbar_Fill_Flipbook_Leatherworking")
+  local fr = b:CreateTexture(nil, "ARTWORK", nil, 3)
+  fr:SetPoint("TOPLEFT", 0, 0)
+  fr:SetSize(width, 23)
+  fr:SetAtlas("Profession-ProgressBar-frame")
+  b.Text = b:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  b.Text:SetPoint("CENTER", 0, -2)
+  function b.Set(share, text)
+    share = math.max(0, math.min(1, share or 0))
+    b.Fill:SetWidth(math.max(1, (width - 4) * share))
+    b.Fill:SetShown(share > 0)
+    b.Text:SetText(text or "")
+  end
+  return b
+end
+
+-- An inset panel with a gold title (for pages that are not overviews).
 function NW.Panel(parent, title)
   local p = try("Frame", parent, "InsetFrameTemplate") or CreateFrame("Frame", nil, parent)
   local bg = p:CreateTexture(nil, "BACKGROUND", nil, 1)

@@ -70,110 +70,113 @@ local function cardDetail(entry, card)
   d.Figures.SetWidth(math.max(100, (card:GetWidth() or 400) - 46))
 end
 
--- Overview: period choice on top, the period's profit and loss, stock, and three boxes.
-local function buildOverview(page)
+-- Overview, built like Blizzard's "Berufe" overview: two wide cards (profit and loss, stock)
+-- and three tall cards (best items, worst items, auctions). Period: Heute / 7 Tage / Alles.
+local function buildOverview(page, w)
   local NW = ns.NativeWindow
-  -- period buttons (top right), the chosen one held down
-  local buttons = {}
-  local prev
-  for i = #PERIODS, 1, -1 do
-    local def = PERIODS[i]
-    local okB, b = pcall(CreateFrame, "Button", nil, page, "UIPanelButtonTemplate")
-    if not okB then b = CreateFrame("Button", nil, page) end
-    b:SetSize(76, 22)
-    b:SetText(def.label)
-    if prev then b:SetPoint("RIGHT", prev, "LEFT", -4, 0) else b:SetPoint("TOPRIGHT", page, "TOPRIGHT", -6, 0) end
-    b:SetScript("OnClick", function()
-      period = def.key
+
+  -- 1. profit and loss
+  local pnl = NW.WideCard(w, page, -41)
+  pnl.Title:SetText("Gewinn und Verlust")
+  -- period choice: Blizzard's dropdown button, else a button that cycles
+  local dd
+  local okD, d = pcall(CreateFrame, "DropdownButton", nil, pnl, "WowStyle1DropdownTemplate")
+  if okD and d and d.SetupMenu then
+    dd = d
+    dd:SetWidth(110)
+    dd:SetPoint("TOPRIGHT", -20, -10)
+    dd:SetupMenu(function(_, root)
+      for _, def in ipairs(PERIODS) do
+        root:CreateRadio(def.label, function() return period == def.key end, function()
+          period = def.key
+          if page.Refresh then page.Refresh() end
+        end)
+      end
+    end)
+  else
+    local okB, bt = pcall(CreateFrame, "Button", nil, pnl, "UIPanelButtonTemplate")
+    dd = okB and bt or CreateFrame("Button", nil, pnl)
+    dd:SetSize(110, 22)
+    dd:SetPoint("TOPRIGHT", -20, -10)
+    dd:SetScript("OnClick", function()
+      for i, def in ipairs(PERIODS) do
+        if def.key == period then period = PERIODS[i % #PERIODS + 1].key break end
+      end
       if page.Refresh then page.Refresh() end
     end)
-    buttons[def.key] = b
-    prev = b
   end
-  local label = page:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-  label:SetPoint("RIGHT", prev, "LEFT", -10, 0)
-  label:SetText("Zeitraum:")
+  local pnlSlot = NW.Slot(pnl, "Interface\\Icons\\INV_Misc_Coin_02", "Gewinn", "")
+  pnlSlot:SetPoint("BOTTOMLEFT", 15, 46)
+  local pnlBar = NW.Bar(pnl, 441, "Skillbar_Fill_Flipbook_Leatherworking")
+  pnlBar:SetPoint("RIGHT", pnl, "RIGHT", -40, 0)
+  pnlBar:SetPoint("TOP", pnlSlot, "TOP", 0, -12)
+  local pnlLine = pnl:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  pnlLine:SetPoint("TOPLEFT", pnlBar, "BOTTOMLEFT", 2, -12)
 
-  -- top: profit and loss (left), stock (right)
-  local pnl = NW.Panel(page, "Gewinn und Verlust")
-  pnl:SetPoint("TOPLEFT", 0, -30)
-  pnl:SetPoint("RIGHT", page, "CENTER", -3, 0)
-  pnl:SetHeight(190)
-  pnl.Big = pnl:CreateFontString(nil, "OVERLAY", "GameFontHighlightHuge")
-  pnl.Big:SetPoint("TOPLEFT", pnl.Title, "BOTTOMLEFT", 0, -12)
-  pnl.Sub = pnl:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-  pnl.Sub:SetPoint("TOPLEFT", pnl.Big, "BOTTOMLEFT", 0, -4)
-  pnl.Figures = NW.Figures(pnl, pnl.Sub, { "Umsatz", "Einkauf", "Gebühren", "Gewinn" })
+  -- 2. stock
+  local stock = NW.WideCard(w, page, -41 - 142 + 5)
+  stock.Title:SetText("Bestand")
+  local stockSlot = NW.Slot(stock, "Interface\\Icons\\INV_Box_02", "Buchgewinn", "|cff5fd38d+6g 74s|r")
+  stockSlot:SetPoint("BOTTOMLEFT", 15, 46)
+  local stockBar = NW.Bar(stock, 441, "Skillbar_Fill_Flipbook_Skinning")
+  stockBar:SetPoint("RIGHT", stock, "RIGHT", -40, 0)
+  stockBar:SetPoint("TOP", stockSlot, "TOP", 0, -12)
+  stockBar.Set(4.02 / 10.76, "Einkauf 4g 02s  ·  Erlös netto 10g 76s")
+  local stockLine = stock:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  stockLine:SetPoint("TOPLEFT", stockBar, "BOTTOMLEFT", 2, -12)
+  stockLine:SetText("7 Items  ·  11 Stück  ·  wenn alles zum Marktwert verkauft wird")
 
-  local stock = NW.Panel(page, "Bestand")
-  stock:SetPoint("TOPLEFT", page, "TOP", 3, -30)
-  stock:SetPoint("RIGHT", page, "RIGHT", 0, 0)
-  stock:SetHeight(190)
-  stock.Big = stock:CreateFontString(nil, "OVERLAY", "GameFontHighlightHuge")
-  stock.Big:SetPoint("TOPLEFT", stock.Title, "BOTTOMLEFT", 0, -12)
-  stock.Big:SetText("|cff5fd38d+6g 74s|r")
-  stock.Sub = stock:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-  stock.Sub:SetPoint("TOPLEFT", stock.Big, "BOTTOMLEFT", 0, -4)
-  stock.Sub:SetText("Buchgewinn, wenn alles verkauft wird")
-  stock.Figures = NW.Figures(stock, stock.Sub, { "Items", "Einkauf", "Erlös netto", "Buchgewinn" })
-  local sv = stock.Figures.values
-  sv[1]:SetText("7 Items · 11 Stück"); sv[2]:SetText("4g 02s"); sv[3]:SetText("10g 76s"); sv[4]:SetText("|cff5fd38d+6g 74s|r")
-
-  -- bottom: three boxes
-  local boxes = {
-    { title = "Beste Items", lines = { "Stiefel des Nachtschleichers  |cff5fd38d+9g 12s|r", "Muster: Robe der Leere  |cff5fd38d+4g 80s|r", "Leichtes Leder  |cff5fd38d+2g 05s|r" } },
-    { title = "Schlechteste Items", lines = { "Abgefangene Kiste  |cffff6b6b-6s 99c|r", "Hose des Nachtschleichers  |cffff6b6b-1g 10s|r", "Tückische Lederstulpen  |cffff6b6b-42s|r" } },
-    { title = "Auktionen", lines = { "12 laufend", "|cffff6b6b3 unterboten|r", "5 abgelaufen (Gebühr 22s)" } },
+  -- 3. three tall cards
+  local cards = {
+    { title = "Beste Items", atlas = "Profession-overview-card-generic-Cooking",
+      lines = { "Stiefel des Nachtschleichers", "|cff5fd38d+9g 12s|r", "Muster: Robe der Leere", "|cff5fd38d+4g 80s|r",
+        "Leichtes Leder", "|cff5fd38d+2g 05s|r" },
+      slot = { "Interface\\Icons\\INV_Boots_08", "Stiefel des Nachtsch…", "bestes Item" } },
+    { title = "Schlechteste Items", atlas = "Profession-overview-card-generic-Fishing",
+      lines = { "Hose des Nachtschleichers", "|cffff6b6b-1g 10s|r", "Tückische Lederstulpen", "|cffff6b6b-42s|r",
+        "Abgefangene Kiste", "|cffff6b6b-6s 99c|r" },
+      slot = { "Interface\\Icons\\INV_Pants_07", "Hose des Nachtsch…", "schlechtestes Item" } },
+    { title = "Auktionen", atlas = "Profession-overview-card-generic-FirstAid",
+      lines = { "Laufend", "12", "Unterboten", "|cffff6b6b3|r", "Abgelaufen", "5 (Gebühr 22s)" },
+      slot = { "Interface\\Icons\\INV_Hammer_15", "Auktionen", "12 laufend" } },
   }
-  local bw = 1 / 3
-  for i, def in ipairs(boxes) do
-    local box = NW.Panel(page, def.title)
-    box:SetPoint("TOPLEFT", pnl, "BOTTOMLEFT", 0, -6)
-    box:SetPoint("BOTTOM", page, "BOTTOM", 0, 0)
-    box.m4Index = i
-    box.m4Lines = {}
-    for k, text in ipairs(def.lines) do
-      local fs = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-      fs:SetPoint("TOPLEFT", box.Title, "BOTTOMLEFT", 0, -10 - (k - 1) * 16)
-      fs:SetText(text)
+  local prev = stock
+  for i, def in ipairs(cards) do
+    local c = NW.TallCard(w, page, i, def.atlas, i == 1 and stock or prev)
+    c.Title:SetText(def.title)
+    for k = 1, #def.lines, 2 do
+      local row = (k + 1) / 2
+      local l = c:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+      l:SetPoint("TOPLEFT", 20, -50 - (row - 1) * 34)
+      l:SetWidth(185)
+      l:SetJustifyH("LEFT")
+      l:SetText(def.lines[k])
+      local v = c:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+      v:SetPoint("TOPLEFT", l, "BOTTOMLEFT", 0, -2)
+      v:SetText(def.lines[k + 1])
     end
-    page["Box" .. i] = box
+    local slot = NW.Slot(c, def.slot[1], def.slot[2], def.slot[3])
+    slot:SetPoint("BOTTOMLEFT", 20, 25)
+    prev = c
   end
-  -- three equal columns (widths need the page's size)
-  local function layoutBoxes()
-    local w = page:GetWidth() or 0
-    if w <= 0 then return end
-    local each = (w - 12) * bw
-    for i = 1, 3 do
-      local box = page["Box" .. i]
-      box:ClearAllPoints()
-      box:SetPoint("TOPLEFT", pnl, "BOTTOMLEFT", (i - 1) * (each + 6), -6)
-      box:SetPoint("BOTTOM", page, "BOTTOM", 0, 0)
-      box:SetWidth(each)
-    end
-    local half = (w - 6) / 2 - 28
-    pnl.Figures.SetWidth(half)
-    stock.Figures.SetWidth(half)
-  end
-  page:SetScript("OnSizeChanged", layoutBoxes)
 
   function page.Refresh()
-    for key, b in pairs(buttons) do
-      if b.SetEnabled then b:SetEnabled(key ~= period) end -- the chosen one held down (disabled look)
-    end
+    local label
+    for _, def in ipairs(PERIODS) do if def.key == period then label = def.label end end
+    if dd.SetText then dd:SetText(label) end
+    if dd.GenerateMenu then pcall(dd.GenerateMenu, dd) end
     local e = EXAMPLE[period]
-    pnl.Big:SetText(e.profit)
-    pnl.Sub:SetText("Gewinn · " .. e.sales)
-    local v = pnl.Figures.values
-    v[1]:SetText(e.revenue); v[2]:SetText(e.cost); v[3]:SetText(e.fees); v[4]:SetText(e.profit)
-    layoutBoxes()
+    pnlSlot.Sub:SetText(e.profit)
+    local share = ({ today = 0.37, week = 0.40, all = 0.35 })[period]
+    pnlBar.Set(share, string.format("Marge %d %%", math.floor(share * 100 + 0.5)))
+    pnlLine:SetText("Umsatz " .. e.revenue .. "  ·  Einkauf " .. e.cost .. "  ·  Gebühren " .. e.fees .. "  ·  " .. e.sales)
   end
   page.Refresh()
 end
 
 local function create()
-  window = ns.NativeWindow.New({ name = NAME, title = "Handelsbuch", icon = ICON, width = 760, height = 560 })
-  window:AddTab({ key = "overview", title = "Übersicht", icon = "Interface\\Icons\\INV_Misc_Coin_02",
+  window = ns.NativeWindow.New({ name = NAME, title = "Handelsbuch", icon = ICON })
+  window:AddTab({ key = "overview", title = "Übersicht", icon = "Interface\\Icons\\INV_Misc_Coin_02", overview = true,
     build = buildOverview, onShow = function(page) if page.Refresh then page.Refresh() end end })
   window:AddTab({ key = "ledger", title = "Handelsbuch", icon = "Interface\\Icons\\INV_Misc_Note_01",
     build = function(page) ns.NativeWindow.Split(page, { entries = DUMMY, onSelect = cardDetail }) end })
