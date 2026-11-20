@@ -13,7 +13,7 @@
 --   medYesterday       the same median over the whole previous Berlin day
 --   med7, med7Days     the same median over today plus the 6 full days before, days behind it
 --   ref, refSource     R, THE reference price everywhere (selling, sniper, recipes, views):
---                      medYesterday, else med7, else medToday; refSource "yesterday" /
+--                      med7 once it rests on 3 days, else medYesterday, else med7, else medToday; refSource "yesterday" /
 --                      "week" / "today" (Item.RefLabel). Same rule as the cloud (price_ref).
 --   demand     relative demand from the cloud (scale: TSM's real EU sales per day; our own
 --              estimate calibrated to it). Shown as a level, not as units: Item.DemandText
@@ -236,7 +236,12 @@ function Item.Observe(itemID, cheapest, t)
 end
 
 -- R and its source from the medians of an item table (see the head of this file).
+-- R: the median of the 7 days (one odd day moves it little) once it rests on at least 3 days,
+-- else of yesterday, else of the 7 days, else of today. Same rule as the cloud
+-- (ahmetrics.price_ref_source, WEEK_MIN_DAYS).
+Item.WEEK_MIN_DAYS = 3
 function Item.Reference(e)
+  if e.med7 and e.med7 > 0 and (e.med7Days or 0) >= Item.WEEK_MIN_DAYS then return e.med7, "week" end
   if e.medYesterday and e.medYesterday > 0 then return e.medYesterday, "yesterday" end
   if e.med7 and e.med7 > 0 then return e.med7, "week" end
   if e.medToday and e.medToday > 0 then return e.medToday, "today" end
