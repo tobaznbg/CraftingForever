@@ -37,6 +37,11 @@ Farming.ProfessionSkill = professionSkill
 -- Whether the player can gather the item now: ok, reason text.
 local function access(group, entry, level)
   local skill = professionSkill(group.source)
+  if group.kind == "fish" then
+    -- the fishing water decides the skill, not the fish
+    if not skill then return false, group.label .. " fehlt" end
+    return true, "Angeln"
+  end
   if group.kind == "skill" then
     if not skill then return false, group.label .. " fehlt" end
     if skill < entry[2] then return false, string.format("ab Skill %d", entry[2]) end

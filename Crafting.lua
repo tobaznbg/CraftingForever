@@ -632,6 +632,7 @@ local GATHER = {
   [393] = { source = "Kürschnerei", icon = "Interface\\Icons\\INV_Misc_Pelt_Wolf_01" },
   [186] = { source = "Bergbau", icon = "Interface\\Icons\\Trade_Mining" },
   [182] = { source = "Kräuterkunde", icon = "Interface\\Icons\\Trade_Herbalism" },
+  [356] = { source = "Angeln", icon = "Interface\\Icons\\Trade_Fishing" },
 }
 local RANKS = { { 225, "Fachmann (225–300)" }, { 150, "Experte (150–224)" }, { 75, "Geselle (75–149)" }, { 0, "Lehrling (1–74)" } }
 
@@ -656,12 +657,20 @@ local function gatherRows(pid)
     local value, onAH = ns.Item.SellNet(it)
     local need, lo, hi = entry[2], nil, nil
     if group.kind == "mob" then lo, hi = entry[2], entry[3]; need = F.SkinSkill(lo) end
+    if group.kind == "fish" then need = 1 end -- the water decides, not the fish
     list[#list + 1] = { gather = true, kind = group.kind, itemID = id, recipe = ns.ItemName(id) or ("#" .. id),
       need = need, lo = lo, hi = hi, value = value or 0, onAH = onAH, profit = value or 0, cost = 0, produced = 1,
       demand = it.demand or 0, nowPrice = it.now, unsure = ns.Item.Unsure(it), reagents = {},
       learned = (skill or 0) >= need, pid = pid }
   end
   return list
+end
+
+local function gatherEntry(pid, itemID)
+  local group = gatherGroup(pid)
+  for _, entry in ipairs(group and group.items or {}) do
+    if entry[1] == itemID then return entry end
+  end
 end
 
 local function rankOf(need)
@@ -740,6 +749,10 @@ local function productEntries(pid)
     for _, e in ipairs(gatherRows(pid)) do
       if key ~= "learned" or e.learned then list[#list + 1] = e end
       e.catName, e.catOrder = rankOf(e.need)
+      if e.kind == "fish" then
+        local entry = gatherEntry(pid, e.itemID)
+        e.catName, e.catOrder = (entry and entry[2] == 2) and "Schwärme und Treibgut" or "Fische", (entry and entry[2] == 2) and 0 or 1
+      end
     end
   else
     list = rows(key == "learned" and "learned" or "all", pid)
@@ -1043,6 +1056,7 @@ local function showProduct(entry, c)
     .. (e.produced > 1 and string.format("  |cff999999x%g|r", e.produced) or ""))
   if e.gather then
     local need = e.kind == "mob" and string.format("Gegner Stufe %d–%d · Häuten ab Skill %d", e.lo, e.hi, e.need)
+      or (e.kind == "fish" and "Angeln · der Skill hängt vom Gewässer ab")
       or string.format("ab Skill %d", e.need)
     v.Sub:SetText((e.learned and "|cff5fd38d" or "|cffffb547") .. need .. "|r")
   else
