@@ -1,22 +1,22 @@
--- SellInfo: under Blizzard's "Auktion erstellen" (auction house tab "Verkaufen") what the item
--- in the sell slot cost the player and what the entered price leaves after the 5 % cut:
---   M4 Einstand 98s 13c (hergestellt) · ohne Verlust ab 1g 03s
---      bei 77s 09c: -24s 89c je Stück
--- Cost from ns.Profit.UnitCost (ledger), nothing of its own. Only reads Blizzard's frames,
--- never posts or changes anything there.
+-- SellInfo: two rows in Blizzard's "Auktion erstellen" (auction house tab "Verkaufen"), right
+-- under "Gesamtpreis" and in its style, recomputed while the price or quantity is typed:
+--   Einstand   1g 96s 26c          (cost of the units, ns.Profit.UnitCost x quantity)
+--   Gewinn    -49s 80c             (total price after the 5 % cut minus that cost; green/red)
+-- Without a known cost: "Einstand  unbekannt", no profit row. The post button moves down by
+-- the two rows. Only reads Blizzard's frames, never posts or changes a price.
 local ADDON, ns = ...
 
 local SellInfo = {}
 ns.SellInfo = SellInfo
 
 local CUT = 0.05
+local ROW_H = 24
 
-local function money(c) return ns.FormatMoney(c, true) end
+local function money(c) return ns.FormatMoney(c) end
 
 -- The item id in a sell frame, nil when the slot is empty: the location Blizzard put in with
--- SetItem (hooked in attach), else the frame's GetItem where the client has it.
+-- SetItem (hooked in attach), else the frame's GetItem.
 local function itemOf(frame)
-  if not frame then return nil end
   local location = frame.m4Location
   if location == nil and frame.GetItem then
     local ok, loc = pcall(frame.GetItem, frame)
@@ -26,13 +26,12 @@ local function itemOf(frame)
   if type(location) == "table" and location.IsValid and not location:IsValid() then return nil end
   local getID = C_Item and C_Item.GetItemID
   if not getID then return nil end
-  local ok2, id = pcall(getID, location)
-  return ok2 and id or nil
+  local ok, id = pcall(getID, location)
+  return ok and id or nil
 end
 
--- The unit price entered in a sell frame (copper), nil when none.
+-- The unit price entered (copper), nil when none.
 local function unitPriceOf(frame)
-  if not frame then return nil end
   if frame.GetUnitPrice then
     local ok, price = pcall(frame.GetUnitPrice, frame)
     if ok and type(price) == "number" and price > 0 then return price end
@@ -45,25 +44,56 @@ local function unitPriceOf(frame)
   return nil
 end
 
--- The text for item `id` at unit price `price` (nil: no price entered yet); nil without a cost.
-function SellInfo.Text(id, price)
+-- The quantity entered, 1 when it cannot be read.
+local function quantityOf(frame)
+  for _, get in ipairs({
+    function() return frame:GetQuantity() end,
+    function() return frame.QuantityInput:GetQuantity() end,
+    function() return frame.QuantityInput.InputBox:GetNumber() end,
+  }) do
+    local ok, n = pcall(get)
+    if ok and type(n) == "number" and n > 0 then return n end
+  end
+  return 1
+end
+
+-- The two values for item `id`, unit price `price` (nil: none yet) and `qty` units:
+-- costText, profitText (nil: no profit row). Nothing at all without an item.
+function SellInfo.Values(id, price, qty)
   if not (id and ns.Profit and ns.Profit.UnitCost) then return nil end
-  local cost, source = ns.Profit.UnitCost(id)
-  local Style = ns.Style
-  local muted, green, red = Style and Style.MUTED or "|cff999999", "|cff5fd38d", "|cffff6b6b"
-  local head = "|cff4fc2a1M4|r "
-  if not cost then
-    return head .. muted .. "Einstand unbekannt – kein Kauf oder Herstellung erfasst|r"
+  local cost = ns.Profit.UnitCost(id)
+  if not cost then return "|cff999999unbekannt|r", nil end
+  qty = qty or 1
+  local total = math.floor(cost * qty + 0.5)
+  if not price then return money(total), nil end
+  local profit = math.floor(price * qty * (1 - CUT) - total)
+  local text = profit >= 0 and ("|cff5fd38d" .. money(profit) .. "|r") or ("|cffff6b6b-" .. money(-profit) .. "|r")
+  return money(total), text
+end
+
+-- One row like Blizzard's: label right-aligned in the label column, value left in the value column.
+local function newRow(holder, frame, labelText, index)
+  local total = frame.TotalPrice
+  local label = holder:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+  local value = holder:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+  label:SetText(labelText)
+  label:SetJustifyH("RIGHT")
+  value:SetJustifyH("LEFT")
+  local y = -(index - 1) * ROW_H - 10
+  if total and total.Label then
+    label:SetPoint("TOPRIGHT", total.Label, "BOTTOMRIGHT", 0, y)
+  elseif total then
+    label:SetPoint("TOPLEFT", total, "BOTTOMLEFT", 0, y)
+  else
+    label:SetPoint("BOTTOMLEFT", frame.PostButton or frame, "TOPLEFT", 0, -y)
   end
-  local text = head .. "Einstand " .. money(math.floor(cost + 0.5)) .. muted .. " (" .. source .. ")"
-    .. "  ·  ohne Verlust ab " .. money(ns.Profit.BreakEven(cost)) .. "|r"
-  if price then
-    local per = math.floor(price * (1 - CUT) - cost)
-    text = text .. "\n" .. muted .. "bei " .. money(price) .. ": |r"
-      .. (per >= 0 and (green .. "+" .. money(per)) or (red .. "-" .. money(-per))) .. "|r"
-      .. muted .. " je Stück nach Gebühr|r"
+  local valueAnchor = total and (total.MoneyDisplayFrame or total.MoneyFrame)
+  if valueAnchor then
+    value:SetPoint("TOPLEFT", valueAnchor, "BOTTOMLEFT", 0, y)
+  else
+    value:SetPoint("LEFT", label, "RIGHT", 18, 0)
   end
-  return text
+  return { label = label, value = value }
 end
 
 local function attach(frame)
@@ -73,69 +103,50 @@ local function attach(frame)
   holder:SetAllPoints(frame)
   holder:SetFrameStrata(frame:GetFrameStrata())
   holder:SetFrameLevel(frame:GetFrameLevel() + 50)
-  local fs = holder:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-  fs:SetJustifyH("LEFT")
-  fs:SetWidth(300)
-  if frame.PostButton then
-    fs:SetPoint("TOPLEFT", frame.PostButton, "BOTTOMLEFT", -40, -10)
-  else
-    fs:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 20, 40)
+  local rows = { newRow(holder, frame, "Einstand", 1), newRow(holder, frame, "Gewinn", 2) }
+  frame.m4SellInfo = holder
+  -- Layout check: what "Gesamtpreis" consists of in this client (saved variables).
+  if ns.db and frame.TotalPrice then
+    local keys = {}
+    for k, v in pairs(frame.TotalPrice) do
+      if type(v) == "table" and v.GetObjectType then keys[#keys + 1] = tostring(k) .. ":" .. v:GetObjectType() end
+    end
+    table.sort(keys)
+    ns.db.sellInfoLayout = table.concat(keys, ", ")
   end
-  frame.m4SellInfo = fs
   if frame.SetItem then
     hooksecurefunc(frame, "SetItem", function(self, itemLocation) self.m4Location = itemLocation end)
   end
-  -- What this client offers (read once from the saved variables when something is missing).
-  if ns.db then
-    ns.db.sellInfoProbe = ns.db.sellInfoProbe or {}
-    ns.db.sellInfoProbe[tostring(frame:GetName() or (frame == (AuctionHouseFrame and AuctionHouseFrame.ItemSellFrame) and "item" or "commodity"))] = {
-      SetItem = frame.SetItem ~= nil, GetItem = frame.GetItem ~= nil, GetUnitPrice = frame.GetUnitPrice ~= nil,
-      PriceInput = frame.PriceInput ~= nil, PostButton = frame.PostButton ~= nil, t = time() }
+  -- The post button moves down by the two rows (once).
+  local button = frame.PostButton
+  if button and button.GetPoint and button:GetNumPoints() > 0 then
+    local p, rel, rp, x, y = button:GetPoint(1)
+    button:ClearAllPoints()
+    button:SetPoint(p, rel, rp, x, (y or 0) - 2 * ROW_H)
   end
-  -- Price and item change while the frame is open: a light check five times a second.
+  local function show(costText, profitText)
+    rows[1].label:SetShown(costText ~= nil)
+    rows[1].value:SetText(costText or "")
+    rows[2].label:SetShown(profitText ~= nil)
+    rows[2].value:SetText(profitText or "")
+  end
+  show(nil, nil)
+  -- Price, quantity and item change while the frame is open: a light check five times a second.
   local elapsed, lastKey = 0, nil
-  local function tick(self)
-    local id, price = itemOf(self), unitPriceOf(self)
-    local key = tostring(id) .. ":" .. tostring(price)
+  local function tick()
+    local id, price, qty = itemOf(frame), unitPriceOf(frame), quantityOf(frame)
+    local key = tostring(id) .. ":" .. tostring(price) .. ":" .. tostring(qty)
     if key == lastKey then return end
     lastKey = key
-    local ok, text = pcall(SellInfo.Text, id, price)
-    fs:SetText(ok and text or "")
-    if ns.db then ns.db.sellInfoLast = { id = id, price = price, ok = ok, text = ok and text or tostring(text), t = time() } end
+    show(SellInfo.Values(id, price, qty))
   end
-  -- The timer runs on the own layer (a child: shown exactly while the sell frame is shown).
   holder:SetScript("OnUpdate", function(_, dt)
     elapsed = elapsed + (dt or 0)
     if elapsed < 0.2 then return end
     elapsed = 0
-    ns.Safe(tick, frame)
+    ns.Safe(tick)
   end)
-  frame:HookScript("OnHide", function() lastKey = nil; fs:SetText("") end)
-end
-
--- Which frames of the auction house are shown (keys and names), recorded every 2 s while it is
--- open: Forever's sell screen is not Blizzard's ItemSellFrame (its OnUpdate never ran).
-local function probeShown()
-  local ah = AuctionHouseFrame
-  if not (ah and ah:IsShown() and ns.db) then return end
-  local shown = {}
-  for key, v in pairs(ah) do
-    if type(v) == "table" and type(v.IsShown) == "function" and type(v.GetObjectType) == "function" then
-      local ok, vis = pcall(v.IsShown, v)
-      if ok and vis then
-        local name = v.GetName and v:GetName() or nil
-        shown[#shown + 1] = tostring(key) .. (name and ("=" .. name) or "")
-      end
-    end
-  end
-  table.sort(shown)
-  local list = ns.db.sellInfoShown or {}
-  ns.db.sellInfoShown = list
-  local line = table.concat(shown, ", ")
-  if list[#list] ~= line then
-    list[#list + 1] = line
-    while #list > 20 do table.remove(list, 1) end
-  end
+  holder:SetScript("OnHide", function() lastKey = nil end)
 end
 
 local function attachAll()
@@ -146,15 +157,9 @@ local function attachAll()
 end
 
 if ns.On then
-  ns.On("AUCTION_HOUSE_CLOSED", function()
-    if SellInfo.ticker then SellInfo.ticker:Cancel(); SellInfo.ticker = nil end
-  end)
   ns.On("AUCTION_HOUSE_SHOW", function()
     attachAll()
     -- The auction house UI loads on demand: its frames may only exist a moment later.
     if C_Timer then C_Timer.After(0.2, function() ns.Safe(attachAll) end) end
-    if C_Timer and C_Timer.NewTicker and not SellInfo.ticker then
-      SellInfo.ticker = C_Timer.NewTicker(2, function() ns.Safe(probeShown) end)
-    end
   end)
 end
