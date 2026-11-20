@@ -570,7 +570,7 @@ local function showOverview(v, st)
   local data = ns.RecipeData and ns.RecipeData[st.pid]
   local nSteps = #r.segments
   setHead(v, data and data.icon or ALL_ICON, nil, "Gesamter Plan",
-    string.format("%s · Skill %d → %d · %s · %d %s", profName, st.from, r.reached,
+    string.format("%s · Skill %d bis %d · %s · %d %s", profName, st.from, r.reached,
       st.way == "dynamic" and "dynamischer Weg" or "Standard-Weg", nSteps, nSteps == 1 and "Schritt" or "Schritte"))
   local info
   if r.reached < maxSkill() then
@@ -624,10 +624,10 @@ local function showStep(v, st, seg, section)
   local c = seg.recipe
   local crafts = math.ceil(seg.crafts)
   local icon = itemIcon(c.out) or (GetSpellTexture and GetSpellTexture(c.id)) or PLAN_ICON
-  local sub = string.format("Skill %d → %d · ~%d× herstellen", seg.from, seg.to, crafts)
+  local sub = string.format("Skill %d bis %d · ca. %d× herstellen", seg.from, seg.to, crafts)
   local buffered = math.ceil(ns.Planner.BufferedCrafts(seg))
   if buffered > crafts then sub = sub .. string.format(" · Material für %d×", buffered) end
-  if (c.qty or 1) > 1 then sub = sub .. string.format(" (ergibt ~%d)", segmentItems(seg)) end
+  if (c.qty or 1) > 1 then sub = sub .. string.format(" (ergibt ca. %d)", segmentItems(seg)) end
   setHead(v, icon, c.out, qualityName(c.out, c.name or "?"), sub)
   local anchor, gap = v.Icon, -20
   local info = not c.learned and learnLines(st, c) or nil
