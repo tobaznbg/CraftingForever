@@ -369,9 +369,9 @@ local function areaFigures(g, items)
   for i = 1, math.min(5, #sorted) do top[i] = { sorted[i].name or ns.ItemName(sorted[i].itemId) or "?", signed(sorted[i].profit) } end
   if g.name == P.TRADE then
     return { sub = "Handel – im AH oder beim Händler gekauft und wieder verkauft", topTitle = "Größter Beitrag:",
-      labels = { "Einkauf", "Verkauf", "Gebühren", "Marge", "Noch im Bestand (Einkauf)", "Abgelaufen / abgebrochen", "Gewinn" },
+      labels = { "Einkauf", "Verkauf", "Gebühren", "Marge", "Noch im Bestand", "Abgelaufen", "Gewinn" },
       values = { money(g.spent), money(g.revenue), money(g.fees), pct(g.profit or 0, g.revenue), money(g.stockValue),
-        string.format("%d / %d  (%s Gebühr verloren)", g.expired or 0, g.cancelled or 0, money(g.depositsLost)), signed(g.profit) },
+        string.format("%d×  " .. RED .. "-%s|r", (g.expired or 0) + (g.cancelled or 0), money(g.depositsLost)), signed(g.profit) },
       top = top }
   end
   return { sub = "Beruf – Material gekauft, hergestellt und verkauft", topTitle = "Größter Beitrag:",
@@ -509,7 +509,7 @@ local function buildLedger(page)
     area.Icon:SetTexture(entry.icon)
     area.itemID = nil
     area.Name:SetText(entry.name)
-    area.Sub:SetText(f.sub)
+    area.Sub:SetText("Zusammenfassung")
     for i = 1, AREA_ROWS do
       local has = f.labels[i] ~= nil
       area.Figures.labels[i]:SetShown(has)
