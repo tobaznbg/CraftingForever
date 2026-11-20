@@ -785,7 +785,12 @@ render = function()
     local cheapest = fresh.offers[1]
     now = cheapest and cheapest.unit or nil
   end
-  line("AH jetzt", now and money(now) or (Style.MUTED .. "nicht im AH|r"))
+  -- red when below the median of yesterday and of the 7 days (selling now goes under value)
+  local nowText = now and money(now) or (Style.MUTED .. "nicht im AH|r")
+  if now and item.medYesterday and item.med7 and now < item.medYesterday and now < item.med7 then
+    nowText = "|cffff6b6b" .. nowText .. "|r"
+  end
+  line("AH jetzt", nowText)
   line("Median heute", item.medToday and money(item.medToday) or "–")
   line("Median gestern", item.medYesterday and money(item.medYesterday) or "–")
   line("Median 7 Tage", item.med7 and money(item.med7) or "–")
