@@ -2,8 +2,8 @@
 -- under "Gesamtpreis" and in its style, recomputed while the price or quantity is typed:
 --   Einstand   1g 96s 26c          (cost of the units, ns.Profit.UnitCost x quantity)
 --   Gewinn    -49s 80c             (total price after the 5 % cut minus that cost; green/red)
--- Without a known cost: "Einstand  unbekannt", no profit row. The post button moves down by
--- the two rows. Only reads Blizzard's frames, never posts or changes a price.
+-- Without a known cost: "Einstand  unbekannt", no profit row. The post button moves below the
+-- rows. Only reads Blizzard's frames, never posts or changes a price.
 local ADDON, ns = ...
 
 local SellInfo = {}
@@ -117,12 +117,21 @@ local function attach(frame)
   if frame.SetItem then
     hooksecurefunc(frame, "SetItem", function(self, itemLocation) self.m4Location = itemLocation end)
   end
-  -- The post button moves down by the two rows (once).
+  -- The post button sits below the last shown row. Blizzard places it again when the frame
+  -- shows (and on its own layout changes), so every check moves it again when needed.
   local button = frame.PostButton
-  if button and button.GetPoint and button:GetNumPoints() > 0 then
-    local p, rel, rp, x, y = button:GetPoint(1)
-    button:ClearAllPoints()
-    button:SetPoint(p, rel, rp, x, (y or 0) - 2 * ROW_H)
+  local function placeButton()
+    if not (button and button.GetPoint and button:GetNumPoints() > 0) then return end
+    local last = rows[2].label:IsShown() and rows[2].label or rows[1].label
+    if not last:IsShown() then return end
+    local top, bottom = button:GetTop(), last:GetBottom()
+    if not (top and bottom) then return end
+    local overlap = top - (bottom - 8)
+    if overlap > 0.5 then
+      local p, rel, rp, x, y = button:GetPoint(1)
+      button:ClearAllPoints()
+      button:SetPoint(p, rel, rp, x, (y or 0) - overlap)
+    end
   end
   local function show(costText, profitText)
     rows[1].label:SetShown(costText ~= nil)
@@ -136,9 +145,11 @@ local function attach(frame)
   local function tick()
     local id, price, qty = itemOf(frame), unitPriceOf(frame), quantityOf(frame)
     local key = tostring(id) .. ":" .. tostring(price) .. ":" .. tostring(qty)
-    if key == lastKey then return end
-    lastKey = key
-    show(SellInfo.Values(id, price, qty))
+    if key ~= lastKey then
+      lastKey = key
+      show(SellInfo.Values(id, price, qty))
+    end
+    placeButton()
   end
   holder:SetScript("OnUpdate", function(_, dt)
     elapsed = elapsed + (dt or 0)
