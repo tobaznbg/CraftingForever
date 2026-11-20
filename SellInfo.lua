@@ -68,7 +68,12 @@ end
 
 local function attach(frame)
   if not frame or frame.m4SellInfo then return end
-  local fs = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  -- Own layer above Blizzard's inset frames (a text on the sell frame itself lies under them).
+  local holder = CreateFrame("Frame", nil, frame)
+  holder:SetAllPoints(frame)
+  holder:SetFrameStrata(frame:GetFrameStrata())
+  holder:SetFrameLevel(frame:GetFrameLevel() + 50)
+  local fs = holder:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
   fs:SetJustifyH("LEFT")
   fs:SetWidth(300)
   if frame.PostButton then
@@ -99,6 +104,7 @@ local function attach(frame)
     lastKey = key
     local ok, text = pcall(SellInfo.Text, id, price)
     fs:SetText(ok and text or "")
+    if ns.db then ns.db.sellInfoLast = { id = id, price = price, ok = ok, text = ok and text or tostring(text), t = time() } end
   end)
   frame:HookScript("OnHide", function() lastKey = nil; fs:SetText("") end)
 end
