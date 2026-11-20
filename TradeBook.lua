@@ -119,6 +119,10 @@ local function scrollTable(c, cols, top)
       end)
       row:SetScript("OnLeave", function() GameTooltip:Hide() end)
       row:SetScript("OnMouseUp", function(self, button)
+        if button == "RightButton" then
+          if self.itemID and self.ownUseMenu then ns.Safe(TradeBook.OwnUseMenu, self, self.itemID) end
+          return
+        end
         if button ~= "LeftButton" then return end
         if self.itemID and ns.NativeWindow.AltClick(self.itemID, self) then return end
         if self.onClick then ns.Safe(self.onClick) end
@@ -126,6 +130,7 @@ local function scrollTable(c, cols, top)
     end
     row.itemID = r.itemID
     row.onClick = r.onClick
+    row.ownUseMenu = r.ownUseMenu
     row.m4.icon:SetTexture(r.icon)
     for k = 1, #cols do row.m4[k]:SetText(r[k] or "") end
   end)
@@ -325,6 +330,7 @@ end
 local function shortGroup(name)
   if ns.Profit and name == ns.Profit.TRADE then return "Handel" end
   if ns.Profit and name == ns.Profit.FARMED then return "Beute" end
+  if ns.Profit and name == ns.Profit.OWN then return "Eigenbedarf" end
   return name
 end
 
@@ -352,6 +358,14 @@ local function areaFigures(g, items)
   end
   table.sort(sorted, function(a, b) return (a.profit or 0) > (b.profit or 0) end)
   for i = 1, math.min(5, #sorted) do top[i] = { sorted[i].name or ns.ItemName(sorted[i].itemId) or "?", signed(sorted[i].profit) } end
+  if g.name == P.OWN then
+    table.sort(sorted, function(a, b) return (a.spent or 0) > (b.spent or 0) end)
+    top = {}
+    for i = 1, math.min(5, #sorted) do top[i] = { sorted[i].name or ns.ItemName(sorted[i].itemId) or "?", RED .. "-" .. money(sorted[i].spent) .. "|r" } end
+    return { sub = "Eigenbedarf – für dich gekauft (Taschen, Werkzeuge, Verbrauchtes): Ausgaben, kein Handel",
+      topTitle = "Größte Ausgaben:", labels = { "Ausgaben", "Gekauft", "Ergebnis" },
+      values = { money(g.spent), (g.bought or 0) .. " Stück", signed(g.profit) }, top = top }
+  end
   if g.name == P.TRADE then
     return { sub = "Handel – im AH oder beim Händler gekauft und wieder verkauft", topTitle = "Größter Beitrag:",
       labels = { "Einkauf", "Verkauf", "Gebühren", "Marge", "Noch im Bestand", "Abgelaufen", "Gewinn" },
@@ -366,7 +380,8 @@ local function areaFigures(g, items)
       string.format("%d Stück · %s", g.stockUnits or 0, money(g.stockValue)), signed(g.profit) }, top = top }
 end
 
-local AREA_ICONS = { trade = "Interface\\Icons\\INV_Misc_Coin_02", farmed = "Interface\\Icons\\INV_Misc_Bag_10" }
+local AREA_ICONS = { trade = "Interface\\Icons\\INV_Misc_Coin_02", farmed = "Interface\\Icons\\INV_Misc_Bag_10",
+  own = "Interface\\Icons\\INV_Misc_Bag_08" }
 local PROFESSION_ICONS = {
   ["Lederverarbeitung"] = "Interface\\Icons\\Trade_LeatherWorking", ["Schneiderei"] = "Interface\\Icons\\Trade_Tailoring",
   ["Schmiedekunst"] = "Interface\\Icons\\Trade_BlackSmithing", ["Alchimie"] = "Interface\\Icons\\Trade_Alchemy",
@@ -382,6 +397,9 @@ local function head(layer) return ns.NativeWindow.CardHead(layer) end
 -- An item's result in the lists: the profit once something was sold (or lost on expiry); an item
 -- bought and not sold yet is no loss but stock: what it cost, grey ("Bestand 12g 50s").
 local function resultText(r)
+  if ns.Profit and r.prof == ns.Profit.OWN and (r.sold or 0) == 0 then
+    return RED .. "-" .. money(r.spent) .. "|r"
+  end
   local active = (r.sold or 0) > 0 or (r.expired or 0) > 0 or (r.cancelled or 0) > 0 or (r.profit or 0) ~= 0
   if not active and (r.stockUnits or 0) > 0 then
     return MUTED .. "Bestand " .. money(r.stockValue) .. "|r"
@@ -490,7 +508,8 @@ local function buildLedger(page)
     for _, r in ipairs(entry.items) do
       local value = entry.isLoot and money(r.revenue) or resultText(r)
       rows[#rows + 1] = { itemID = r.itemId, icon = iconOf(r.itemId), r.name or ns.ItemName(r.itemId) or "?",
-        (r.sold or 0) > 0 and tostring(r.sold) or (MUTED .. "–|r"), value, onClick = function() showItem(r, true) end }
+        (r.sold or 0) > 0 and tostring(r.sold) or (MUTED .. "–|r"), value, onClick = function() showItem(r, true) end,
+        ownUseMenu = r.prof == ns.Profit.TRADE or r.prof == ns.Profit.OWN }
     end
     area.SetItems(rows)
   end
@@ -542,7 +561,10 @@ local function buildLedger(page)
     for _, g in ipairs(report.groups) do if g.name == P.FARMED then ordered[#ordered + 1] = g end end
     -- gathering professions next to the loot, then the crafting professions
     for _, g in ipairs(report.groups) do if g.name ~= P.FARMED and P.IsFarmed(g.name) then ordered[#ordered + 1] = g end end
-    for _, g in ipairs(report.groups) do if g.name ~= P.TRADE and not P.IsFarmed(g.name) then ordered[#ordered + 1] = g end end
+    for _, g in ipairs(report.groups) do
+      if g.name ~= P.TRADE and g.name ~= P.OWN and not P.IsFarmed(g.name) then ordered[#ordered + 1] = g end
+    end
+    for _, g in ipairs(report.groups) do if g.name == P.OWN then ordered[#ordered + 1] = g end end
     local entries = { { key = "areas", header = "Bereiche" } }
     allItems = {}
     for _, g in ipairs(ordered) do
@@ -553,7 +575,7 @@ local function buildLedger(page)
         if isLoot then return (a.revenue or 0) > (b.revenue or 0) end
         return (a.profit or 0) > (b.profit or 0)
       end)
-      local icon = g.name == P.TRADE and AREA_ICONS.trade or (isLoot and AREA_ICONS.farmed)
+      local icon = g.name == P.TRADE and AREA_ICONS.trade or (g.name == P.OWN and AREA_ICONS.own) or (isLoot and AREA_ICONS.farmed)
         or PROFESSION_ICONS[g.name] or "Interface\\Icons\\INV_Misc_QuestionMark"
       entries[#entries + 1] = { key = g.name, areaEntry = true, name = shortGroup(g.name), icon = icon,
         value = signed(g.profit), figures = areaFigures(g, items), items = items, isLoot = isLoot }
@@ -1094,6 +1116,30 @@ local function create()
     build = buildAuctions, onShow = onTab("auctions", function(page) refreshPage(page); ns.Safe(TradeBook.CheckAuctions) end) })
   window:AddTab({ key = "gold", title = "Gold", icon = "Interface\\Icons\\INV_Misc_Coin_01",
     build = buildGold, onShow = onTab("gold") })
+end
+
+-- Right click on a trade / own use item: own use by hand, back to trade, or the automatic rule
+-- (Profit.SetOwnUse; the marks travel with the settings sync).
+function TradeBook.OwnUseMenu(owner, itemID)
+  local P = ns.Profit
+  local mark = P.OwnUseMark(itemID)
+  local function set(v)
+    P.SetOwnUse(itemID, v)
+    local tab = window and window.current and window.tabs[window.current]
+    if tab and tab.page and tab.page.Refresh then ns.Safe(tab.page.Refresh) end
+  end
+  if MenuUtil and MenuUtil.CreateContextMenu then
+    MenuUtil.CreateContextMenu(owner, function(_, root)
+      root:CreateTitle(ns.ItemName(itemID) or "Item")
+      root:CreateRadio("Eigenbedarf (Ausgabe)", function() return mark == true end, function() set(true) end)
+      root:CreateRadio("Handel (zum Weiterverkauf)", function() return mark == false end, function() set(false) end)
+      root:CreateRadio("Automatisch einordnen", function() return mark == nil end, function() set(nil) end)
+    end)
+  else
+    -- no menu API: toggle own use / trade
+    set(not (mark == true))
+    print("|cff33ccffm4:|r " .. (ns.ItemName(itemID) or "Item") .. ": " .. (mark == true and "Handel" or "Eigenbedarf"))
+  end
 end
 
 function TradeBook.Show()

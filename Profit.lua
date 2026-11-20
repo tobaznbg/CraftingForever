@@ -71,7 +71,31 @@ ns.Profit = Profit
 local UNKNOWN = "Unbekannt"
 local TRADE = "Handel (gekauft, verkauft)"
 local FARMED = "Gesammelt (Farm, Beute)"
-Profit.TRADE, Profit.FARMED = TRADE, FARMED
+-- Own use ("Eigenbedarf", decided 20 Nov 2026): bought for oneself, not to resell - an
+-- expense, not trade. An item counts as own use when
+--   1. marked by hand (ns.db.settings.ownUse[itemID] = true; false = always trade), else
+--   2. it was the tool of a craft (craft events with tool = itemID), else
+--   3. it was bought, never posted, sold or brought to a vendor, and no household character
+--      holds it any more (bags, bank, auctions): used up, equipped, eaten; only when every
+--      bank is known (heldCounts).
+local OWN = "Eigenbedarf"
+Profit.TRADE, Profit.FARMED, Profit.OWN = TRADE, FARMED, OWN
+
+local function ownMarks()
+  local s = ns.db and ns.db.settings
+  return s and s.ownUse or {}
+end
+
+-- Marks an item as own use (true), trade (false) or back to the automatic rules (nil); the
+-- settings travel with the state sync.
+function Profit.SetOwnUse(itemID, value)
+  if not (ns.db and itemID) then return end
+  ns.db.settings = ns.db.settings or {}
+  ns.db.settings.ownUse = ns.db.settings.ownUse or {}
+  ns.db.settings.ownUse[itemID] = value
+  if Profit.Invalidate then Profit.Invalidate() end
+end
+function Profit.OwnUseMark(itemID) return ownMarks()[itemID] end
 
 -- Character filter (the ledger window's choice): the figures count only this character's events;
 -- the pools (cost of goods) still run over the whole household. nil = every character.
@@ -194,6 +218,8 @@ local function replay(since)
   local other = {}      -- TRADE / FARMED -> itemID -> figures
   local everBought = {} -- itemID -> true
   local lost = {}
+  local traded = {}     -- itemID -> true: posted, sold, vendored, expired or cancelled once
+  local tools = {}      -- itemID -> true: the tool of a craft
   local function figures(itemID, group)
     local t = items
     if group then
@@ -220,6 +246,7 @@ local function replay(since)
         f.bought, f.spent = f.bought + u, f.spent + (e.c or 0)
       end
     elseif id and e.k == "craft" and u > 0 then
+      if e.tool then tools[e.tool] = true end
       local external, internal = 0, 0
       for _, g in ipairs(e.r or {}) do
         if g.i and g.n then
@@ -237,12 +264,14 @@ local function replay(since)
         f.crafted, f.materials = f.crafted + u, f.materials + external
       end
     elseif id and e.k == "post" then
+      traded[id] = true
       if e.dep and u > 0 then
         local d = depo[id] or { u = 0, dep = 0 }
         d.u, d.dep = d.u + u, d.dep + e.dep
         depo[id] = d
       end
     elseif id and (e.k == "sale" or e.k == "vendor") and u > 0 then
+      traded[id] = true
       local k, cv = take(crafted[id], u)
       local kb, bv = take(bought[id], u - k)
       local function book(n, group, cost, value)
@@ -271,6 +300,7 @@ local function replay(since)
         book(rest, not maker and farmGroup(id) or nil, 0, 0)
       end
     elseif id and (e.k == "expired" or e.k == "cancelled") then
+      traded[id] = true
       local d = depo[id]
       local amount = d and d.u > 0 and d.dep / d.u * u or 0
       if amount > 0 then lost[e] = amount end
@@ -285,8 +315,22 @@ local function replay(since)
       end
     end
   end
-  return items, crafted, profOf, other, bought, lost
+  return items, crafted, profOf, other, bought, lost, { traded = traded, tools = tools, everBought = everBought }
 end
+
+-- Whether a bought item is own use (see OWN); pool = its bought pool (units neither sold nor
+-- used in crafts), held = heldCounts(true) or nil.
+local function isOwnUse(id, act, held, pool)
+  local mark = ownMarks()[id]
+  if mark ~= nil then return mark end
+  if act and act.tools[id] then return true end
+  if act and act.everBought[id] and not act.traded[id] and pool and pool.q > 0
+      and held and (held[id] or 0) == 0 then
+    return true
+  end
+  return false
+end
+Profit.IsOwnUse = isOwnUse
 
 local function round(x) return math.floor(x + 0.5) end
 
@@ -331,18 +375,28 @@ function Profit.Invalidate() cached = nil end
 -- for bought items that were sold, came back or are still there (stock = bought pool, also
 -- when nothing happened in the period), FARMED rows without stock.
 local function itemRows(since, replayed)
-  local items, crafted, profOf, other, bought = unpack(replayed or { replay(since) })
+  local items, crafted, profOf, other, bought, _, act = unpack(replayed or { replay(since) })
   local rows = {}
+  local held = Profit.HeldCounts and Profit.HeldCounts(true) -- defined further down
   local trade = other[TRADE] or {}
   for id, p in pairs(bought) do
     if p.q > 0 and not trade[id] then trade[id] = newFigures() end
   end
   other[TRADE] = next(trade) and trade or nil
-  for group, list in pairs(other) do
+  for area, list in pairs(other) do
     for id, f in pairs(list) do
+      local group = area
       local p = group == TRADE and bought[id] or NONE
-      -- Bought material that went into crafts (none left, nothing sold) is no trade.
-      if group ~= TRADE or p.q > 0 or f.sold > 0 or f.expired > 0 or f.cancelled > 0 then
+      if group == TRADE and isOwnUse(id, act, held, bought[id]) then
+        -- own use: the purchase is an expense, no stock
+        f.materials = f.spent
+        group, p = OWN, NONE
+      end
+      -- Bought material that went into crafts (none left, nothing sold) is no trade; own use
+      -- only in the period it was bought.
+      local show = group ~= TRADE or p.q > 0 or f.sold > 0 or f.expired > 0 or f.cancelled > 0
+      if group == OWN and (f.spent or 0) == 0 and f.sold == 0 then show = false end
+      if show then
         table.insert(rows, row(id, group, f, p))
       end
     end
@@ -437,13 +491,17 @@ local function heldCounts(household)
   if not (inv and inv.bagsT and inv.bankT) then return nil end
   return held
 end
+Profit.HeldCounts = heldCounts
 
 -- Stock now from the pools: crafted and bought units of an item together, at most what the
 -- character holds (items used, equipped, destroyed or given away leave the stock).
-local function stock(crafted, bought)
+local function stock(crafted, bought, act)
   local by, list = {}, {}
+  local households = act and heldCounts(true)
   local function add(id, p, source)
     if not p or p.q <= 0 then return end
+    -- own use (tools, marked, used up) is no stock
+    if source == "gekauft" and act and isOwnUse(id, act, households, p) then return end
     local s = by[id]
     if not s then
       s = { itemId = id, name = ns.ItemName and ns.ItemName(id) or nil, units = 0, cost = 0 }
@@ -505,8 +563,8 @@ local function stock(crafted, bought)
 end
 
 function Profit.Stock()
-  local _, crafted, _, _, bought = replayAll()
-  return stock(crafted, bought)
+  local _, crafted, _, _, bought, _, act = replayAll()
+  return stock(crafted, bought, act)
 end
 
 -- Stock snapshot for the server's Discord message on a strong book gain (m4d stockalert.go):
@@ -566,7 +624,7 @@ function Profit.Report(since)
     table.insert(items[r.prof], r)
   end
   for _, list in pairs(items) do table.sort(list, byProfit) end
-  local list, t = stock(replayed[2], replayed[5])
+  local list, t = stock(replayed[2], replayed[5], replayed[7])
   return { groups = groups, items = items, totals = totals(groups), stock = list, stockTotals = t }
 end
 

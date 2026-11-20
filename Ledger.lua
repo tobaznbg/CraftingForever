@@ -376,7 +376,8 @@ local function finishToolCraft()
     local gone = n - (after[id] or 0)
     if gone > 0 and id ~= p.itemID and id ~= p.tool then table.insert(reagents, { i = id, n = gone }) end
   end
-  local e = { k = "craft", i = p.itemID, u = p.count, x = 1, src = "tool", prof = p.prof }
+  -- tool: the item used (Profit counts it as own use, not as stock to sell)
+  local e = { k = "craft", i = p.itemID, u = p.count, x = 1, src = "tool", prof = p.prof, tool = p.tool }
   addReagents(e, reagents)
   add(e)
 end
