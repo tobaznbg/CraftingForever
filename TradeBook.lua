@@ -452,8 +452,7 @@ local function buildLedger(page)
     local okB, back = pcall(CreateFrame, "Button", nil, il, "UIPanelButtonTemplate")
     if not okB then back = CreateFrame("Button", nil, il) end
     back:SetSize(76, 22)
-    back:SetPoint("RIGHT", il, "RIGHT", -16, 0)
-    back:SetPoint("TOP", item.Name, "TOP", 0, 4)
+    back:SetPoint("TOPRIGHT", il, "TOPRIGHT", -16, -27) -- on the name's line (icon 44 px at -22)
     back:SetText("‹ Zurück")
     -- the name and the line below end before the button
     item.Name:ClearAllPoints()
