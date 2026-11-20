@@ -749,6 +749,8 @@ end
 local function createProducts()
   local NW = ns.NativeWindow
   productsWindow = NW.New({ name = "M4CompanionProducts", title = "Alle Produkte", icon = "Interface\\Icons\\INV_Misc_Coin_02" })
+  productsWindow.frame:HookScript("OnShow", function() Products.SyncTab() end)
+  productsWindow.frame:HookScript("OnHide", function() Products.SyncTab() end)
   productsWindow:AddTab({ key = "products", title = "Alle Produkte", hidden = true, build = function(page)
     productsSplit = NW.Split(page, {
       onSelect = showProduct,
@@ -785,7 +787,16 @@ function Products.Show(pid)
   productsWindow:SelectTab("products")
 end
 
--- The button: closes the window, unless it shows another profession (then it switches).
+-- The tab under the profession window looks selected while the window is open.
+function Products.SyncTab()
+  local tab = Products.tab
+  if not tab then return end
+  local open = productsWindow and productsWindow.frame:IsShown()
+  local fn = open and PanelTemplates_SelectTab or PanelTemplates_DeselectTab
+  if fn then pcall(fn, tab) end
+end
+
+-- The tab: closes the window, unless it shows another profession (then it switches).
 function Products.Toggle(pid)
   pid = pid or openProfessionID()
   if productsWindow and productsWindow.frame:IsShown() and (not pid or pid == productsPID) then
@@ -973,18 +984,16 @@ local function attachProfessions()
   profTrace("frame", "list=" .. type(list) .. " form=" .. type(form))
   local layer = CreateFrame("Frame", nil, page)
   page.m4Info = layer
-  -- "Alle Produkte" above Blizzard's "Alle erstellen" (bottom left of the recipe card)
-  local okB, btn = pcall(CreateFrame, "Button", nil, page, "UIPanelButtonTemplate")
-  if okB and btn then
-    btn:SetSize(112, 22)
-    btn:SetText("Alle Produkte")
-    local createAll = rawget(page, "CreateAllButton")
-    if type(createAll) == "table" then
-      btn:SetPoint("BOTTOMLEFT", createAll, "TOPLEFT", 0, 8)
-    elseif type(form) == "table" then
-      btn:SetPoint("BOTTOMLEFT", form, "BOTTOMLEFT", 10, 40)
-    end
-    btn:SetScript("OnClick", function() ns.Safe(Products.Toggle) end)
+  -- "Alle Produkte": a tab under the profession window (Blizzard's tab template), like the
+  -- trade book's tab under the auction house was; shown selected while the window is open
+  local okT, tab = pcall(CreateFrame, "Button", "M4CompanionProductsTab", pf, "PanelTabButtonTemplate")
+  if okT and tab then
+    tab:SetText("Alle Produkte")
+    if PanelTemplates_TabResize then pcall(PanelTemplates_TabResize, tab, 0) end
+    tab:SetPoint("TOPLEFT", pf, "BOTTOMLEFT", 12, 2)
+    Products.tab = tab
+    Products.SyncTab()
+    tab:SetScript("OnClick", function() ns.Safe(Products.Toggle) end)
   end
   local elapsed = 0
   layer:SetScript("OnUpdate", function(_, dt)
