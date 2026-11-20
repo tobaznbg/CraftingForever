@@ -39,6 +39,7 @@ ItemDetail.lua
 Ledger.lua
 Sync.lua
 Profit.lua
+SellInfo.lua
 AHTable.lua
 Invest.lua
 Trends.lua
