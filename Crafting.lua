@@ -645,7 +645,8 @@ local function updateForm(form)
     if i == 3 then
       form.m4Line:ClearAllPoints()
       form.m4Line:SetPoint("BOTTOMLEFT", row.label, "TOPLEFT", 0, 3)
-      form.m4Line:SetPoint("RIGHT", form, "RIGHT", -RIGHT_EDGE, 0)
+      local lx, fr = row.label:GetLeft(), form:GetRight()
+      form.m4Line:SetWidth(lx and fr and math.max(1, fr - RIGHT_EDGE - lx) or 200)
       form.m4Line:SetShown(values ~= nil)
     end
     local _, fy = form:GetCenter()
