@@ -881,10 +881,10 @@ if ns.AHTable and ns.AHTable.Add then
       { key = "units", title = "Stück", width = 56, filter = "num", fmt = function(e) return units(e.units) end },
       { key = "source", title = "Herkunft", width = 120, align = "LEFT", muted = true, optional = true,
         fmt = function(e) return e.source or "" end },
-      { key = "unitCost", title = "Einstand/Stk", width = 96, filter = "money", fmt = function(e) return money(e.unitCost) end },
+      { key = "unitCost", title = "Einkauf/Stk", width = 96, filter = "money", fmt = function(e) return money(e.unitCost) end },
       { key = "marketUnit", title = "AH jetzt/Stk", width = 100, filter = "money", optional = true,
         fmt = function(e) return moneyOr(e.marketUnit) end },
-      { key = "cost", title = "Einstand", width = 96, filter = "money", muted = true, fmt = function(e) return money(e.cost) end },
+      { key = "cost", title = "Einkauf", width = 96, filter = "money", muted = true, fmt = function(e) return money(e.cost) end },
       { key = "sell", title = "Erlös netto", width = 100, filter = "money", fmt = function(e) return moneyOr(e.sell) end },
       { key = "gain", title = "Buchgewinn", width = 106, filter = "money", fmt = function(e) return signed(e.gain) end },
       { key = "gainPct", title = "Buchgewinn %", width = 100, filter = "pct", fmt = function(e) return signedPct(e.gainPct) end },
@@ -924,7 +924,7 @@ PAGES.ledger = function(p)
   local figPeriod = figureCard(p, { { "Umsatz (brutto)", 104 }, { "Einkauf", 100 }, { "AH-Gebühr", 90 },
     { "Einstellgeb. verloren", 112 }, { "Ergebnis", 104 } })
   figPeriod:SetPoint("TOPLEFT", PAD, y)
-  local figStock = figureCard(p, { { "Bestand (jetzt)", 80 }, { "Einstand", 96 }, { "Erlös netto", 98 },
+  local figStock = figureCard(p, { { "Bestand (jetzt)", 80 }, { "Einkauf", 96 }, { "Erlös netto", 98 },
     { "Buchgewinn", INNER_W - GAP - 510 - 274 } })
   figStock:SetPoint("TOPLEFT", figPeriod, "TOPRIGHT", GAP, 0)
 
@@ -932,7 +932,7 @@ PAGES.ledger = function(p)
   local plH = 250
   local pl = grid(p, INNER_W, plH, {
     { "Bereich / Item", 0, nil, true }, { "herg./gek.", 66, "RIGHT" }, { "verkauft", 60, "RIGHT" },
-    { "Ø Verkauf", 88, "RIGHT" }, { "Einstand/Stk", 88, "RIGHT" }, { "Gewinn/Stk", 88, "RIGHT" },
+    { "Ø Verkauf", 88, "RIGHT" }, { "Einkauf/Stk", 88, "RIGHT" }, { "Gewinn/Stk", 88, "RIGHT" },
     { "Ergebnis", 100, "RIGHT" }, { "abgel./abgebr.", 84, "RIGHT" }, { "Gebühr verloren", 96, "RIGHT" } },
     { scroll = true })
   pl:SetPoint("TOPLEFT", PAD, y)
@@ -1064,7 +1064,7 @@ PAGES.ledger = function(p)
       trades:SetRows(rows)
     elseif mode == "stock" then
       label:SetText(Style.HEAD .. "Bestand|r " .. Style.MUTED .. "(noch nicht verkauft)|r")
-      summary:SetText("Einstand: Kaufpreis bzw. gekauftes Material; AH jetzt: billigstes Angebot gerade")
+      summary:SetText("Einkauf: Kaufpreis bzw. gekauftes Material; AH jetzt: billigstes Angebot gerade")
       embed(stockList, "Stock")
     else
       label:SetText(Style.HEAD .. "Letzte Vorgänge|r")

@@ -759,11 +759,11 @@ render = function()
   -- 3b. What one unit cost the player (ns.Profit.UnitCost) and the room left to undercut.
   local cost = nil
   if ns.Profit and ns.Profit.UnitCost then cost = ns.Profit.UnitCost(itemID) end
-  section("Einstand")
+  section("Einkauf")
   if not cost then
-    line("Einstand / Stk.", Style.MUTED .. "unbekannt|r")
+    line("Einkauf / Stk.", Style.MUTED .. "unbekannt|r")
   else
-    line("Einstand / Stk.", money(math.floor(cost + 0.5)))
+    line("Einkauf / Stk.", money(math.floor(cost + 0.5)))
     line("Minimalpreis", money(ns.Profit.BreakEven(cost)))
     local other
     if fresh and fresh.state == "done" then

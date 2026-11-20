@@ -386,7 +386,7 @@ local function detail(e, count)
     { string.format("%d× herstellen", count), string.format("ergibt %g Stück", produced) },
     { "Material gesamt", money(total) },
     { "davon noch kaufen", "|cffffb547" .. money(buyTotal) .. "|r" },
-    { "Einstand pro Stück", money(produced > 0 and total / produced or nil) },
+    { "Einkauf pro Stück", money(produced > 0 and total / produced or nil) },
     { "Preis jetzt", e.nowPrice and (e.unsure and ("|cffffb547" .. money(e.nowPrice) .. " (unsicher)|r")
       or money(e.nowPrice)) or "nicht im Angebot" },
     { "Verkauf netto", money(value) },
@@ -426,7 +426,7 @@ ns.AHTable.Add({
     { key = "cost", title = "Material", width = 90, muted = true, filter = "money",
       fmt = function(e) return money(e.cost) end },
     -- Per unit, next to each other: what one costs to make and what it is offered at.
-    { key = "unitCost", title = "Einstand", width = 85, muted = true, filter = "money", optional = true,
+    { key = "unitCost", title = "Einkauf", width = 85, muted = true, filter = "money", optional = true,
       fmt = function(e) return money(e.unitCost) end },
     { key = "nowPrice", title = "Preis jetzt", width = 90, filter = "money", optional = true,
       fmt = function(e)

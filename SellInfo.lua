@@ -138,7 +138,7 @@ local function attach(frame)
   holder:SetAllPoints(frame)
   holder:SetFrameStrata(frame:GetFrameStrata())
   holder:SetFrameLevel(frame:GetFrameLevel() + 50)
-  local rows = { newRow(holder, frame, "Einstand", 1), newRow(holder, frame, "Gewinn", 2) }
+  local rows = { newRow(holder, frame, "Einkauf", 1), newRow(holder, frame, "Gewinn", 2) }
   frame.m4SellInfo = holder
   -- Layout check: what "Gesamtpreis" consists of in this client (saved variables).
   if ns.db and frame.TotalPrice then
@@ -258,7 +258,7 @@ function SellInfo.AuctionText(id, unit, qty)
   qty = qty or 1
   local profit = math.floor((unit * (1 - CUT) - cost) * qty)
   local short = function(c) return ns.FormatMoney(c, true) end
-  return "|cff999999Einstand " .. short(math.floor(cost + 0.5)) .. "|r\n"
+  return "|cff999999Einkauf " .. short(math.floor(cost + 0.5)) .. "|r\n"
     .. (profit >= 0 and ("|cff5fd38dGewinn +" .. short(profit)) or ("|cffff6b6bGewinn -" .. short(-profit))) .. "|r"
 end
 

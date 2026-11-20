@@ -37,7 +37,7 @@ local mineView, checkButton -- mode "Auktionen" (createMineView)
 local MINE_ROW = 44 -- name, status line, cost line
 local RED, ORANGE = "|cffff6b6b", "|cffffb547"
 -- Columns of the mode "Auktionen" right of the item: own price, cheapest of others, cancel button.
-local MINE_COLS = { { "Einstand", 60 }, { "Mein Preis", 64 }, { "Billigst fremd", 70 }, { "", 66 } }
+local MINE_COLS = { { "Einkauf", 60 }, { "Mein Preis", 64 }, { "Billigst fremd", 70 }, { "", 66 } }
 
 local api = C_AuctionHouse or {}
 
@@ -427,14 +427,14 @@ function Selling.MineRoom(e)
   local cost, source
   if ns.Profit and ns.Profit.UnitCost then cost, source = ns.Profit.UnitCost(e.itemID) end
   if not cost then
-    return "\n" .. MUTED .. "Einstand unbekannt – kein Kauf erfasst (Details: eintragen)|r"
+    return "\n" .. MUTED .. "Einkauf unbekannt – kein Kauf erfasst (Details: eintragen)|r"
   end
-  local text = "\n" .. MUTED .. "Einstand " .. source .. "|r"
+  local text = "\n" .. MUTED .. "Einkauf " .. source .. "|r"
   local target = e.foreign and (e.foreign - 1) or e.unit
   if target then
     local room = math.floor(target * (1 - 0.05) - cost)
     text = text .. MUTED .. "  ·  |r" .. (room >= 0 and (GREEN .. "Luft " .. money(room))
-      or (RED .. "unter Einstand " .. money(-room))) .. "|r"
+      or (RED .. "unter Einkauf " .. money(-room))) .. "|r"
       .. MUTED .. "  ·  ab " .. money(ns.Profit.BreakEven(cost)) .. " ohne Verlust|r"
   end
   return text
