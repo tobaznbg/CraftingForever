@@ -256,7 +256,9 @@ local function smallButton(parent, text, width, onClick)
 end
 
 -- The card: head (item, count with -/+ and remove), the reagent table, the summary.
-local COLS = { { "Brauche", 168 }, { "Habe", 208 }, { "Fehlt", 248 } }
+-- Columns from the right edge (right end of each), so they never run into the cost column.
+local COST_W = 86
+local COLS = { { "Brauche", COST_W + 80 }, { "Habe", COST_W + 44 }, { "Fehlt", COST_W + 12 } }
 local function card(c)
   local NW = ns.NativeWindow
   local v = NW.CardHead(c)
@@ -290,7 +292,7 @@ local function card(c)
   v.colHeads = {}
   for i, col in ipairs(COLS) do
     local h = c:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    h:SetPoint("RIGHT", v.Head, "LEFT", col[2], 0)
+    h:SetPoint("RIGHT", c, "RIGHT", -RIGHT_EDGE - col[2], 0)
     h:SetPoint("TOP", v.Head, "TOP", 0, 0)
     h:SetText(col[1])
     v.colHeads[i] = h
@@ -314,13 +316,13 @@ local function card(c)
     row.Icon:SetPoint("LEFT", 2, 0)
     row.Name = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     row.Name:SetPoint("LEFT", row.Icon, "RIGHT", 5, 0)
-    row.Name:SetWidth(108)
+    row.Name:SetPoint("RIGHT", row, "RIGHT", -(COLS[1][2] + 4 + 46), 0) -- ends before "Brauche"
     row.Name:SetJustifyH("LEFT")
     row.Name:SetWordWrap(false)
     row.cells = {}
     for j, col in ipairs(COLS) do
       local fs = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-      fs:SetPoint("RIGHT", row, "LEFT", col[2] + 2, 0)
+      fs:SetPoint("RIGHT", row, "RIGHT", -(col[2] + 4), 0)
       fs:SetJustifyH("RIGHT")
       row.cells[j] = fs
     end
@@ -350,7 +352,7 @@ local function card(c)
   end
   v.more = c:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
   v.sum = {}
-  for i, text in ipairs({ "Material gesamt", "Noch zu kaufen", "Erlös (nach Gebühr)", "Gewinn" }) do
+  for i, text in ipairs({ "Material gesamt", "Noch zu kaufen" }) do
     local l = c:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     l:SetText(text)
     local val = c:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
@@ -359,9 +361,6 @@ local function card(c)
     val:SetJustifyH("RIGHT")
     v.sum[i] = { label = l, value = val }
   end
-  v.Line = c:CreateTexture(nil, "ARTWORK")
-  v.Line:SetColorTexture(1, 0.82, 0, 0.25)
-  v.Line:SetHeight(1)
   return v
 end
 
@@ -370,7 +369,7 @@ local function show(entry, c)
   local v = c.m4Shopping
   selected = entry
   local shown = entry ~= nil and not entry.header
-  for _, part in ipairs({ v.Icon, v.Ring, v.Name, v.Sub, v.Head, v.costHead, v.Line, v.more }) do part:SetShown(shown) end
+  for _, part in ipairs({ v.Icon, v.Ring, v.Name, v.Sub, v.Head, v.costHead, v.more }) do part:SetShown(shown) end
   for _, h in ipairs(v.colHeads) do h:SetShown(shown) end
   for _, s in ipairs(v.sum) do s.label:SetShown(shown); s.value:SetShown(shown) end
   for _, row in ipairs(v.rows) do row:Hide(); row.line = nil end
@@ -427,23 +426,19 @@ local function show(entry, c)
     money(plan.cost),
     plan.toBuy > 0 and (money(plan.toBuy) .. (plan.missing > 0 and (RED .. " + " .. plan.missing .. " ohne Preis|r") or ""))
       or (GREEN .. "nichts – alles da|r"),
-    plan.revenue > 0 and money(plan.revenue) or "–",
-    plan.revenue > 0 and ((plan.revenue - plan.cost) >= 0 and (GREEN .. "+" .. money(plan.revenue - plan.cost) .. "|r")
-      or (RED .. "-" .. money(plan.cost - plan.revenue) .. "|r")) or "–",
   }
   for i, s in ipairs(v.sum) do
     s.label:ClearAllPoints()
-    s.label:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 2, -14 - (i - 1) * 14 - (i == #v.sum and 7 or 0))
+    s.label:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 2, -14 - (i - 1) * 14)
     s.value:SetText(values[i])
   end
-  v.Line:ClearAllPoints()
-  v.Line:SetPoint("BOTTOMLEFT", v.sum[#v.sum].label, "TOPLEFT", 0, 3)
-  v.Line:SetPoint("RIGHT", c, "RIGHT", -RIGHT_EDGE + 2, 0)
 end
 
 local function create()
   local NW = ns.NativeWindow
-  window = NW.New({ name = "M4CompanionShoppingList", title = "Einkaufsliste", icon = "Interface\\Icons\\INV_Misc_Note_02" })
+  -- wider than the profession window: room for the reagent names next to four columns
+  window = NW.New({ name = "M4CompanionShoppingList", title = "Einkaufsliste", icon = "Interface\\Icons\\INV_Misc_Note_02",
+    width = 760 })
   window:AddTab({ key = "list", title = "Einkaufsliste", hidden = true, build = function(page)
     split = NW.Split(page, { onSelect = show })
   end, onShow = function() refresh() end })
