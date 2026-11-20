@@ -30,7 +30,7 @@ local docked   -- anchor frame while docked at the auction house, nil as a windo
 local lines, sections = {}, {}
 local chart
 local live     -- { itemID, state = "searching"|"done"|"failed", offers, t } of the search on opening
-local skin = "m4" -- "m4" (own flat look) or "blizzard" (native look, pilot: AH sell tab, SellInfo.lua)
+local skin = "blizzard" -- "blizzard" (native look, default) or "m4" (own flat look)
 local GOLD_RGB = { 1, 0.82, 0 }
 local MEDIAN_WINDOW = 24 * 3600 -- the chart's median line: median of the hourly cheapest of the last 24 h
 
@@ -956,7 +956,7 @@ place = function(anchor)
   anchor = anchor or dockAnchor()
   docked = anchor
   frame:ClearAllPoints()
-  if anchor and skin == "blizzard" then
+  if anchor and skin == "blizzard" and anchor == AuctionHouseFrame then
     -- right on the auction house frame's edge, same height: reads as part of it
     frame:SetPoint("TOPLEFT", anchor, "TOPRIGHT", -2, 0)
     frame:SetPoint("BOTTOMLEFT", anchor, "BOTTOMRIGHT", -2, 0)
@@ -1116,7 +1116,7 @@ function Detail.Show(item, opts)
   opts = opts or {}
   if not frame then create() end
   itemID, origin = id, opts.origin
-  skin = opts.skin or "m4"
+  skin = opts.skin or "blizzard" -- the native look everywhere (the own look stays selectable)
   applySkin()
   place(opts.anchor)
   frame:Show()
