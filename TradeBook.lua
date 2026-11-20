@@ -126,39 +126,61 @@ local function buildOverview(page, w)
   stockLine:SetPoint("TOPLEFT", stockBar, "BOTTOMLEFT", 2, -12)
   stockLine:SetText("7 Items  ·  11 Stück  ·  wenn alles zum Marktwert verkauft wird")
 
-  -- 3. three tall cards
-  local cards = {
-    { title = "Beste Items", atlas = "Profession-overview-card-generic-Cooking",
-      lines = { "Stiefel des Nachtschleichers", "|cff5fd38d+9g 12s|r", "Muster: Robe der Leere", "|cff5fd38d+4g 80s|r",
-        "Leichtes Leder", "|cff5fd38d+2g 05s|r" },
-      slot = { "Interface\\Icons\\INV_Boots_08", "Stiefel des Nachtsch…", "bestes Item" } },
-    { title = "Schlechteste Items", atlas = "Profession-overview-card-generic-Fishing",
-      lines = { "Hose des Nachtschleichers", "|cffff6b6b-1g 10s|r", "Tückische Lederstulpen", "|cffff6b6b-42s|r",
-        "Abgefangene Kiste", "|cffff6b6b-6s 99c|r" },
-      slot = { "Interface\\Icons\\INV_Pants_07", "Hose des Nachtsch…", "schlechtestes Item" } },
-    { title = "Auktionen", atlas = "Profession-overview-card-generic-FirstAid",
-      lines = { "Laufend", "12", "Unterboten", "|cffff6b6b3|r", "Abgelaufen", "5 (Gebühr 22s)" },
-      slot = { "Interface\\Icons\\INV_Hammer_15", "Auktionen", "12 laufend" } },
-  }
-  local prev = stock
-  for i, def in ipairs(cards) do
-    local c = NW.TallCard(w, page, i, def.atlas, i == 1 and stock or prev)
-    c.Title:SetText(def.title)
-    for k = 1, #def.lines, 2 do
-      local row = (k + 1) / 2
-      local l = c:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-      l:SetPoint("TOPLEFT", 20, -50 - (row - 1) * 34)
-      l:SetWidth(185)
-      l:SetJustifyH("LEFT")
-      l:SetText(def.lines[k])
-      local v = c:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-      v:SetPoint("TOPLEFT", l, "BOTTOMLEFT", 0, -2)
-      v:SetText(def.lines[k + 1])
-    end
-    local slot = NW.Slot(c, def.slot[1], def.slot[2], def.slot[3])
-    slot:SetPoint("BOTTOMLEFT", 20, 25)
-    prev = c
+  -- 3. running auctions: one card over the width of the three tall ones
+  local auc = CreateFrame("Frame", nil, page)
+  auc:SetPoint("TOPLEFT", stock, "BOTTOMLEFT", 0, 4)
+  auc:SetSize(664, 275)
+  local aucBg = auc:CreateTexture(nil, "BACKGROUND")
+  aucBg:SetAllPoints()
+  aucBg:SetAtlas("Profession-overview-Card")
+  auc.Title = auc:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+  auc.Title:SetPoint("TOPLEFT", 20, -16)
+  auc.Title:SetText("Laufende Auktionen")
+  auc.Info = auc:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+  auc.Info:SetPoint("TOPRIGHT", -20, -18)
+  -- column heads like Blizzard's auction lists
+  local COLS = { { "Gegenstand", 20, "LEFT" }, { "Preis", 430, "RIGHT" }, { "Status", 560, "RIGHT" }, { "Zeit", 640, "RIGHT" } }
+  for _, col in ipairs(COLS) do
+    local h = auc:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    if col[3] == "LEFT" then h:SetPoint("TOPLEFT", col[2], -42) else h:SetPoint("TOPRIGHT", auc, "TOPLEFT", col[2], -42) end
+    h:SetText(col[1])
   end
+  local rule = auc:CreateTexture(nil, "ARTWORK")
+  rule:SetColorTexture(1, 0.82, 0, 0.25)
+  rule:SetHeight(1)
+  rule:SetPoint("TOPLEFT", 20, -56)
+  rule:SetPoint("TOPRIGHT", -24, -56)
+  local EXAMPLE_AUCTIONS = {
+    { icon = "Interface\\Icons\\INV_Boots_08", name = "Stiefel des Nachtschleichers", qty = 3, price = "1g 05s", status = "bester Preis", best = true, left = "23 h" },
+    { icon = "Interface\\Icons\\INV_Scroll_03", name = "Muster: Rote Magiestoffschultern", qty = 1, price = "17s 50c", status = "unterboten 1c", left = "21 h" },
+    { icon = "Interface\\Icons\\INV_Belt_03", name = "Zornprankengürtel des arkanen Zorns", qty = 1, price = "78s 67c", status = "bester Preis", best = true, left = "11 h" },
+    { icon = "Interface\\Icons\\INV_Misc_LeatherScrap_03", name = "Leichtes Leder", qty = 20, price = "4s 32c", status = "unterboten 12c", left = "8 h" },
+    { icon = "Interface\\Icons\\INV_Crate_01", name = "Abgefangene Kiste: Blühende Kräuter", qty = 1, price = "1s 00c", status = "allein im AH", left = "2 h" },
+  }
+  local ROW_H = 22
+  for i, a in ipairs(EXAMPLE_AUCTIONS) do
+    local y = -62 - (i - 1) * ROW_H
+    local icon = auc:CreateTexture(nil, "ARTWORK")
+    icon:SetSize(18, 18)
+    icon:SetPoint("TOPLEFT", 20, y)
+    icon:SetTexture(a.icon)
+    local name = auc:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    name:SetPoint("LEFT", icon, "RIGHT", 6, 0)
+    name:SetWidth(300)
+    name:SetJustifyH("LEFT")
+    name:SetWordWrap(false)
+    name:SetText(a.name .. (a.qty > 1 and ("  |cff999999" .. a.qty .. "×|r") or ""))
+    local function cell(x, text)
+      local fs = auc:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+      fs:SetPoint("RIGHT", auc, "TOPLEFT", x, y - 9)
+      fs:SetJustifyH("RIGHT")
+      fs:SetText(text)
+    end
+    cell(430, a.price)
+    cell(560, a.best and ("|cff5fd38d" .. a.status .. "|r") or (a.status:find("unterboten") and ("|cffff6b6b" .. a.status .. "|r") or ("|cff999999" .. a.status .. "|r")))
+    cell(640, "|cff999999" .. a.left .. "|r")
+  end
+  auc.Info:SetText(#EXAMPLE_AUCTIONS .. " Auktionen  ·  |cffff6b6b2 unterboten|r")
 
   function page.Refresh()
     local label
