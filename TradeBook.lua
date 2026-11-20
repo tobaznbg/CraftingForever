@@ -331,3 +331,45 @@ if ns.On then
     if C_Timer then C_Timer.After(0.5, function() ns.Safe(TradeBook.Probe) end) end
   end)
 end
+
+-- Probe 2: the profession overview page ("Berufe", ProfessionsFrame.BookPage), two levels deep.
+local function describe(f, depth, out, prefix)
+  if type(f) ~= "table" or not f.GetObjectType then return end
+  local w, h = f:GetWidth() or 0, f:GetHeight() or 0
+  local p, rel, rp, x, y = f:GetPoint(1)
+  out[#out + 1] = string.format("%s%s %s %.0fx%.0f @%s %s %.0f %.0f", prefix, f:GetObjectType(), tostring(f:GetName() or "-"),
+    w, h, tostring(p), tostring(rp), x or 0, y or 0)
+  if f.GetRegions then
+    for _, r in ipairs({ f:GetRegions() }) do
+      local t = r:GetObjectType()
+      if t == "Texture" then
+        local layer, sub = r:GetDrawLayer()
+        local rp1, _, rrp, rx, ry = r:GetPoint(1)
+        out[#out + 1] = string.format("%s  tex %s %s/%s %.0fx%.0f @%s %s %.0f %.0f", prefix,
+          tostring((r.GetAtlas and r:GetAtlas()) or r:GetTexture()), tostring(layer), tostring(sub),
+          r:GetWidth() or 0, r:GetHeight() or 0, tostring(rp1), tostring(rrp), rx or 0, ry or 0)
+      elseif t == "FontString" then
+        local fo = r:GetFontObject()
+        out[#out + 1] = string.format("%s  text %q font=%s", prefix, tostring(r:GetText()), tostring(fo and fo:GetName()))
+      end
+    end
+  end
+  if depth > 0 and f.GetChildren then
+    for _, c in ipairs({ f:GetChildren() }) do describe(c, depth - 1, out, prefix .. "    ") end
+  end
+end
+
+function TradeBook.ProbeBook()
+  local pf = rawget(_G, "ProfessionsFrame")
+  local book = type(pf) == "table" and rawget(pf, "BookPage")
+  if type(book) ~= "table" or not ns.db then return end
+  local out = {}
+  describe(book, 3, out, "")
+  ns.db.tradeBookProbe2 = { t = time(), lines = out }
+end
+
+if ns.On then
+  ns.On("TRADE_SKILL_SHOW", function()
+    if C_Timer then C_Timer.After(1, function() ns.Safe(TradeBook.ProbeBook) end) end
+  end)
+end
