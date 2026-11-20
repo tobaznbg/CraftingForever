@@ -494,6 +494,9 @@ local MIN_PROFIT, MIN_DEMAND, DEMAND_CAP = 500, 1, 20
 
 -- Gold coins of a recipe that pays (profession window and "Alle Produkte"): one below 2 gold
 -- profit per craft, two up to 10 gold, three above; none without profit.
+-- Coins deep orange: the product is also in high demand ("hoch" and up, Item.DEMAND_LEVELS).
+function ns.CoinHot(demand) return (demand or 0) >= 5 end
+
 function ns.CoinCount(profit)
   if not profit or profit <= 0 then return 0 end
   if profit < 20000 then return 1 end
@@ -623,7 +626,7 @@ local function productEntries(pid)
   local out = {}
   local function entry(e)
     return { key = tostring(e.spell or e.itemID), name = e.recipe, icon = itemIcon(e.itemID), itemID = e.itemID,
-      coins = e.onAH and ns.CoinCount(e.profit) or 0, locked = not e.learned, e = e }
+      coins = e.onAH and ns.CoinCount(e.profit) or 0, coinsHot = ns.CoinHot(e.demand), locked = not e.learned, e = e }
   end
   -- the filter only leaves recipes out; the game's categories stay as in "Alle Rezepte"
   local kept = {}
@@ -1054,7 +1057,8 @@ local function updateList(list)
     local coins = e and e.profit and e.onAH and ns.CoinCount(e.profit) or 0 -- only where it pays
     -- left of the skill-up arrow when it shows, else where it sits
     local ups = rawget(row, "SkillUps")
-    row.m4Coins.Set(coins, type(ups) == "table" and ups.IsShown and ups:IsShown() and ups or nil)
+    row.m4Coins.Set(coins, type(ups) == "table" and ups.IsShown and ups:IsShown() and ups or nil,
+      e and e.out and ns.CoinHot(ns.Item(e.out).demand))
   end)
   profTrace("listRows", n)
 end
