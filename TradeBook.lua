@@ -267,6 +267,24 @@ end
 
 -- Sub pages: Blizzard's recipe list left, the card right ---------------------------------------
 
+-- The card's icon as a button: item tooltip on hover, Alt+click opens the market data window.
+-- d.itemID is set by whoever shows an item on the card.
+local function iconButton(parent, d)
+  local b = CreateFrame("Button", nil, parent)
+  b:SetAllPoints(d.Icon)
+  b:SetScript("OnEnter", function(self)
+    if not d.itemID then return end
+    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+    GameTooltip:SetItemByID(d.itemID)
+    GameTooltip:Show()
+  end)
+  b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+  b:SetScript("OnClick", function()
+    if d.itemID and ns.ItemDetail then ns.ItemDetail.AltClick(d.itemID) end
+  end)
+  return b
+end
+
 -- Card head (icon in a ring, name) and figure rows, built once per card for its labels.
 local function cardFrame(card, labels)
   if card.m4 then return card.m4 end
@@ -295,6 +313,7 @@ local function cardFrame(card, labels)
   d.Head = card:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
   d.Head:SetPoint("TOPLEFT", d.Icon, "BOTTOMLEFT", 0, -20)
   d.Head:SetText("Kennzahlen:")
+  iconButton(card, d)
   d.Figures = ns.NativeWindow.Figures(card, d.Head, labels)
   d.Figures.SetWidth(math.max(100, (card:GetWidth() or 340) - 46))
   card:HookScript("OnSizeChanged", function(c) d.Figures.SetWidth(math.max(100, (c:GetWidth() or 340) - 46)) end)
@@ -312,6 +331,7 @@ local function showCard(card, d, entry, values, sub)
   if d.Figures.line then d.Figures.line:SetShown(entry ~= nil) end
   if not entry then return end
   d.Icon:SetTexture(entry.icon)
+  d.itemID = entry.itemID
   d.Name:SetText(entry.name)
   d.Sub:SetText(sub or "")
   for i, v in ipairs(d.Figures.values) do v:SetText(values[i] or "–") end
@@ -400,6 +420,7 @@ local function head(layer)
   d.Head = layer:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
   d.Head:SetPoint("TOPLEFT", d.Icon, "BOTTOMLEFT", 0, -20)
   d.Head:SetText("Kennzahlen:")
+  iconButton(layer, d)
   return d
 end
 
@@ -467,6 +488,7 @@ local function buildLedger(page)
     area.layer:Hide()
     item.Back:SetShown(fromArea and true or false)
     item.Icon:SetTexture(iconOf(r.itemId))
+    item.itemID = r.itemId
     item.Name:SetText(r.name or ns.ItemName(r.itemId) or ("#" .. r.itemId))
     item.Sub:SetText(shortGroup(r.prof))
     local v = { string.format("%d / %d", r.crafted or 0, r.bought or 0), tostring(r.sold or 0),
@@ -481,6 +503,7 @@ local function buildLedger(page)
     item.layer:Hide()
     local f = entry.figures
     area.Icon:SetTexture(entry.icon)
+    area.itemID = nil
     area.Name:SetText(entry.name)
     area.Sub:SetText(f.sub)
     for i = 1, AREA_ROWS do
