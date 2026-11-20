@@ -785,7 +785,7 @@ end
 
 -- Ledger: profit and loss of a period, all numbers from ns.Profit.Report.
 --   figures  period: revenue, purchases, cut, lost deposits, result; stock now: units,
---            cost, market value today, difference
+--            cost, selling after the cut (Item.SellNet), book gain (Buchgewinn)
 --   areas    professions, trade, farmed; a click opens / closes the items of an area
 --            (ns.db.mainui.ledgerOpen); a click on an item shows its trades below
 --   below    recent trades, the trades of the clicked item, or the valued stock
@@ -866,24 +866,35 @@ end
 local stockClick
 if ns.AHTable and ns.AHTable.Add then
   local function signed(c) return type(c) == "number" and signedMoney(c) or "–" end
+  local function signedPct(v)
+    if type(v) ~= "number" then return "–" end
+    local n = math.floor(math.abs(v) * 100 + 0.5) * (v < 0 and -1 or 1)
+    return (n > 0 and GREEN or n < 0 and RED or "") .. string.format("%+d %%", n) .. (n ~= 0 and "|r" or "")
+  end
+  -- Buchgewinn (book gain, not realised): selling now after the cut (Item.SellNet: cheapest
+  -- offer - 1 copper, at most R, minus 5 %) minus the cost; the same basis as the Discord
+  -- message. "AH jetzt/Stk" stays as information (before the cut).
   ns.AHTable.Add({
-    id = "Stock", label = "Bestand", title = "Bestand", ahTab = false, sort = "market",
+    id = "Stock", label = "Bestand", title = "Bestand", ahTab = false, sort = "sell",
     columns = {
       { key = "name", title = "Item", width = 0, align = "LEFT" },
       { key = "units", title = "Stück", width = 56, filter = "num", fmt = function(e) return units(e.units) end },
       { key = "source", title = "Herkunft", width = 120, align = "LEFT", muted = true, optional = true,
         fmt = function(e) return e.source or "" end },
       { key = "unitCost", title = "Einstand/Stk", width = 96, filter = "money", fmt = function(e) return money(e.unitCost) end },
-      { key = "marketUnit", title = "AH jetzt/Stk", width = 100, filter = "money", fmt = function(e) return moneyOr(e.marketUnit) end },
+      { key = "marketUnit", title = "AH jetzt/Stk", width = 100, filter = "money", optional = true,
+        fmt = function(e) return moneyOr(e.marketUnit) end },
       { key = "cost", title = "Einstand", width = 96, filter = "money", muted = true, fmt = function(e) return money(e.cost) end },
-      { key = "market", title = "AH jetzt gesamt", width = 110, filter = "money", fmt = function(e) return moneyOr(e.market) end },
-      { key = "diff", title = "Unterschied", width = 106, filter = "money", fmt = function(e) return signed(e.diff) end },
+      { key = "sell", title = "Erlös netto", width = 100, filter = "money", fmt = function(e) return moneyOr(e.sell) end },
+      { key = "gain", title = "Buchgewinn", width = 106, filter = "money", fmt = function(e) return signed(e.gain) end },
+      { key = "gainPct", title = "Buchgewinn %", width = 100, filter = "pct", fmt = function(e) return signedPct(e.gainPct) end },
     },
     rows = function()
       local list = {}
       for _, s in ipairs(ns.Profit and ns.Profit.Stock and ns.Profit.Stock() or {}) do
         table.insert(list, { itemID = s.itemId, units = s.units, source = s.source, unitCost = s.unitCost,
-          marketUnit = s.marketUnit, cost = s.cost, market = s.market, diff = s.diff })
+          marketUnit = s.marketUnit, cost = s.cost, market = s.market, diff = s.diff,
+          sell = s.sell, gain = s.gain, gainPct = s.gainPct })
       end
       return list
     end,
@@ -913,8 +924,8 @@ PAGES.ledger = function(p)
   local figPeriod = figureCard(p, { { "Umsatz (brutto)", 104 }, { "Einkauf", 100 }, { "AH-Gebühr", 90 },
     { "Einstellgeb. verloren", 112 }, { "Ergebnis", 104 } })
   figPeriod:SetPoint("TOPLEFT", PAD, y)
-  local figStock = figureCard(p, { { "Bestand (jetzt)", 80 }, { "Einstand", 96 }, { "AH jetzt", 98 },
-    { "Unterschied", INNER_W - GAP - 510 - 274 } })
+  local figStock = figureCard(p, { { "Bestand (jetzt)", 80 }, { "Einstand", 96 }, { "Erlös netto", 98 },
+    { "Buchgewinn", INNER_W - GAP - 510 - 274 } })
   figStock:SetPoint("TOPLEFT", figPeriod, "TOPRIGHT", GAP, 0)
 
   y = y - FIG_H - GAP
@@ -1093,10 +1104,19 @@ PAGES.ledger = function(p)
     figPeriod:Set(5, signedMoney(t.profit), "Umsatz − Einkauf − Gebühren")
     figStock:Set(1, units(st.units) .. " Stk", #report.stock .. " Items")
     figStock:Set(2, money(st.cost), "")
-    figStock:Set(3, st.unpriced < #report.stock and money(st.market) or "–",
-      st.unpriced > 0 and (st.unpriced .. " ohne Marktpreis") or "")
-    figStock:Set(4, st.unpriced < #report.stock and signedMoney(st.diff) or "–",
-      st.unpriced > 0 and "nur Items mit Preis" or "noch nicht verkauft")
+    local unsold = 0
+    for _, s in ipairs(report.stock) do if not s.sell then unsold = unsold + 1 end end
+    local anySell = unsold < #report.stock
+    figStock:Set(3, anySell and money(st.sell) or "–",
+      unsold > 0 and (unsold .. " ohne Preis") or "nach AH-Gebühr")
+    local pctText = ""
+    if anySell and (st.sellCost or 0) > 0 then
+      local d = st.gain / st.sellCost
+      pctText = string.format("%+d %%", math.floor(math.abs(d) * 100 + 0.5) * (d < 0 and -1 or 1))
+    end
+    figStock:Set(4, anySell and signedMoney(st.gain) or "–",
+      unsold > 0 and ("nur Items mit Preis" .. (pctText ~= "" and (", " .. pctText) or ""))
+      or ("noch nicht verkauft" .. (pctText ~= "" and (", " .. pctText) or "")))
     pl:SetRows(areaRows(), "Keine Vorgänge im Zeitraum", not reset)
     showList()
   end
@@ -1443,7 +1463,7 @@ PAGES.planner = function(p)
   local function compute(pid, from, to, ah)
     local prof, why = ns.Costs.Profession(pid)
     if not prof then return { why = why } end
-    local candidates, skipped = ns.Costs.Candidates(prof, "vendor")
+    local candidates, skipped = ns.Costs.Candidates(prof)
     local segments, total, reached = ns.Planner.Path(candidates, from, to, ah and AH_CAP or 0)
     -- The own cap counts only when planning from the own skill range.
     local max = prof.max
@@ -1513,7 +1533,7 @@ PAGES.planner = function(p)
       end
     end
     if result.reached < r.to then
-      table.insert(rows, { span = string.format("%sAb Skill %d geben Lehrer- und Händler-Rezepte keine Punkte mehr – weiter nur mit Mustern (Drop, Quest, Ruf).|r",
+      table.insert(rows, { span = string.format("%sAb Skill %d gibt kein bekanntes oder beim Lehrer erlernbares Rezept mehr Punkte – weiter nur mit Mustern (Händler, Drop, Quest, Ruf).|r",
         ORANGE, result.reached) })
     end
     path:SetRows(rows, "")
@@ -1624,10 +1644,34 @@ PAGES.settings = function(p)
   local function discord() return ns.MyAuctions and ns.MyAuctions.Discord() or {} end
   add("Meine Verkäufe in #wow-broker melden (mit Erwähnung)", function() return discord().sales end,
     function(on) discord().sales = on end)
+  -- Book gain of the stock: a direct message from the server when an item in the stock is
+  -- worth much more than it cost (opt-in; threshold via the stepper, at least stockMin).
+  local stockToggle = add("DM, wenn ein Item im Bestand stark gestiegen ist",
+    function() return discord().stock end, function(on) discord().stock = on; p:Refresh() end)
+  local STOCK_STEPS = ns.MyAuctions and ns.MyAuctions.STOCK_STEPS or { 25, 50, 100, 200 }
+  local stockLabel = Style.Text(p, 12)
+  local function stepStock(delta)
+    local d = discord()
+    local cur, at = d.stockPct or 50, 1
+    for i, v in ipairs(STOCK_STEPS) do if v <= cur then at = i end end
+    at = math.max(1, math.min(#STOCK_STEPS, at + delta))
+    d.stockPct = STOCK_STEPS[at]
+    p:Refresh()
+  end
+  -- Threshold stepper on the same row, right of the switch (the page has no room for one more row).
+  local stockMinus = Style.Button(p, "–", 24, 20, function() stepStock(-1) end)
+  stockMinus:SetPoint("TOPLEFT", stockToggle, "TOPRIGHT", 10, -2)
+  stockLabel:SetPoint("LEFT", stockMinus, "RIGHT", 10, 0)
+  stockLabel:SetWidth(150)
+  local stockPlus = Style.Button(p, "+", 24, 20, function() stepStock(1) end)
+  stockPlus:SetPoint("LEFT", stockLabel, "RIGHT", 10, 0)
   local discordHint = Style.Text(p, 11)
   discordHint:SetPoint("TOPLEFT", PAD + 4, y)
-  discordHint:SetText(Style.MUTED .. "Snipes und Rezepte postet der Server für die ganze Gilde. Gilt nach /reload oder Logout.|r")
-  y = y - 24
+  discordHint:SetJustifyH("LEFT")
+  discordHint:SetText(Style.MUTED .. "Bestand: Buchgewinn nach AH-Gebühr, mind. "
+    .. money(discord().stockMin or 10000) .. ", je Item einmal pro Stufe (Server prüft stündlich).\n"
+    .. "Snipes und Rezepte postet der Server für die ganze Gilde. Gilt nach /reload oder Logout.|r")
+  y = y - 38
 
   y = y - 10
   section("Fenster")
@@ -1647,6 +1691,12 @@ PAGES.settings = function(p)
 
   function p:Refresh()
     for _, t in ipairs(toggles) do t:Update() end
+    local d = discord()
+    local on = d.stock and true or false
+    stockLabel:SetText((on and "" or Style.MUTED) .. string.format("ab +%d %% Buchgewinn", d.stockPct or 50)
+      .. (on and "" or "|r"))
+    stockMinus:SetEnabled(on)
+    stockPlus:SetEnabled(on)
     scaleLabel:SetText(string.format("Größe %d %%", math.floor((state().scale or 1) * 100 + 0.5)))
   end
 end

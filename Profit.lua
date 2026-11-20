@@ -52,8 +52,12 @@
 --   totals = Totals, stock, stockTotals = Stock() } from one replay (the ledger page)
 -- ns.Profit.Stock() -> list, totals: per item units left (crafted + bought pool), cost
 --   (Einstand), market value now (ns.Item(id).now x units, nil without a price) and the
---   difference; totals { units, cost, market, pricedCost, diff, unpriced } (market and diff
---   over the items with a price only, unpriced = items without one)
+--   difference; sellUnit / sell (Item.SellNet per unit / x units: selling after the cut),
+--   gain (Buchgewinn = sell - cost) and gainPct (sellUnit / unitCost - 1, nil at cost 0);
+--   totals { units, cost, market, pricedCost, diff, unpriced, sell, sellCost, gain, capped }
+--   (market and diff over the items with a price only, unpriced = items without one; sell
+--   and gain over the items with a selling price; capped = held counts known)
+-- ns.Profit.Snapshot() / WriteSnapshot(): stock snapshot for the server (see there)
 -- ns.Profit.ItemEvents(itemID, since) -> the item's events, newest first, as
 --   { t, k, u, c, cut, p, dep, lost } (lost: deposit lost by an expired/cancelled auction)
 local ADDON, ns = ...
@@ -390,7 +394,8 @@ local function stock(crafted, bought)
       end
     end
   end
-  local t = { units = 0, cost = 0, market = 0, pricedCost = 0, diff = 0, unpriced = 0 }
+  local t = { units = 0, cost = 0, market = 0, pricedCost = 0, diff = 0, unpriced = 0,
+    sell = 0, sellCost = 0, gain = 0, capped = held ~= nil }
   for _, s in ipairs(list) do
     s.cost = round(s.cost)
     s.unitCost = round(s.cost / s.units)
@@ -403,11 +408,23 @@ local function stock(crafted, bought)
     else
       t.unpriced = t.unpriced + 1
     end
+    -- Book gain (Buchgewinn): what selling would bring after the cut (Item.SellNet, the same
+    -- formula as the server's Discord message) minus the cost.
+    local sellNet = type(ns.Item) == "table" and ns.Item.SellNet
+    local sellUnit = item and sellNet and sellNet(item) or 0
+    if sellUnit > 0 then
+      s.sellUnit = sellUnit
+      s.sell = round(sellUnit * s.units)
+      s.gain = s.sell - s.cost
+      if s.unitCost > 0 then s.gainPct = sellUnit / s.unitCost - 1 end
+      t.sell, t.sellCost = t.sell + s.sell, t.sellCost + s.cost
+    end
     t.units, t.cost = t.units + s.units, t.cost + s.cost
   end
   t.diff = t.market - t.pricedCost
+  t.gain = t.sell - t.sellCost
   table.sort(list, function(a, b)
-    local va, vb = a.market or a.cost, b.market or b.cost
+    local va, vb = a.sell or a.market or a.cost, b.sell or b.market or b.cost
     if va ~= vb then return va > vb end
     return (a.name or tostring(a.itemId)) < (b.name or tostring(b.itemId))
   end)
@@ -417,6 +434,46 @@ end
 function Profit.Stock()
   local _, crafted, _, _, bought = replay(nil)
   return stock(crafted, bought)
+end
+
+-- Stock snapshot for the server's Discord message on a strong book gain (m4d stockalert.go):
+-- written on logout / reload into ns.db.owned[charKey].stk, so it travels with the own
+-- auctions of the state sync (no app change). Only items with a known cost (> 0) and only
+-- when the stock is capped by what the character holds (bank seen once), else nothing:
+--   stk = { v = 1, t = time(), l = { { i = itemID, u = units, c = cost per unit }... } }
+-- (at most SNAPSHOT_MAX items, the most valuable first). The server computes the selling
+-- price itself (same formula as Item.SellNet), the cost is never recomputed there.
+local SNAPSHOT_MAX = 300
+function Profit.Snapshot()
+  local list, t = Profit.Stock()
+  if not t.capped then return nil end
+  local out = {}
+  for _, s in ipairs(list) do
+    if (s.unitCost or 0) > 0 and s.units > 0 then
+      table.insert(out, { i = s.itemId, u = s.units, c = s.unitCost })
+    end
+  end
+  table.sort(out, function(a, b)
+    if a.u * a.c ~= b.u * b.c then return a.u * a.c > b.u * b.c end
+    return a.i < b.i
+  end)
+  for i = #out, SNAPSHOT_MAX + 1, -1 do out[i] = nil end
+  return { v = 1, t = time and time() or 0, l = out }
+end
+
+-- Writes the snapshot into the character's own auctions entry (only when it exists: its t
+-- is what the sync needs; a new entry would claim "no running auctions").
+function Profit.WriteSnapshot()
+  local key = ns.CharKey and ns.CharKey()
+  local o = key and ns.db and ns.db.owned and ns.db.owned[key]
+  if type(o) ~= "table" then return end
+  o.stk = Profit.Snapshot()
+end
+
+if ns.On then
+  ns.On("PLAYER_LOGOUT", function()
+    if ns.Safe then ns.Safe(Profit.WriteSnapshot) else Profit.WriteSnapshot() end
+  end)
 end
 
 -- Everything the ledger page shows, from one replay.

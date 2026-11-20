@@ -8,7 +8,8 @@
 -- Every answer is also kept per character for the companion app (Discord messages on sales):
 --   ns.db.owned[charKey] = { t = time(), g = GetMoney(), list = { { id = auctionID, i = itemID,
 --     u = unit price, b = buyoutAmount, q = quantity, tl = timeLeftSeconds, s = 1 if sold }... },
---     cx = { [auctionID] = time() of a cancel in game (AUCTION_CANCELED), kept CANCEL_KEEP } }
+--     cx = { [auctionID] = time() of a cancel in game (AUCTION_CANCELED), kept CANCEL_KEEP },
+--     stk = stock snapshot for the server, written on logout (Profit.WriteSnapshot) }
 -- Discord settings (read by the app, applied by the server): ns.db.settings.discord, see
 -- MyAuctions.Discord.
 local ADDON, ns = ...
@@ -264,7 +265,8 @@ local function storeOwned()
   ns.db.owned = ns.db.owned or {}
   local key = ns.CharKey()
   local prev = ns.db.owned[key]
-  ns.db.owned[key] = { t = time(), g = GetMoney and GetMoney() or nil, list = list, cx = prev and prev.cx }
+  ns.db.owned[key] = { t = time(), g = GetMoney and GetMoney() or nil, list = list, cx = prev and prev.cx,
+    stk = prev and prev.stk }
 end
 
 -- A cancel in game: the server must not report this auction as sold.
@@ -288,7 +290,12 @@ My.StoreOwned = storeOwned
 -- snipeMin copper profit on. Defaults filled in place.
 -- sales: a mention in #wow-broker for each own sold auction, off unless switched on. Snipes
 -- and recipes in the shared channel are the server's (not a user setting any more).
-My.DISCORD_DEFAULTS = { sales = false, snipes = true, snipeMin = 50000, recipes = true }
+-- stock: a direct message from the server when an item in the stock gained at least stockPct
+-- percent of its cost (book gain after the cut) and at least stockMin copper in total; off
+-- unless switched on (unasked DMs are rude). The server reads these from the synced settings.
+My.DISCORD_DEFAULTS = { sales = false, snipes = true, snipeMin = 50000, recipes = true,
+  stock = false, stockPct = 50, stockMin = 10000 }
+My.STOCK_STEPS = { 25, 50, 100, 200 }
 function My.Discord()
   ns.db.settings = ns.db.settings or {}
   local d = ns.db.settings.discord

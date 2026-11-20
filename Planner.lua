@@ -47,8 +47,14 @@ function Planner.NextRank(cap)
   end
 end
 
+-- Source codes of a recipe ("2+16"): exact codes, so "16" is not "6".
+--   2 drop, 4 quest, 5 vendor, 6 trainer, ...
 local function hasSource(source, code)
-  return type(source) == "string" and source:find(code, 1, true) ~= nil
+  if type(source) ~= "string" then return false end
+  for part in source:gmatch("[^+]+") do
+    if part == code then return true end
+  end
+  return false
 end
 
 -- Builds the list of candidate recipes.
@@ -57,24 +63,26 @@ end
 --   buyCost(id)   copper per unit to obtain a reagent, or nil if unknown
 --   vendorSell(id) copper per unit a merchant pays for the product (0 if none)
 --   ahSell(id)    copper per unit after auction cut, or nil if no auction price
---   all           true: every recipe; "vendor": also patterns sold by a vendor
---                 (their price is unknown, so it is not counted; marked needsPattern)
+--   all           true: every recipe (profit views); otherwise only recipes the character
+--                 knows or a trainer teaches - the skill path never relies on patterns
+--                 that have to be bought or looted
 function Planner.Candidates(scanRecipes, data, buyCost, vendorSell, ahSell, all)
   local list, skipped = {}, {}
   for recipeID, recipe in pairs(scanRecipes) do
     local d = data[recipeID]
     -- Start recipes (orange from skill 0/1, given when the profession is learned) carry no
     -- source in the data; their "learned at" (d[5]) is the first rank's cap, not a skill.
-    local startRecipe = d ~= nil and (d[7] == nil or d[7] == "") and (d[1] or 99) <= 1
+    -- (learned at no later than the first rank; a recipe without source data and a high
+    -- learn level, e.g. a reputation pattern, is none)
+    local startRecipe = d ~= nil and (d[7] == nil or d[7] == "") and (d[1] or 99) <= 1 and (d[5] or 0) <= 75
     local trainer = hasSource(d and d[7], "6") or startRecipe
     -- Transmutations have a cooldown (Forever: 1 hour, Arcanite ~2 days): they cannot be
     -- crafted dozens of times in a row, so they are no way to raise the skill.
     local cooldown = recipe.name and recipe.name:find("^Transmutieren") ~= nil
-    local vendorPattern = not trainer and hasSource(d and d[7], "5")
     local special = (Planner.SPECIALIZATION[recipeID] or (d and d.spec)) and not recipe.learned
       and all ~= true
     if d and (recipe.out or recipe.noOutput) and not special and not cooldown
-        and (all == true or recipe.learned or trainer or (all == "vendor" and vendorPattern)) then
+        and (all == true or recipe.learned or trainer) then
       local cost, missing = 0, nil
       for _, reagent in ipairs(recipe.r or {}) do
         local unit = reagent.i and buyCost(reagent.i)

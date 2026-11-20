@@ -191,7 +191,7 @@ local function showPath()
   if from >= cap then capNotice(cap) end
 
   -- Trainer recipes plus patterns sold by vendors, as the usual levelling guides do.
-  local segments, _, reached = ns.Planner.Path(ns.Costs.Candidates(prof, "vendor"), from, to, 0)
+  local segments, _, reached = ns.Planner.Path(ns.Costs.Candidates(prof), from, to, 0)
   if not segments then
     addText("Kein Weg gefunden – für manche Zutaten fehlen Preise. Im AH einmal scannen.")
     return
@@ -236,7 +236,7 @@ local function showPath()
   addCells("", GOLD .. "Gesamt|r", "", money(sumSpend), cost(sumSafe), cost(sumPotential))
   if reached < to then
     addBlank()
-    addText(string.format("%sAb Skill %d gibt es keine Lehrer- oder Händler-Rezepte mehr, die noch Punkte geben.|r", ORANGE, reached))
+    addText(string.format("%sAb Skill %d gibt kein bekanntes oder beim Lehrer erlernbares Rezept mehr Punkte.|r", ORANGE, reached))
     addText("Weiter geht es nur mit Mustern (Drop, Händler, Ruf). Die günstigsten, die bei " .. reached .. " noch Punkte geben:")
     local options = {}
     for _, c in ipairs(ns.Costs.Candidates(prof, true)) do
