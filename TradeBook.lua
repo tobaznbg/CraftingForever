@@ -1,20 +1,26 @@
--- TradeBook: the ledger ("Handelsbuch") as a window in Blizzard's own look, built like the
--- profession window: portrait and title, a list column on the left (search box, entries) and a
--- details area on the right. Opened with the tab "Handelsbuch" under the auction house (next to
--- Blizzard's tabs) or /m4 buch. First step: the bare frame, no content yet.
+-- TradeBook: the ledger ("Handelsbuch") in Blizzard's own look (ns.NativeWindow): side tabs
+-- Übersicht / Handelsbuch / Bestand / Auktionen. Opens on the overview, period "Alles".
+-- Opened with the tab "Handelsbuch" under the auction house, the minimap button or /m4 buch.
+-- Layout pilot: example figures, not the real ledger yet.
 local ADDON, ns = ...
 
 local TradeBook = {}
 ns.TradeBook = TradeBook
 
 local NAME = "M4CompanionTradeBook"
-local WIDTH, HEIGHT = 760, 560
-local LIST_WIDTH = 270 -- the scroll part; Blizzard's list template adds the frame around it
 local ICON = "Interface\\Icons\\INV_Misc_Coin_02" -- a pile of gold coins
+local PERIODS = { { key = "today", label = "Heute" }, { key = "week", label = "7 Tage" }, { key = "all", label = "Alles" } }
 
-local frame
+local window
+local period = "all"
 
--- Example entries until the real ledger is wired in (layout pilot).
+-- Example figures per period (until the real ledger is wired in).
+local EXAMPLE = {
+  today = { revenue = "3g 12s", cost = "1g 80s", fees = "16s", profit = "|cff5fd38d+1g 16s|r", sales = "7 Verkäufe" },
+  week = { revenue = "41g 05s", cost = "22g 40s", fees = "2g 05s", profit = "|cff5fd38d+16g 60s|r", sales = "63 Verkäufe" },
+  all = { revenue = "96g 70s", cost = "58g 15s", fees = "4g 84s", profit = "|cff5fd38d+33g 71s|r", sales = "171 Verkäufe" },
+}
+
 local DUMMY = {
   { header = "Lederverarbeitung" },
   { name = "Stiefel des Nachtschleichers", icon = "Interface\\Icons\\INV_Boots_08" },
@@ -28,240 +34,166 @@ local DUMMY = {
   { name = "Leichtes Leder", icon = "Interface\\Icons\\INV_Misc_LeatherScrap_03" },
 }
 
-local TABS = {
-  { key = "overview", title = "Übersicht", icon = "Interface\\Icons\\INV_Misc_Coin_02" },
-  { key = "ledger", title = "Handelsbuch", icon = "Interface\\Icons\\INV_Misc_Note_01" },
-  { key = "stock", title = "Bestand", icon = "Interface\\Icons\\INV_Box_02" },
-  { key = "auctions", title = "Auktionen", icon = "Interface\\Icons\\INV_Hammer_15" },
-}
-
-local function try(objType, parent, template)
-  local ok, f = pcall(CreateFrame, objType, nil, parent, template)
-  return ok and f or nil
-end
-
--- Detail area: the selected entry like the profession window's recipe card.
-local function showDetail(entry)
-  local d = frame.Detail
-  if not (d and entry) then return end
+-- The card of a list entry: icon and name like the recipe header, four figures.
+local function cardDetail(entry, card)
+  if not card.m4 then
+    local d = {}
+    d.Icon = card:CreateTexture(nil, "ARTWORK")
+    d.Icon:SetSize(44, 44)
+    d.Icon:SetPoint("TOPLEFT", 22, -22)
+    local okMask, mask = pcall(card.CreateMaskTexture, card)
+    if okMask and mask then
+      mask:SetTexture("Interface\\CharacterFrame\\TempPortraitAlphaMask", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+      mask:SetAllPoints(d.Icon)
+      d.Icon:AddMaskTexture(mask)
+    end
+    local ring = card:CreateTexture(nil, "OVERLAY")
+    ring:SetSize(60, 60)
+    ring:SetPoint("CENTER", d.Icon, "CENTER", 0, 0)
+    ring:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
+    ring:SetTexCoord(0, 0.6, 0, 0.6)
+    d.Name = card:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
+    d.Name:SetPoint("LEFT", d.Icon, "RIGHT", 14, 6)
+    d.Name:SetPoint("RIGHT", card, "RIGHT", -20, 0)
+    d.Name:SetJustifyH("LEFT")
+    local head = card:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    head:SetPoint("TOPLEFT", d.Icon, "BOTTOMLEFT", 0, -20)
+    head:SetText("Kennzahlen:")
+    d.Figures = ns.NativeWindow.Figures(card, head, { "Umsatz", "Einkauf", "Gebühren", "Gewinn" })
+    card.m4 = d
+  end
+  local d = card.m4
   d.Icon:SetTexture(entry.icon)
   d.Name:SetText(entry.name)
-  d.Values[1]:SetText("12g 40s")
-  d.Values[2]:SetText("7g 15s")
-  d.Values[3]:SetText("62s")
-  d.Values[4]:SetText("|cff5fd38d+4g 63s|r")
-  local w = math.max(100, (frame.Card:GetWidth() or 400) - 46)
-  for _, v in ipairs(d.Values) do v:SetWidth(w) end
-  if d.Line then d.Line:SetWidth(w) end
+  local v = d.Figures.values
+  v[1]:SetText("12g 40s"); v[2]:SetText("7g 15s"); v[3]:SetText("62s"); v[4]:SetText("|cff5fd38d+4g 63s|r")
+  d.Figures.SetWidth(math.max(100, (card:GetWidth() or 400) - 46))
 end
 
-local function buildList(listFrame)
-  local box, bar = rawget(listFrame, "ScrollBox"), rawget(listFrame, "ScrollBar")
-  if not (type(box) == "table" and CreateScrollBoxListLinearView and ScrollUtil and CreateDataProvider) then return false end
-  local view = CreateScrollBoxListLinearView()
-  view:SetElementFactory(function(factory, data)
-    if data.header then
-      factory("ProfessionsRecipeListCategoryTemplate", function(button)
-        local text = rawget(button, "ButtonText") or rawget(button, "Label")
-        if type(text) == "table" then text:SetText(data.header) end
-        local rank = rawget(button, "RankBar") -- the profession's skill bar of a category: not ours
-        if type(rank) == "table" and rank.Hide then rank:Hide() end
-        local collapse = rawget(button, "CollapseButton")
-        if type(collapse) == "table" and collapse.UpdateCollapsedState then pcall(collapse.UpdateCollapsedState, collapse, false) end
-        button:SetScript("OnEnter", nil)
-        button:SetScript("OnLeave", nil)
-        button:SetScript("OnClick", nil)
-      end)
-    else
-      factory("ProfessionsRecipeListRecipeTemplate", function(button)
-        local label = rawget(button, "Label")
-        if type(label) == "table" then label:SetText(data.name) end
-        for _, key in ipairs({ "SkillUps", "LockedIcon", "Count" }) do
-          local part = rawget(button, key)
-          if type(part) == "table" and part.Hide then part:Hide() end
-        end
-        local selected = rawget(button, "SelectedOverlay")
-        if type(selected) == "table" then selected:SetShown(frame.selected == data) end
-        button:SetScript("OnEnter", function(self)
-          local h = rawget(self, "HighlightOverlay")
-          if type(h) == "table" then h:Show() end
-        end)
-        button:SetScript("OnLeave", function(self)
-          local h = rawget(self, "HighlightOverlay")
-          if type(h) == "table" then h:Hide() end
-        end)
-        button:SetScript("OnClick", function()
-          frame.selected = data
-          showDetail(data)
-          box:ForEachFrame(function(other)
-            local o = rawget(other, "SelectedOverlay")
-            if type(o) == "table" then o:SetShown(other == button) end
-          end)
-        end)
-      end)
+-- Overview: period choice on top, the period's profit and loss, stock, and three boxes.
+local function buildOverview(page)
+  local NW = ns.NativeWindow
+  -- period buttons (top right), the chosen one held down
+  local buttons = {}
+  local prev
+  for i = #PERIODS, 1, -1 do
+    local def = PERIODS[i]
+    local okB, b = pcall(CreateFrame, "Button", nil, page, "UIPanelButtonTemplate")
+    if not okB then b = CreateFrame("Button", nil, page) end
+    b:SetSize(76, 22)
+    b:SetText(def.label)
+    if prev then b:SetPoint("RIGHT", prev, "LEFT", -4, 0) else b:SetPoint("TOPRIGHT", page, "TOPRIGHT", -6, 0) end
+    b:SetScript("OnClick", function()
+      period = def.key
+      if page.Refresh then page.Refresh() end
+    end)
+    buttons[def.key] = b
+    prev = b
+  end
+  local label = page:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+  label:SetPoint("RIGHT", prev, "LEFT", -10, 0)
+  label:SetText("Zeitraum:")
+
+  -- top: profit and loss (left), stock (right)
+  local pnl = NW.Panel(page, "Gewinn und Verlust")
+  pnl:SetPoint("TOPLEFT", 0, -30)
+  pnl:SetPoint("RIGHT", page, "CENTER", -3, 0)
+  pnl:SetHeight(190)
+  pnl.Big = pnl:CreateFontString(nil, "OVERLAY", "GameFontHighlightHuge")
+  pnl.Big:SetPoint("TOPLEFT", pnl.Title, "BOTTOMLEFT", 0, -12)
+  pnl.Sub = pnl:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+  pnl.Sub:SetPoint("TOPLEFT", pnl.Big, "BOTTOMLEFT", 0, -4)
+  pnl.Figures = NW.Figures(pnl, pnl.Sub, { "Umsatz", "Einkauf", "Gebühren", "Gewinn" })
+
+  local stock = NW.Panel(page, "Bestand")
+  stock:SetPoint("TOPLEFT", page, "TOP", 3, -30)
+  stock:SetPoint("RIGHT", page, "RIGHT", 0, 0)
+  stock:SetHeight(190)
+  stock.Big = stock:CreateFontString(nil, "OVERLAY", "GameFontHighlightHuge")
+  stock.Big:SetPoint("TOPLEFT", stock.Title, "BOTTOMLEFT", 0, -12)
+  stock.Big:SetText("|cff5fd38d+6g 74s|r")
+  stock.Sub = stock:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+  stock.Sub:SetPoint("TOPLEFT", stock.Big, "BOTTOMLEFT", 0, -4)
+  stock.Sub:SetText("Buchgewinn, wenn alles verkauft wird")
+  stock.Figures = NW.Figures(stock, stock.Sub, { "Items", "Einkauf", "Erlös netto", "Buchgewinn" })
+  local sv = stock.Figures.values
+  sv[1]:SetText("7 Items · 11 Stück"); sv[2]:SetText("4g 02s"); sv[3]:SetText("10g 76s"); sv[4]:SetText("|cff5fd38d+6g 74s|r")
+
+  -- bottom: three boxes
+  local boxes = {
+    { title = "Beste Items", lines = { "Stiefel des Nachtschleichers  |cff5fd38d+9g 12s|r", "Muster: Robe der Leere  |cff5fd38d+4g 80s|r", "Leichtes Leder  |cff5fd38d+2g 05s|r" } },
+    { title = "Schlechteste Items", lines = { "Abgefangene Kiste  |cffff6b6b-6s 99c|r", "Hose des Nachtschleichers  |cffff6b6b-1g 10s|r", "Tückische Lederstulpen  |cffff6b6b-42s|r" } },
+    { title = "Auktionen", lines = { "12 laufend", "|cffff6b6b3 unterboten|r", "5 abgelaufen (Gebühr 22s)" } },
+  }
+  local bw = 1 / 3
+  for i, def in ipairs(boxes) do
+    local box = NW.Panel(page, def.title)
+    box:SetPoint("TOPLEFT", pnl, "BOTTOMLEFT", 0, -6)
+    box:SetPoint("BOTTOM", page, "BOTTOM", 0, 0)
+    box.m4Index = i
+    box.m4Lines = {}
+    for k, text in ipairs(def.lines) do
+      local fs = box:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+      fs:SetPoint("TOPLEFT", box.Title, "BOTTOMLEFT", 0, -10 - (k - 1) * 16)
+      fs:SetText(text)
     end
-  end)
-  view:SetElementExtentCalculator(function(_, data) return data.header and 25 or 20 end)
-  ScrollUtil.InitScrollBoxListWithScrollBar(box, bar, view)
-  box:SetDataProvider(CreateDataProvider(DUMMY))
-  return true
+    page["Box" .. i] = box
+  end
+  -- three equal columns (widths need the page's size)
+  local function layoutBoxes()
+    local w = page:GetWidth() or 0
+    if w <= 0 then return end
+    local each = (w - 12) * bw
+    for i = 1, 3 do
+      local box = page["Box" .. i]
+      box:ClearAllPoints()
+      box:SetPoint("TOPLEFT", pnl, "BOTTOMLEFT", (i - 1) * (each + 6), -6)
+      box:SetPoint("BOTTOM", page, "BOTTOM", 0, 0)
+      box:SetWidth(each)
+    end
+    local half = (w - 6) / 2 - 28
+    pnl.Figures.SetWidth(half)
+    stock.Figures.SetWidth(half)
+  end
+  page:SetScript("OnSizeChanged", layoutBoxes)
+
+  function page.Refresh()
+    for key, b in pairs(buttons) do
+      if b.SetEnabled then b:SetEnabled(key ~= period) end -- the chosen one held down (disabled look)
+    end
+    local e = EXAMPLE[period]
+    pnl.Big:SetText(e.profit)
+    pnl.Sub:SetText("Gewinn · " .. e.sales)
+    local v = pnl.Figures.values
+    v[1]:SetText(e.revenue); v[2]:SetText(e.cost); v[3]:SetText(e.fees); v[4]:SetText(e.profit)
+    layoutBoxes()
+  end
+  page.Refresh()
 end
 
 local function create()
-  -- Blizzard's profession templates live in a load-on-demand part of the UI
-  if not rawget(_G, "ProfessionsFrame") then
-    local load = (C_AddOns and C_AddOns.LoadAddOn) or LoadAddOn
-    if load then pcall(load, "Blizzard_Professions") end
-  end
-  local ok, f = pcall(CreateFrame, "Frame", NAME, UIParent, "PortraitFrameTemplate")
-  if not ok then ok, f = pcall(CreateFrame, "Frame", NAME, UIParent, "ButtonFrameTemplate") end
-  if not ok then f = CreateFrame("Frame", NAME, UIParent) end
-  frame = f
-  f:SetSize(WIDTH, HEIGHT)
-  f:SetToplevel(true)
-  f:EnableMouse(true)
-  f:SetMovable(true)
-  f:SetClampedToScreen(true)
-  f:Hide()
-  if ButtonFrameTemplate_HideButtonBar then pcall(ButtonFrameTemplate_HideButtonBar, f) end
-  if f.SetPortraitToAsset then
-    pcall(f.SetPortraitToAsset, f, ICON)
-  else
-    local container = rawget(f, "PortraitContainer")
-    local portrait = rawget(f, "portrait") or (type(container) == "table" and rawget(container, "portrait"))
-    if type(portrait) == "table" and SetPortraitToTexture then pcall(SetPortraitToTexture, portrait, ICON) end
-  end
-  if f.SetTitle then
-    pcall(f.SetTitle, f, "Handelsbuch")
-  else
-    local container = rawget(f, "TitleContainer")
-    local title = rawget(f, "TitleText") or (type(container) == "table" and rawget(container, "TitleText"))
-    if type(title) == "table" then title:SetText("Handelsbuch") end
-  end
-  local inset = rawget(f, "Inset")
-  if type(inset) == "table" then inset:Hide() end
-  f:RegisterForDrag("LeftButton")
-  f:SetScript("OnDragStart", function(self) self:StartMoving() end)
-  f:SetScript("OnDragStop", function(self) self:StopMovingOrSizing() end)
-  if UISpecialFrames then tinsert(UISpecialFrames, NAME) end
-  f:SetPoint("CENTER", UIParent, "CENTER", 0, 40)
-
-  -- The profession window's page background (atlas from the probe of this client).
-  local page = f:CreateTexture(nil, "BACKGROUND", nil, -3)
-  page:SetPoint("TOPLEFT", 3, -21)
-  page:SetPoint("BOTTOMRIGHT", -3, 3)
-  page:SetAtlas("Profession-Background-Template2")
-
-  -- Left: Blizzard's recipe list (background, frame, search box, filter, scroll box).
-  local list = try("Frame", f, "ProfessionsRecipeListTemplate")
-  if not list then
-    list = CreateFrame("Frame", nil, f, "InsetFrameTemplate")
-  end
-  list:ClearAllPoints()
-  list:SetPoint("TOPLEFT", 8, -64)
-  list:SetPoint("BOTTOMLEFT", 8, 8)
-  list:SetWidth(LIST_WIDTH + 34)
-  f.List = list
-  if not ns.Safe(buildList, list) then end
-
-  -- Right: the recipe card (border and background like the profession window's form).
-  local card = CreateFrame("Frame", nil, f)
-  card:SetPoint("TOPLEFT", list, "TOPRIGHT", 6, 0)
-  card:SetPoint("BOTTOMRIGHT", -8, 8)
-  local cardBg = card:CreateTexture(nil, "BACKGROUND")
-  cardBg:SetAllPoints()
-  cardBg:SetAtlas("Profession-background-card-leatherworking")
-  local cardBorder = card:CreateTexture(nil, "BORDER")
-  cardBorder:SetAllPoints()
-  cardBorder:SetAtlas("common-insideframe")
-  f.Card = card
-
-  -- Detail content (example): icon and name like the recipe header, four figures.
-  local d = {}
-  d.Icon = card:CreateTexture(nil, "ARTWORK")
-  d.Icon:SetSize(44, 44)
-  d.Icon:SetPoint("TOPLEFT", 22, -22)
-  local okMask, mask = pcall(card.CreateMaskTexture, card)
-  if okMask and mask then
-    mask:SetTexture("Interface\\CharacterFrame\\TempPortraitAlphaMask", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
-    mask:SetAllPoints(d.Icon)
-    d.Icon:AddMaskTexture(mask)
-  end
-  local ring = card:CreateTexture(nil, "OVERLAY")
-  ring:SetSize(60, 60)
-  ring:SetPoint("CENTER", d.Icon, "CENTER", 0, 0)
-  ring:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
-  ring:SetTexCoord(0, 0.6, 0, 0.6)
-  d.Name = card:CreateFontString(nil, "OVERLAY", "GameFontHighlightLarge")
-  d.Name:SetPoint("LEFT", d.Icon, "RIGHT", 14, 6)
-  d.Name:SetPoint("RIGHT", card, "RIGHT", -20, 0)
-  d.Name:SetJustifyH("LEFT")
-  local head = card:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-  head:SetPoint("TOPLEFT", d.Icon, "BOTTOMLEFT", 0, -20)
-  head:SetText("Kennzahlen:")
-  d.Values = {}
-  for i, label in ipairs({ "Umsatz", "Einkauf", "Gebühren", "Gewinn" }) do
-    local l = card:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    l:SetPoint("TOPLEFT", head, "BOTTOMLEFT", 0, -10 - (i - 1) * 16 - (i == 4 and 8 or 0))
-    l:SetText(label)
-    local v = card:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    v:SetPoint("TOPLEFT", l, "TOPLEFT", 0, 0) -- width set to the card's in showDetail
-    v:SetJustifyH("RIGHT")
-    d.Values[i] = v
-    if i == 4 then
-      local line = card:CreateTexture(nil, "ARTWORK")
-      line:SetColorTexture(1, 0.82, 0, 0.25)
-      line:SetHeight(1)
-      line:SetPoint("BOTTOMLEFT", l, "TOPLEFT", 0, 4)
-      d.Line = line
-    end
-  end
-  f.Detail = d
-  showDetail(DUMMY[2])
-
-  -- Side tabs on the right edge, like the profession window's (LargeSideTabButtonTemplate).
-  f.Tabs = {}
-  for i, def in ipairs(TABS) do
-    local t = try("CheckButton", f, "LargeSideTabButtonTemplate") or try("Button", f, "LargeSideTabButtonTemplate")
-      or try("Frame", f, "LargeSideTabButtonTemplate")
-    if t then
-      t:ClearAllPoints()
-      t:SetPoint("TOPLEFT", f, "TOPRIGHT", -2, -40 - (i - 1) * 60)
-      local icon = rawget(t, "Icon")
-      if type(icon) == "table" then icon:SetTexture(def.icon) end
-      local sel = rawget(t, "SelectedTexture")
-      if type(sel) == "table" then sel:SetShown(i == 1) end
-      if t.SetScript and t.HasScript and t:HasScript("OnClick") then
-        t:SetScript("OnClick", function()
-          for j, other in ipairs(f.Tabs) do
-            local o = rawget(other, "SelectedTexture")
-            if type(o) == "table" then o:SetShown(j == i) end
-          end
-        end)
-      end
-      t:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-        GameTooltip:SetText(def.title)
-        GameTooltip:Show()
-      end)
-      t:SetScript("OnLeave", function() GameTooltip:Hide() end)
-      t:Show()
-      f.Tabs[#f.Tabs + 1] = t
-    end
-  end
+  window = ns.NativeWindow.New({ name = NAME, title = "Handelsbuch", icon = ICON, width = 760, height = 560 })
+  window:AddTab({ key = "overview", title = "Übersicht", icon = "Interface\\Icons\\INV_Misc_Coin_02",
+    build = buildOverview, onShow = function(page) if page.Refresh then page.Refresh() end end })
+  window:AddTab({ key = "ledger", title = "Handelsbuch", icon = "Interface\\Icons\\INV_Misc_Note_01",
+    build = function(page) ns.NativeWindow.Split(page, { entries = DUMMY, onSelect = cardDetail }) end })
+  window:AddTab({ key = "stock", title = "Bestand", icon = "Interface\\Icons\\INV_Box_02",
+    build = function(page) ns.NativeWindow.Split(page, { entries = DUMMY, onSelect = cardDetail }) end })
+  window:AddTab({ key = "auctions", title = "Auktionen", icon = "Interface\\Icons\\INV_Hammer_15",
+    build = function(page) ns.NativeWindow.Split(page, { entries = DUMMY, onSelect = cardDetail }) end })
 end
 
 function TradeBook.Show()
-  if not frame then create() end
-  frame:Show()
-  frame:Raise()
+  if not window then create() end
+  window:Show()
+  window:SelectTab("overview")
 end
 
 function TradeBook.Toggle()
-  if frame and frame:IsShown() then frame:Hide() else TradeBook.Show() end
+  if window and window.frame:IsShown() then window.frame:Hide() else TradeBook.Show() end
 end
 
-function TradeBook.Frame() return frame end
+function TradeBook.Frame() return window and window.frame end
 
 -- The tab "Handelsbuch" under the auction house, after Blizzard's tabs. It opens the window and
 -- leaves the auction house view as it is (it is not one of the AH's display modes).

@@ -41,6 +41,7 @@ Ledger.lua
 Sync.lua
 Profit.lua
 SellInfo.lua
+NativeWindow.lua
 TradeBook.lua
 AHTable.lua
 Invest.lua
