@@ -70,21 +70,72 @@ local function cardDetail(entry, card)
   d.Figures.SetWidth(math.max(100, (card:GetWidth() or 400) - 46))
 end
 
--- Overview, built like Blizzard's "Berufe" overview: two wide cards (profit and loss, stock)
--- and three tall cards (best items, worst items, auctions). Period: Heute / 7 Tage / Alles.
+-- Overview, built from Blizzard's "Berufe" overview parts: on top two cards side by side
+-- (profit and loss with the period choice, stock), below running auctions and recent trades.
+local CARD_W, TOP_H = 331, 142
+
+local function card(page, w, x, y, width, height, title)
+  local c = CreateFrame("Frame", nil, page)
+  c:SetSize(width, height)
+  c:SetPoint("TOPLEFT", w.frame, "TOPLEFT", x, y)
+  local bg = c:CreateTexture(nil, "BACKGROUND")
+  bg:SetAllPoints()
+  bg:SetAtlas("Profession-overview-Card")
+  c.Title = c:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+  c.Title:SetPoint("TOPLEFT", 20, -16)
+  c.Title:SetText(title)
+  return c
+end
+
+-- A small table in a card: column heads, a gold rule, rows of icon + texts.
+local function cardTable(c, cols, rows, top)
+  for _, col in ipairs(cols) do
+    local h = c:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    if col[3] == "LEFT" then h:SetPoint("TOPLEFT", col[2], top) else h:SetPoint("TOPRIGHT", c, "TOPLEFT", col[2], top) end
+    h:SetText(col[1])
+  end
+  local rule = c:CreateTexture(nil, "ARTWORK")
+  rule:SetColorTexture(1, 0.82, 0, 0.25)
+  rule:SetHeight(1)
+  rule:SetPoint("TOPLEFT", 20, top - 14)
+  rule:SetPoint("TOPRIGHT", -24, top - 14)
+  for i, r in ipairs(rows) do
+    local y = top - 20 - (i - 1) * 20
+    local x0 = 20
+    if r.icon then
+      local icon = c:CreateTexture(nil, "ARTWORK")
+      icon:SetSize(16, 16)
+      icon:SetPoint("TOPLEFT", 20, y)
+      icon:SetTexture(r.icon)
+      x0 = 42
+    end
+    for k, col in ipairs(cols) do
+      local fs = c:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+      fs:SetWordWrap(false)
+      if col[3] == "LEFT" then
+        fs:SetPoint("TOPLEFT", (k == 1 and x0 or col[2]), y - 2)
+        fs:SetWidth(col[4] or 200)
+        fs:SetJustifyH("LEFT")
+      else
+        fs:SetPoint("TOPRIGHT", c, "TOPLEFT", col[2], y - 2)
+        fs:SetJustifyH("RIGHT")
+      end
+      fs:SetText(r[k] or "")
+    end
+  end
+end
+
 local function buildOverview(page, w)
   local NW = ns.NativeWindow
 
-  -- 1. profit and loss
-  local pnl = NW.WideCard(w, page, -41)
-  pnl.Title:SetText("Gewinn und Verlust")
-  -- period choice: Blizzard's dropdown button, else a button that cycles
+  -- 1. profit and loss (left) with the period choice
+  local pnl = card(page, w, 5, -41, CARD_W, TOP_H, "Gewinn und Verlust")
   local dd
   local okD, d = pcall(CreateFrame, "DropdownButton", nil, pnl, "WowStyle1DropdownTemplate")
   if okD and d and d.SetupMenu then
     dd = d
-    dd:SetWidth(110)
-    dd:SetPoint("TOPRIGHT", -20, -10)
+    dd:SetWidth(96)
+    dd:SetPoint("TOPRIGHT", -16, -10)
     dd:SetupMenu(function(_, root)
       for _, def in ipairs(PERIODS) do
         root:CreateRadio(def.label, function() return period == def.key end, function()
@@ -96,8 +147,8 @@ local function buildOverview(page, w)
   else
     local okB, bt = pcall(CreateFrame, "Button", nil, pnl, "UIPanelButtonTemplate")
     dd = okB and bt or CreateFrame("Button", nil, pnl)
-    dd:SetSize(110, 22)
-    dd:SetPoint("TOPRIGHT", -20, -10)
+    dd:SetSize(96, 22)
+    dd:SetPoint("TOPRIGHT", -16, -10)
     dd:SetScript("OnClick", function()
       for i, def in ipairs(PERIODS) do
         if def.key == period then period = PERIODS[i % #PERIODS + 1].key break end
@@ -106,81 +157,48 @@ local function buildOverview(page, w)
     end)
   end
   local pnlSlot = NW.Slot(pnl, "Interface\\Icons\\INV_Misc_Coin_02", "Gewinn", "")
-  pnlSlot:SetPoint("BOTTOMLEFT", 15, 46)
-  local pnlBar = NW.Bar(pnl, 441, "Skillbar_Fill_Flipbook_Leatherworking")
-  pnlBar:SetPoint("RIGHT", pnl, "RIGHT", -40, 0)
-  pnlBar:SetPoint("TOP", pnlSlot, "TOP", 0, -12)
+  pnlSlot:SetPoint("TOPLEFT", 16, -40)
+  local pnlBar = NW.Bar(pnl, CARD_W - 36, "Skillbar_Fill_Flipbook_Leatherworking")
+  pnlBar:SetPoint("TOPLEFT", 16, -90)
   local pnlLine = pnl:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-  pnlLine:SetPoint("TOPLEFT", pnlBar, "BOTTOMLEFT", 2, -12)
+  pnlLine:SetPoint("TOPLEFT", pnlBar, "BOTTOMLEFT", 2, -10)
+  pnlLine:SetWidth(CARD_W - 40)
+  pnlLine:SetJustifyH("LEFT")
 
-  -- 2. stock
-  local stock = NW.WideCard(w, page, -41 - 142 + 5)
-  stock.Title:SetText("Bestand")
+  -- 2. stock (right)
+  local stock = card(page, w, 5 + CARD_W + 2, -41, CARD_W, TOP_H, "Bestand")
   local stockSlot = NW.Slot(stock, "Interface\\Icons\\INV_Box_02", "Buchgewinn", "|cff5fd38d+6g 74s|r")
-  stockSlot:SetPoint("BOTTOMLEFT", 15, 46)
-  local stockBar = NW.Bar(stock, 441, "Skillbar_Fill_Flipbook_Skinning")
-  stockBar:SetPoint("RIGHT", stock, "RIGHT", -40, 0)
-  stockBar:SetPoint("TOP", stockSlot, "TOP", 0, -12)
-  stockBar.Set(4.02 / 10.76, "Einkauf 4g 02s  ·  Erlös netto 10g 76s")
+  stockSlot:SetPoint("TOPLEFT", 16, -40)
+  local stockBar = NW.Bar(stock, CARD_W - 36, "Skillbar_Fill_Flipbook_Skinning")
+  stockBar:SetPoint("TOPLEFT", 16, -90)
+  stockBar.Set(4.02 / 10.76, "Einkauf 4g 02s  ·  Erlös 10g 76s")
   local stockLine = stock:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-  stockLine:SetPoint("TOPLEFT", stockBar, "BOTTOMLEFT", 2, -12)
-  stockLine:SetText("7 Items  ·  11 Stück  ·  wenn alles zum Marktwert verkauft wird")
+  stockLine:SetPoint("TOPLEFT", stockBar, "BOTTOMLEFT", 2, -10)
+  stockLine:SetText("7 Items  ·  11 Stück")
 
-  -- 3. running auctions: one card over the width of the three tall ones
-  local auc = CreateFrame("Frame", nil, page)
-  auc:SetPoint("TOPLEFT", stock, "BOTTOMLEFT", 0, 4)
-  auc:SetSize(664, 275)
-  local aucBg = auc:CreateTexture(nil, "BACKGROUND")
-  aucBg:SetAllPoints()
-  aucBg:SetAtlas("Profession-overview-Card")
-  auc.Title = auc:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-  auc.Title:SetPoint("TOPLEFT", 20, -16)
-  auc.Title:SetText("Laufende Auktionen")
-  auc.Info = auc:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-  auc.Info:SetPoint("TOPRIGHT", -20, -18)
-  -- column heads like Blizzard's auction lists
-  local COLS = { { "Gegenstand", 20, "LEFT" }, { "Preis", 430, "RIGHT" }, { "Status", 560, "RIGHT" }, { "Zeit", 640, "RIGHT" } }
-  for _, col in ipairs(COLS) do
-    local h = auc:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    if col[3] == "LEFT" then h:SetPoint("TOPLEFT", col[2], -42) else h:SetPoint("TOPRIGHT", auc, "TOPLEFT", col[2], -42) end
-    h:SetText(col[1])
-  end
-  local rule = auc:CreateTexture(nil, "ARTWORK")
-  rule:SetColorTexture(1, 0.82, 0, 0.25)
-  rule:SetHeight(1)
-  rule:SetPoint("TOPLEFT", 20, -56)
-  rule:SetPoint("TOPRIGHT", -24, -56)
-  local EXAMPLE_AUCTIONS = {
-    { icon = "Interface\\Icons\\INV_Boots_08", name = "Stiefel des Nachtschleichers", qty = 3, price = "1g 05s", status = "bester Preis", best = true, left = "23 h" },
-    { icon = "Interface\\Icons\\INV_Scroll_03", name = "Muster: Rote Magiestoffschultern", qty = 1, price = "17s 50c", status = "unterboten 1c", left = "21 h" },
-    { icon = "Interface\\Icons\\INV_Belt_03", name = "Zornprankengürtel des arkanen Zorns", qty = 1, price = "78s 67c", status = "bester Preis", best = true, left = "11 h" },
-    { icon = "Interface\\Icons\\INV_Misc_LeatherScrap_03", name = "Leichtes Leder", qty = 20, price = "4s 32c", status = "unterboten 12c", left = "8 h" },
-    { icon = "Interface\\Icons\\INV_Crate_01", name = "Abgefangene Kiste: Blühende Kräuter", qty = 1, price = "1s 00c", status = "allein im AH", left = "2 h" },
-  }
-  local ROW_H = 22
-  for i, a in ipairs(EXAMPLE_AUCTIONS) do
-    local y = -62 - (i - 1) * ROW_H
-    local icon = auc:CreateTexture(nil, "ARTWORK")
-    icon:SetSize(18, 18)
-    icon:SetPoint("TOPLEFT", 20, y)
-    icon:SetTexture(a.icon)
-    local name = auc:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    name:SetPoint("LEFT", icon, "RIGHT", 6, 0)
-    name:SetWidth(300)
-    name:SetJustifyH("LEFT")
-    name:SetWordWrap(false)
-    name:SetText(a.name .. (a.qty > 1 and ("  |cff999999" .. a.qty .. "×|r") or ""))
-    local function cell(x, text)
-      local fs = auc:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-      fs:SetPoint("RIGHT", auc, "TOPLEFT", x, y - 9)
-      fs:SetJustifyH("RIGHT")
-      fs:SetText(text)
-    end
-    cell(430, a.price)
-    cell(560, a.best and ("|cff5fd38d" .. a.status .. "|r") or (a.status:find("unterboten") and ("|cffff6b6b" .. a.status .. "|r") or ("|cff999999" .. a.status .. "|r")))
-    cell(640, "|cff999999" .. a.left .. "|r")
-  end
-  auc.Info:SetText(#EXAMPLE_AUCTIONS .. " Auktionen  ·  |cffff6b6b2 unterboten|r")
+  -- 3. running auctions (full width)
+  local AH = 200
+  local auc = card(page, w, 5, -41 - TOP_H + 4, 664, AH, "Laufende Auktionen")
+  local aucInfo = auc:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+  aucInfo:SetPoint("TOPRIGHT", -20, -18)
+  aucInfo:SetText("5 Auktionen  ·  |cffff6b6b2 unterboten|r")
+  cardTable(auc, { { "Gegenstand", 20, "LEFT", 330 }, { "Preis", 470, "RIGHT" }, { "Status", 580, "RIGHT" }, { "Zeit", 640, "RIGHT" } }, {
+    { icon = "Interface\\Icons\\INV_Boots_08", "Stiefel des Nachtschleichers  |cff9999993×|r", "1g 05s", "|cff5fd38dbester Preis|r", "|cff99999923 h|r" },
+    { icon = "Interface\\Icons\\INV_Scroll_03", "Muster: Rote Magiestoffschultern", "17s 50c", "|cffff6b6bunterboten 1c|r", "|cff99999921 h|r" },
+    { icon = "Interface\\Icons\\INV_Belt_03", "Zornprankengürtel des arkanen Zorns", "78s 67c", "|cff5fd38dbester Preis|r", "|cff99999911 h|r" },
+    { icon = "Interface\\Icons\\INV_Misc_LeatherScrap_03", "Leichtes Leder  |cff99999920×|r", "4s 32c", "|cffff6b6bunterboten 12c|r", "|cff9999998 h|r" },
+    { icon = "Interface\\Icons\\INV_Crate_01", "Abgefangene Kiste: Blühende Kräuter", "1s 00c", "|cff999999allein im AH|r", "|cff9999992 h|r" },
+  }, -42)
+
+  -- 4. recent trades (full width)
+  local tr = card(page, w, 5, -41 - TOP_H + 4 - AH + 4, 664, 594 - 41 - TOP_H - AH + 8 - 14, "Letzte Vorgänge")
+  cardTable(tr, { { "Item", 20, "LEFT", 290 }, { "Art", 400, "LEFT", 90 }, { "Menge", 520, "RIGHT" }, { "Betrag", 640, "RIGHT" } }, {
+    { icon = "Interface\\Icons\\INV_Boots_08", "Stiefel des Nachtschleichers", "Verkauf", "1", "|cff5fd38d+99s 75c|r" },
+    { icon = "Interface\\Icons\\INV_Misc_LeatherScrap_03", "Unverwüstliches Leder", "Kauf", "20", "|cffff6b6b-5g 64s|r" },
+    { icon = "Interface\\Icons\\INV_Gauntlets_19", "Tückische Lederstulpen", "Hergestellt", "4", "" },
+    { icon = "Interface\\Icons\\INV_Scroll_03", "Muster: Robe der Leere", "Abgelaufen", "1", "|cffff6b6b-45s|r" },
+    { icon = "Interface\\Icons\\INV_Belt_03", "Zornprankengürtel des arkanen Zorns", "Händler", "1", "|cff5fd38d+15s 20c|r" },
+  }, -42)
 
   function page.Refresh()
     local label
@@ -191,7 +209,7 @@ local function buildOverview(page, w)
     pnlSlot.Sub:SetText(e.profit)
     local share = ({ today = 0.37, week = 0.40, all = 0.35 })[period]
     pnlBar.Set(share, string.format("Marge %d %%", math.floor(share * 100 + 0.5)))
-    pnlLine:SetText("Umsatz " .. e.revenue .. "  ·  Einkauf " .. e.cost .. "  ·  Gebühren " .. e.fees .. "  ·  " .. e.sales)
+    pnlLine:SetText("Umsatz " .. e.revenue .. "  ·  Einkauf " .. e.cost .. "  ·  Gebühren " .. e.fees)
   end
   page.Refresh()
 end
