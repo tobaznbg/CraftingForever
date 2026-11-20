@@ -243,7 +243,9 @@ function List.AddPattern(p)
   return w
 end
 
-function List.Add(rid, n)
+-- set = true (the planner): the count replaces the wish's count instead of adding to it, so
+-- putting a plan on the list again does not double it.
+function List.Add(rid, n, set)
   local r, scan = scanRecipe(rid)
   if not (r and r.out) then
     print("|cff33ccffm4:|r Dieses Rezept stellt kein Item her.")
@@ -253,7 +255,7 @@ function List.Add(rid, n)
   changed()
   for _, w in ipairs(wishes()) do
     if w.rid == rid and w.kind ~= "pattern" then -- a pattern of the same recipe is its own line
-      w.n = w.n + n
+      w.n = set and n or (w.n + n)
       return w
     end
   end

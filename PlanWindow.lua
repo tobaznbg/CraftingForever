@@ -250,7 +250,7 @@ local function toShoppingList(segs, select)
     -- the pattern to buy first (vendor / auction house), then the step's material
     local p = patternOf(c)
     if p and ns.ShoppingList.AddPattern and ns.ShoppingList.AddPattern(p) then patterns = patterns + 1 end
-    if c.out and ns.ShoppingList.Add(c.id, segmentItems(seg)) then
+    if c.out and ns.ShoppingList.Add(c.id, segmentItems(seg), true) then -- replaces an earlier count
       added = added + 1
       first = first or c.id
     else
