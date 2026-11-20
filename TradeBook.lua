@@ -1,6 +1,6 @@
 -- TradeBook: the ledger ("Handelsbuch") in Blizzard's own look (ns.NativeWindow): side tabs
--- Übersicht / Handelsbuch / Bestand / Auktionen. Opens on the overview, period "Alles".
--- Opened with the tab "Handelsbuch" under the auction house, the minimap button or /m4 buch.
+-- Übersicht / Handelsbuch / Bestand / Auktionen / Gold. Opens on the overview, period "Alles",
+-- all characters of the household. Opened with the minimap button (left click) or /m4 buch.
 -- All pages with the real figures (ns.Profit, ns.MyAuctions, ns.Ledger).
 local ADDON, ns = ...
 
@@ -13,11 +13,33 @@ local PERIODS = { { key = "today", label = "Heute" }, { key = "week", label = "7
 
 local window
 local period = "all"
+local charSel = nil -- nil: all characters of the household, else one character key
+
+-- The characters the pages show: the chosen one or the whole household (same realm and faction).
+local function household()
+  return ns.Ledger and ns.Ledger.Household and ns.Ledger.Household() or { ns.CharKey and ns.CharKey() }
+end
+local function shownKeys() return charSel and { charSel } or household() end
+
+-- A character's gold: live for the one playing, else the last stored value (Tracker snapshot,
+-- updated on every change of money while that character plays).
+local function goldOf(key)
+  if key == (ns.CharKey and ns.CharKey()) and GetMoney then return GetMoney() end
+  local c = ns.db and ns.db.chars and ns.db.chars[key]
+  return c and c.money or 0
+end
+
+function TradeBook.Gold()
+  local sum = 0
+  for _, key in ipairs(shownKeys()) do sum = sum + goldOf(key) end
+  return sum
+end
 
 
 -- Overview, built from Blizzard's "Berufe" overview parts: on top two cards side by side
 -- (profit and loss with the period choice, stock), below running auctions and recent trades.
-local CARD_W, TOP_H = 331, 142
+local CARD_W, TOP_H = 331, 130
+local TOP = -62 -- the overview's cards start under the window's choice row (character, period)
 
 local function card(page, w, x, y, width, height, title)
   local c = CreateFrame("Frame", nil, page)
@@ -126,42 +148,8 @@ local function since()
   return nil
 end
 
--- Running auctions: the last answer of this session (with the undercut check), else the copy
--- stored for the companion app (not checked).
-local function auctionRows()
-  local out, under = {}, 0
-  local My = ns.MyAuctions
-  for _, r in ipairs(My and My.Rows and My.Rows() or {}) do
-    if (r.active or 0) > 0 then
-      local status
-      if r.status == "best" then status = GREEN .. "bester Preis|r"
-      elseif r.status == "under" then status = RED .. "unterboten " .. money(r.diff) .. "|r"; under = under + 1
-      elseif r.status == "alone" then status = MUTED .. "allein im AH|r"
-      elseif r.status == "bid" then status = MUTED .. "nur Gebot|r"
-      else status = MUTED .. "–|r" end
-      local left = r.timeLeft and string.format("%d h", math.ceil(r.timeLeft / 3600)) or "–"
-      out[#out + 1] = { itemID = r.itemID, icon = iconOf(r.itemID),
-        (ns.ItemName(r.itemID) or "") .. ((r.quantity or 1) > 1 and (MUTED .. "  " .. r.quantity .. "×|r") or ""),
-        r.unit and money(r.unit) or "–", status, MUTED .. left .. "|r" }
-    end
-  end
-  if #out == 0 then
-    local key = ns.CharKey and ns.CharKey()
-    local saved = key and ns.db and ns.db.owned and ns.db.owned[key]
-    for _, a in ipairs(saved and saved.list or {}) do
-      if not a.s then
-        if a.st == "under" then under = under + 1 end
-        out[#out + 1] = { itemID = a.i, icon = iconOf(a.i),
-          (ns.ItemName(a.i) or "") .. ((a.q or 1) > 1 and (MUTED .. "  " .. a.q .. "×|r") or ""),
-          a.u and money(a.u) or "–",
-          a.st == "under" and (RED .. "unterboten " .. money(a.df) .. "|r") or (a.st == "best" and (GREEN .. "bester Preis|r"))
-            or (a.st == "alone" and (MUTED .. "allein im AH|r")) or (MUTED .. "nicht geprüft|r"),
-          MUTED .. (a.tl and string.format("%d h", math.ceil(a.tl / 3600)) or "–") .. "|r" }
-      end
-    end
-  end
-  return out, under
-end
+-- Running auctions of the shown characters (built with the "Auktionen" tab's collection).
+local function auctionRows() return TradeBook.AuctionRows() end
 
 local KINDS = { buy = "Kauf", sale = "Verkauf", vendor = "Händler", post = "Eingestellt", expired = "Abgelaufen",
   cancelled = "Abgebrochen", craft = "Hergestellt" }
@@ -169,14 +157,26 @@ local KINDS = { buy = "Kauf", sale = "Verkauf", vendor = "Händler", post = "Ein
 -- The last 20 trades (all of them: the "Handelsbuch" tab).
 local function tradeRows()
   local out = {}
-  for _, e in ipairs(ns.Ledger and ns.Ledger.Recent and ns.Ledger.Recent(20) or {}) do
+  local L = ns.Ledger
+  local events = L and L.HouseholdEvents and L.HouseholdEvents() or {}
+  local me, many = ns.CharKey and ns.CharKey(), not charSel and #household() > 1
+  local recent = {}
+  for i = #events, 1, -1 do
+    local e = events[i]
+    local who = L.CharOf and L.CharOf(e)
+    if not charSel or who == charSel then recent[#recent + 1] = { e = e, who = who } end
+    if #recent >= 20 then break end
+  end
+  for _, x in ipairs(recent) do
+    local e = x.e
     local amount = ""
     if e.k == "buy" then amount = RED .. "-" .. money(e.c) .. "|r"
     elseif e.k == "sale" then amount = GREEN .. "+" .. money((e.c or 0) - (e.cut or 0)) .. "|r"
     elseif e.k == "vendor" then amount = GREEN .. "+" .. money(e.c) .. "|r"
     elseif e.k == "post" and e.p then amount = MUTED .. money(e.p * (e.u or 1)) .. "|r" end
+    local whoText = (many and x.who and x.who ~= me) and (MUTED .. "  · " .. (x.who:match("^([^-]+)") or x.who) .. "|r") or ""
     out[#out + 1] = { itemID = e.i, icon = iconOf(e.i),
-      e.n or (e.i and ns.ItemName(e.i)) or "?",
+      (e.n or (e.i and ns.ItemName(e.i)) or "?") .. whoText,
       MUTED .. date("%d.%m. %H:%M", e.t or 0) .. "|r  " .. (KINDS[e.k] or tostring(e.k)),
       tostring(e.u or 1), amount }
   end
@@ -187,33 +187,7 @@ local function buildOverview(page, w)
   local NW = ns.NativeWindow
 
   -- 1. profit and loss (left) with the period choice
-  local pnl = card(page, w, 5, -41, CARD_W, TOP_H, "Gewinn und Verlust")
-  local dd
-  local okD, d = pcall(CreateFrame, "DropdownButton", nil, pnl, "WowStyle1DropdownTemplate")
-  if okD and d and d.SetupMenu then
-    dd = d
-    dd:SetWidth(96)
-    dd:SetPoint("TOPRIGHT", -16, -10)
-    dd:SetupMenu(function(_, root)
-      for _, def in ipairs(PERIODS) do
-        root:CreateRadio(def.label, function() return period == def.key end, function()
-          period = def.key
-          if page.Refresh then page.Refresh() end
-        end)
-      end
-    end)
-  else
-    local okB, bt = pcall(CreateFrame, "Button", nil, pnl, "UIPanelButtonTemplate")
-    dd = okB and bt or CreateFrame("Button", nil, pnl)
-    dd:SetSize(96, 22)
-    dd:SetPoint("TOPRIGHT", -16, -10)
-    dd:SetScript("OnClick", function()
-      for i, def in ipairs(PERIODS) do
-        if def.key == period then period = PERIODS[i % #PERIODS + 1].key break end
-      end
-      if page.Refresh then page.Refresh() end
-    end)
-  end
+  local pnl = card(page, w, 5, TOP, CARD_W, TOP_H, "Gewinn und Verlust")
   local pnlSlot = NW.Slot(pnl, "Interface\\Icons\\INV_Misc_Coin_02", "Gewinn", "")
   pnlSlot:SetPoint("TOPLEFT", 16, -40)
   local pnlFig = NW.Figures(pnl, pnlSlot, { "Umsatz", "Einkauf", "Gebühren" }, { line = false, gap = 8, step = 14 })
@@ -222,33 +196,29 @@ local function buildOverview(page, w)
   pnlFig.SetWidth(CARD_W - 40)
 
   -- 2. stock (right)
-  local stock = card(page, w, 5 + CARD_W + 2, -41, CARD_W, TOP_H, "Bestand")
+  local stock = card(page, w, 5 + CARD_W + 2, TOP, CARD_W, TOP_H, "Bestand und Gold")
   local stockSlot = NW.Slot(stock, "Interface\\Icons\\INV_Box_02", "Buchgewinn", "")
   stockSlot:SetPoint("TOPLEFT", 16, -40)
-  local stockFig = NW.Figures(stock, stockSlot, { "Einkauf", "Erlös", "Items" }, { line = false, gap = 8, step = 14 })
+  local stockFig = NW.Figures(stock, stockSlot, { "Einkauf", "Erlös", "Gold" }, { line = false, gap = 8, step = 14 })
   stockFig.labels[1]:ClearAllPoints()
   stockFig.labels[1]:SetPoint("TOPLEFT", stockSlot, "BOTTOMLEFT", 2, -8)
   stockFig.SetWidth(CARD_W - 40)
 
   -- 3. running auctions (full width)
-  local AH = 200
-  local auc = card(page, w, 5, -41 - TOP_H + 4, 664, AH, "Laufende Auktionen")
+  local AH = 186
+  local auc = card(page, w, 5, TOP - TOP_H + 4, 664, AH, "Laufende Auktionen")
   local aucInfo = auc:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
   aucInfo:SetPoint("TOPRIGHT", -20, -18)
   local setAuctions = scrollTable(auc, { { "Gegenstand", 20, "LEFT", 330 }, { "Preis", 450, "RIGHT" },
     { "Status", 565, "RIGHT" }, { "Zeit", 612, "RIGHT" } }, -42)
 
   -- 4. recent trades (full width), scrollable
-  local trTop = -41 - TOP_H + 4 - AH + 4
+  local trTop = TOP - TOP_H + 4 - AH + 4
   local tr = card(page, w, 5, trTop, 664, 594 + trTop - 10, "Letzte Vorgänge")
   local setTrades = scrollTable(tr, { { "Item", 20, "LEFT", 270 }, { "Wann · Art", 320, "LEFT", 170 },
     { "Menge", 520, "RIGHT" }, { "Betrag", 612, "RIGHT" } }, -42)
 
   function page.Refresh()
-    local label
-    for _, def in ipairs(PERIODS) do if def.key == period then label = def.label end end
-    if dd.SetText then dd:SetText(label) end
-    if dd.GenerateMenu then pcall(dd.GenerateMenu, dd) end
     -- profit and loss of the period, stock now (ns.Profit, one replay)
     local report = ns.Profit and ns.Profit.Report and ns.Profit.Report(since())
     local t = report and report.totals or {}
@@ -259,7 +229,8 @@ local function buildOverview(page, w)
     local st = report and report.stockTotals or {}
     stockSlot.Sub:SetText(signed(st.gain))
     stockFig.values[1]:SetText(money(st.cost)); stockFig.values[2]:SetText(money(st.sell))
-    stockFig.values[3]:SetText(string.format("%d Items · %d Stück", report and #(report.stock or {}) or 0, st.units or 0))
+    stockSlot.Name:SetText(string.format("Buchgewinn  |cff999999%d Items · %d Stück|r", report and #(report.stock or {}) or 0, st.units or 0))
+    stockFig.values[3]:SetText(money(TradeBook.Gold()))
     local rows, under = auctionRows()
     setAuctions(rows)
     aucInfo:SetText(#rows .. " Auktionen" .. (under > 0 and ("  ·  " .. RED .. under .. " unterboten|r") or ""))
@@ -797,7 +768,7 @@ local function collectAuctions()
   local groups = {}
   for _, d in ipairs(defs) do groups[d.key] = { key = d.key, name = d.name, icon = d.icon, items = {}, worth = 0, net = 0, profit = 0, units = 0 } end
   local total = { worth = 0, profit = 0, count = 0 }
-  local function add(bucket, r, status)
+  local function add(bucket, r, status, who)
     local g = groups[bucket]
     local qty = r.quantity or 1
     local cost, source = ns.Profit.UnitCost(r.itemID)
@@ -806,6 +777,9 @@ local function collectAuctions()
     local name = ns.ItemName(r.itemID) or ("#" .. tostring(r.itemID))
     g.items[#g.items + 1] = { key = bucket .. ":" .. tostring(r.itemID) .. ":" .. (#g.items + 1), itemID = r.itemID, icon = iconOf(r.itemID),
       name = name, sub = status, profit = profit or -1e12, worth = (r.unit or 0) * qty, under = bucket == "under",
+      qty = qty, unit = r.unit, timeLeft = r.timeLeft, who = who, short = (r.st == "under" and (RED .. "unterboten " .. money(r.diff) .. "|r"))
+        or (r.st == "best" and (GREEN .. "bester Preis|r")) or (r.st == "alone" and (MUTED .. "allein im AH|r"))
+        or (r.st == "bid" and (MUTED .. "nur Gebot|r")) or (MUTED .. "nicht geprüft|r"),
       cols = { name, r.unit and money(r.unit) or "–", profit and signed(profit) or "–" },
       values = { tostring(qty), r.unit and money(r.unit) or "–", r.foreign and money(r.foreign) or "–", status,
         r.timeLeft and string.format("%d h", math.ceil(r.timeLeft / 3600)) or "–",
@@ -814,20 +788,23 @@ local function collectAuctions()
     if profit then g.profit = g.profit + profit; total.profit = total.profit + profit end
     total.worth, total.count = total.worth + (r.unit or 0) * qty, total.count + 1
   end
-  local rows = My and My.Rows and My.Rows() or {}
+  local me = ns.CharKey and ns.CharKey()
+  local keys = shownKeys()
+  local mine = false
+  for _, key in ipairs(keys) do if key == me then mine = true end end
+  local rows = mine and My and My.Rows and My.Rows() or {}
   local any = false
   for _, r in ipairs(rows) do
     if (r.active or 0) > 0 then
+      r.st = r.status
       any = true
       if r.status == "under" then add("under", r, RED .. "unterboten um " .. money(r.diff) .. "|r")
       elseif r.status == "best" then add("best", r, GREEN .. "bester Preis|r")
       else add("other", r, r.status == "alone" and "allein im AH" or "nicht geprüft") end
     end
   end
-  -- the other characters of the household: their stored auctions (and this one's without the AH)
-  local me = ns.CharKey and ns.CharKey()
-  local households = ns.Ledger and ns.Ledger.Household and ns.Ledger.Household() or { me }
-  for _, key in ipairs(households) do
+  -- the other characters: their stored auctions (and this one's without the AH)
+  for _, key in ipairs(keys) do
     if key ~= me or not any then
     local saved = key and ns.db and ns.db.owned and ns.db.owned[key]
     local who = key ~= me and ("  " .. MUTED .. "· " .. charName(key) .. "|r") or ""
@@ -839,13 +816,13 @@ local function collectAuctions()
     end
     for _, a in ipairs(saved and saved.list or {}) do
       if not a.s then
-        local r = { itemID = a.i, unit = a.u, quantity = a.q, foreign = a.f, diff = a.df,
+        local r = { itemID = a.i, unit = a.u, quantity = a.q, foreign = a.f, diff = a.df, st = a.st,
           timeLeft = a.tl and math.max(0, a.tl - age) or nil }
         local when = (a.ck and ("  " .. MUTED .. "· geprüft " .. ago(a.ck) .. "|r") or "") .. who
-        if a.st == "under" then add("under", r, RED .. "unterboten um " .. money(a.df) .. "|r" .. when)
-        elseif a.st == "best" then add("best", r, GREEN .. "bester Preis|r" .. when)
-        elseif a.st == "alone" then add("other", r, "allein im AH" .. when)
-        else add("other", r, "nicht geprüft (Auktionshaus öffnen)" .. who) end
+        if a.st == "under" then add("under", r, RED .. "unterboten um " .. money(a.df) .. "|r" .. when, key)
+        elseif a.st == "best" then add("best", r, GREEN .. "bester Preis|r" .. when, key)
+        elseif a.st == "alone" then add("other", r, "allein im AH" .. when, key)
+        else add("other", r, "nicht geprüft (Auktionshaus öffnen)" .. who, key) end
       end
     end
     end
@@ -861,6 +838,33 @@ local function collectAuctions()
     end
   end
   return { groups = out, balance = { tostring(total.count), money(total.worth), signed(total.profit) } }
+end
+
+-- The overview's auction rows: undercut first, then the dearest; the character after the name
+-- when all characters are shown.
+function TradeBook.AuctionRows()
+  local data = collectAuctions()
+  local me, many = ns.CharKey and ns.CharKey(), not charSel and #household() > 1
+  local items, under = {}, 0
+  for _, g in ipairs(data.groups) do
+    for _, it in ipairs(g.items) do
+      items[#items + 1] = it
+      if it.under then under = under + 1 end
+    end
+  end
+  table.sort(items, function(x, y)
+    if x.under ~= y.under then return x.under end
+    return (x.worth or 0) > (y.worth or 0)
+  end)
+  local out = {}
+  for _, it in ipairs(items) do
+    local who = (many and it.who and it.who ~= me) and (MUTED .. "  · " .. charName(it.who) .. "|r") or ""
+    out[#out + 1] = { itemID = it.itemID, icon = it.icon,
+      it.name .. ((it.qty or 1) > 1 and (MUTED .. "  " .. it.qty .. "×|r") or "") .. who,
+      it.unit and money(it.unit) or "–", it.short,
+      MUTED .. (it.timeLeft and string.format("%d h", math.ceil(it.timeLeft / 3600)) or "–") .. "|r" }
+  end
+  return out, under
 end
 
 -- Auctions: left every running auction as a row, dearest first (price right), right its details;
@@ -917,21 +921,188 @@ local function buildAuctions(page)
   end
 end
 
+-- "Gold": every character of the household with its gold (and the gold bound in its running
+-- auctions), the total under the list. Always all characters, whatever is chosen above.
+local CLASS_ICON = "Interface\\Icons\\ClassIcon_"
+local function ago(t)
+  if not t then return "unbekannt" end
+  local d = math.max(0, time() - t)
+  if d < 120 then return "gerade eben" end
+  if d < 7200 then return string.format("vor %d min", math.floor(d / 60 + 0.5)) end
+  if d < 172800 then return string.format("vor %d h", math.floor(d / 3600 + 0.5)) end
+  return string.format("vor %d Tagen", math.floor(d / 86400 + 0.5))
+end
+local function auctionWorth(key)
+  local saved = ns.db and ns.db.owned and ns.db.owned[key]
+  local sum, n = 0, 0
+  for _, a in ipairs(saved and saved.list or {}) do
+    if not a.s and a.u then sum, n = sum + a.u * (a.q or 1), n + 1 end
+  end
+  return sum, n
+end
+
+local function buildGold(page)
+  local NW = ns.NativeWindow
+  local LABELS = { "Gold", "Anteil", "In Auktionen", "Zusammen", "Stand" }
+  local view
+  local split = NW.Split(page, {
+    footer = 22 + 3 * 15 + 16,
+    onSelect = function(entry, c)
+      if not view then
+        view = head(c)
+        view.Figures = NW.Figures(c, view.Head, LABELS)
+        local function widths(fr) view.Figures.SetWidth(math.max(100, (fr:GetWidth() or 340) - 46)) end
+        widths(c)
+        c:HookScript("OnSizeChanged", widths)
+      end
+      local ch = entry and entry.ch
+      for _, part in ipairs({ view.Icon, view.Name, view.Sub, view.Head }) do part:SetShown(ch ~= nil) end
+      for i, fs in ipairs(view.Figures.values) do fs:SetShown(ch ~= nil); view.Figures.labels[i]:SetShown(ch ~= nil) end
+      if view.Figures.line then view.Figures.line:SetShown(ch ~= nil) end
+      if not ch then return end
+      view.Icon:SetTexture(ch.icon)
+      view.itemID = nil
+      view.Name:SetText(ch.name)
+      view.Sub:SetText(ch.sub)
+      for i, fs in ipairs(view.Figures.values) do fs:SetText(ch.values[i] or "–") end
+    end,
+  })
+  local balance
+  if split.footer then
+    local title = split.footer:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    title:SetPoint("TOPLEFT", 6, -8)
+    title:SetText("Bilanz")
+    balance = NW.Figures(split.footer, title, { "Gold", "In Auktionen", "Zusammen" }, { gap = 6, step = 15 })
+    balance.SetWidth(math.max(100, (split.footer:GetWidth() or 280) - 14))
+    split.footer:HookScript("OnSizeChanged", function(f) balance.SetWidth(math.max(100, (f:GetWidth() or 280) - 14)) end)
+  end
+  function page.Refresh()
+    local me = ns.CharKey and ns.CharKey()
+    local list, total, bound = {}, 0, 0
+    for _, key in ipairs(household()) do
+      local c = ns.db and ns.db.chars and ns.db.chars[key] or {}
+      local gold = goldOf(key)
+      local worth, n = auctionWorth(key)
+      total, bound = total + gold, bound + worth
+      list[#list + 1] = { key = key, gold = gold, worth = worth, n = n, c = c }
+    end
+    table.sort(list, function(x, y) return x.gold > y.gold end)
+    local entries = { { key = "gold", header = "Charaktere" } }
+    for _, x in ipairs(list) do
+      local c = x.c
+      local icon = c.class and (CLASS_ICON .. c.class:sub(1, 1) .. c.class:sub(2):lower()) or ICON
+      local stand = x.key == me and "jetzt (spielt)" or ago(c.moneyT or c.updated)
+      local ch = { icon = icon, name = charName(x.key),
+        sub = string.format("Stufe %s %s", tostring(c.level or "?"), c.className or ""),
+        values = { money(x.gold), total > 0 and string.format("%d %%", math.floor(x.gold / total * 100 + 0.5)) or "–",
+          x.n > 0 and string.format("%s  " .. MUTED .. "(%d)|r", money(x.worth), x.n) or "–", money(x.gold + x.worth), stand } }
+      entries[#entries + 1] = { key = x.key, name = charName(x.key), icon = icon, value = money(x.gold), ch = ch }
+    end
+    split.SetEntries(entries)
+    if balance then
+      balance.values[1]:SetText(money(total)); balance.values[2]:SetText(money(bound)); balance.values[3]:SetText(money(total + bound))
+    end
+  end
+end
+
 local function refreshPage(page) if page.Refresh then page.Refresh() end end
+
+-- The window's choice row under the title: character (all or one) left, period right. The
+-- period only where it counts (overview, ledger); the gold tab shows every character anyway.
+local choices = {}
+local function chooser(parent, width, options, get, set)
+  local ok, d = pcall(CreateFrame, "DropdownButton", nil, parent, "WowStyle1DropdownTemplate")
+  if ok and d and d.SetupMenu then
+    d:SetWidth(width)
+    d:SetupMenu(function(_, root)
+      for _, o in ipairs(options()) do
+        root:CreateRadio(o.label, function() return get() == o.key end, function() set(o.key) end)
+      end
+    end)
+    function d.Update()
+      for _, o in ipairs(options()) do if o.key == get() then d:SetText(o.label) end end
+      if d.GenerateMenu then pcall(d.GenerateMenu, d) end
+    end
+    return d
+  end
+  local okB, bt = pcall(CreateFrame, "Button", nil, parent, "UIPanelButtonTemplate")
+  d = okB and bt or CreateFrame("Button", nil, parent)
+  d:SetSize(width, 22)
+  d:SetScript("OnClick", function()
+    local opts = options()
+    for i, o in ipairs(opts) do
+      if o.key == get() then set(opts[i % #opts + 1].key) break end
+    end
+  end)
+  function d.Update()
+    for _, o in ipairs(options()) do if o.key == get() and d.SetText then d:SetText(o.label) end end
+  end
+  return d
+end
+
+local function refreshCurrent()
+  local tab = window and window.current and window.tabs[window.current]
+  if tab and tab.page and tab.page.Refresh then ns.Safe(tab.page.Refresh) end
+  for _, d in pairs(choices) do if d.Update then d.Update() end end
+end
+
+local function buildChoices(w)
+  local f = w.frame
+  local charLabel = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+  charLabel:SetPoint("TOPLEFT", 66, -36)
+  charLabel:SetText("Charakter")
+  choices.char = chooser(f, 150, function()
+    local opts = { { key = "all", label = "Alle Charaktere" } }
+    for _, key in ipairs(household()) do opts[#opts + 1] = { key = key, label = charName(key) } end
+    return opts
+  end, function() return charSel or "all" end, function(key)
+    charSel = key ~= "all" and key or nil
+    if ns.Profit and ns.Profit.SetCharFilter then ns.Profit.SetCharFilter(charSel) end
+    refreshCurrent()
+  end)
+  choices.char:SetPoint("LEFT", charLabel, "RIGHT", 8, 0)
+  choices.charLabel = charLabel
+  choices.period = chooser(f, 100, function() return PERIODS end, function() return period end, function(key)
+    period = key
+    refreshCurrent()
+  end)
+  choices.period:SetPoint("TOPRIGHT", -12, -30)
+  local periodLabel = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+  periodLabel:SetPoint("RIGHT", choices.period, "LEFT", -8, 0)
+  periodLabel:SetText("Zeitraum")
+  choices.periodLabel = periodLabel
+  for _, d in pairs(choices) do if d.Update then d.Update() end end
+end
+
+local function showChoices(key)
+  local withChar, withPeriod = key ~= "gold", key == "overview" or key == "ledger"
+  choices.char:SetShown(withChar); choices.charLabel:SetShown(withChar)
+  choices.period:SetShown(withPeriod); choices.periodLabel:SetShown(withPeriod)
+  for _, d in pairs(choices) do if d.Update then d.Update() end end
+end
+local function onTab(key, fn)
+  return function(page)
+    showChoices(key)
+    if fn then fn(page) else refreshPage(page) end
+  end
+end
 
 local function create()
   window = ns.NativeWindow.New({ name = NAME, title = "Handelsbuch", icon = ICON })
+  buildChoices(window)
   window:AddTab({ key = "overview", title = "Übersicht", icon = "Interface\\Icons\\INV_Misc_Coin_02", overview = true,
-    build = buildOverview, onShow = function(page)
+    build = buildOverview, onShow = onTab("overview", function(page)
       if page.Refresh then page.Refresh() end
       ns.Safe(TradeBook.CheckAuctions)
-    end })
+    end) })
   window:AddTab({ key = "ledger", title = "Handelsbuch", icon = "Interface\\Icons\\INV_Misc_Note_01",
-    build = buildLedger, onShow = refreshPage })
+    build = buildLedger, onShow = onTab("ledger") })
   window:AddTab({ key = "stock", title = "Bestand", icon = "Interface\\Icons\\INV_Box_02",
-    build = buildStock, onShow = refreshPage })
+    build = buildStock, onShow = onTab("stock") })
   window:AddTab({ key = "auctions", title = "Auktionen", icon = "Interface\\Icons\\INV_Hammer_15",
-    build = buildAuctions, onShow = function(page) refreshPage(page); ns.Safe(TradeBook.CheckAuctions) end })
+    build = buildAuctions, onShow = onTab("auctions", function(page) refreshPage(page); ns.Safe(TradeBook.CheckAuctions) end) })
+  window:AddTab({ key = "gold", title = "Gold", icon = "Interface\\Icons\\INV_Misc_Coin_01",
+    build = buildGold, onShow = onTab("gold") })
 end
 
 function TradeBook.Show()
@@ -945,6 +1116,13 @@ function TradeBook.Toggle()
 end
 
 function TradeBook.Frame() return window and window.frame end
+
+-- The playing character's gold in its snapshot on every change, so the other characters see it.
+ns.On("PLAYER_MONEY", function()
+  local c = ns.db and ns.db.chars and ns.CharKey and ns.db.chars[ns.CharKey()]
+  if c and GetMoney then c.money, c.moneyT = GetMoney(), time() end
+  if window and window.frame:IsShown() and (window.current == "gold" or window.current == "overview") then refreshCurrent() end
+end)
 
 -- Own auctions changed (MyAuctions: list or a search result): the shown page follows.
 function TradeBook.OnAuctionsChanged()
@@ -972,35 +1150,6 @@ if ns.On then
     if window and window.frame:IsShown() and C_Timer then
       C_Timer.After(1, function() ns.Safe(checkAuctions) end)
     end
-  end)
-end
-
--- The tab "Handelsbuch" under the auction house, after Blizzard's tabs. It opens the window and
--- leaves the auction house view as it is (it is not one of the AH's display modes).
-local tab
-local function addTab()
-  local ah = AuctionHouseFrame
-  if not ah or tab then return end
-  local tabs = rawget(ah, "Tabs")
-  local last = type(tabs) == "table" and tabs[#tabs]
-  local ok, t = pcall(CreateFrame, "Button", "M4CompanionTradeBookTab", ah, "AuctionHouseFrameDisplayModeTabTemplate")
-  if not ok then ok, t = pcall(CreateFrame, "Button", "M4CompanionTradeBookTab", ah, "UIPanelButtonTemplate") end
-  if not ok then return end
-  tab = t
-  t:SetText("Handelsbuch")
-  if PanelTemplates_TabResize then pcall(PanelTemplates_TabResize, t, 20, nil, 70) end
-  if last then
-    t:SetPoint("TOPLEFT", last, "TOPRIGHT", 3, 0)
-  else
-    t:SetPoint("TOPLEFT", ah, "BOTTOMLEFT", 300, 2)
-  end
-  if PanelTemplates_DeselectTab then pcall(PanelTemplates_DeselectTab, t) end
-  t:SetScript("OnClick", function() ns.Safe(TradeBook.Toggle) end)
-end
-
-if ns.On then
-  ns.On("AUCTION_HOUSE_SHOW", function()
-    if C_Timer then C_Timer.After(0.2, function() ns.Safe(addTab) end) else ns.Safe(addTab) end
   end)
 end
 

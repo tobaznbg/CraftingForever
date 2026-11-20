@@ -73,6 +73,15 @@ local TRADE = "Handel (gekauft, verkauft)"
 local FARMED = "Gesammelt (Farm, Beute)"
 Profit.TRADE, Profit.FARMED = TRADE, FARMED
 
+-- Character filter (the ledger window's choice): the figures count only this character's events;
+-- the pools (cost of goods) still run over the whole household. nil = every character.
+local charFilter = nil
+function Profit.SetCharFilter(key) charFilter = key end
+function Profit.CharFilter() return charFilter end
+local function charOK(e)
+  return not charFilter or not (ns.Ledger and ns.Ledger.CharOf) or ns.Ledger.CharOf(e) == charFilter
+end
+
 -- Gathered goods count for their gathering profession, not as loot: leather, hides and scales
 -- for skinning, ore, stone and gems for mining, herbs for herbalism (ns.Gathering).
 local gatherOf
@@ -200,7 +209,7 @@ local function replay(since)
   end
 
   for _, e in ipairs(events) do
-    local inPeriod = not since or (e.t or 0) >= since
+    local inPeriod = (not since or (e.t or 0) >= since) and charOK(e)
     local id, u = idOf(e), e.u or 0
     if id and e.k == "buy" then
       everBought[id] = true
@@ -308,7 +317,7 @@ local function clock() return (GetTime and GetTime()) or os.clock() end
 local function replayAll()
   local events = ns.Ledger and (ns.Ledger.HouseholdEvents or ns.Ledger.Events) and (ns.Ledger.HouseholdEvents or ns.Ledger.Events)() or {}
   local last = events[#events]
-  local key = tostring(#events) .. ":" .. tostring(last)
+  local key = tostring(#events) .. ":" .. tostring(last) .. ":" .. tostring(charFilter)
   local now = clock()
   if not cached or key ~= cachedKey or now - cachedAt > CACHE_TTL then
     cached, cachedKey, cachedAt = { replay(nil) }, key, now
@@ -400,15 +409,19 @@ end
 
 -- What the character really holds of an item: bags, bank (once seen) and own running
 -- auctions. nil when the bank was never opened (then nothing is capped).
-local function heldCounts()
+local function heldCounts(household)
   -- bags, bank (once seen) and running auctions of every character of the household; nil when a
   -- character's bank was never opened (then nothing is capped)
   local keys = ns.Ledger and ns.Ledger.Household and ns.Ledger.Household() or { ns.CharKey and ns.CharKey() }
+  -- one chosen character: only what is known of it (bags, bank once seen, auctions), never the
+  -- uncapped household pools
+  local single = charFilter and not household
+  if single then keys = { charFilter } end
   local held = {}
   for _, key in ipairs(keys) do
     local inv = key and ns.db and ns.db.inventory and ns.db.inventory[key]
     if inv then
-      if not (inv.bagsT and inv.bankT) then return nil end
+      if not (inv.bagsT and inv.bankT) and not single then return nil end
       for _, part in ipairs({ inv.bags or {}, inv.bank or {} }) do
         for id, entry in pairs(part) do held[id] = (held[id] or 0) + (entry.n or 0) end
       end
@@ -418,6 +431,7 @@ local function heldCounts()
       if a.i and not a.s then held[a.i] = (held[a.i] or 0) + (a.q or 1) end
     end
   end
+  if single then return held end
   local me = ns.CharKey and ns.CharKey()
   local inv = me and ns.db.inventory and ns.db.inventory[me]
   if not (inv and inv.bagsT and inv.bankT) then return nil end
@@ -556,7 +570,7 @@ function Profit.ItemEvents(itemID, since)
   local out = {}
   for i = #events, 1, -1 do
     local e = events[i]
-    if (not since or (e.t or 0) >= since) and idOf(e) == itemID then
+    if (not since or (e.t or 0) >= since) and idOf(e) == itemID and charOK(e) then
       table.insert(out, { t = e.t, k = e.k, u = e.u, c = e.c, cut = e.cut, p = e.p, dep = e.dep,
         lost = lost[e] and round(lost[e]) or nil })
     end
@@ -575,7 +589,7 @@ function Profit.UnitCost(itemID)
   -- Holding more than the ledger's pool (e.g. 1 crate bought, 1674 looted): the extra units are
   -- loot and cost nothing, the average is spread over all units held.
   local now = clock()
-  if not heldCache or now - heldAt > 2 then heldCache, heldAt = heldCounts() or false, now end
+  if not heldCache or now - heldAt > 2 then heldCache, heldAt = heldCounts(true) or false, now end
   local have = heldCache and heldCache[itemID] or 0
   local function average(pool, source)
     if have > pool.q then return pool.v / have, source .. " + Beute" end

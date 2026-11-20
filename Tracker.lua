@@ -306,8 +306,9 @@ end
 
 -- Character snapshot, so levels and skills are visible outside the game
 -- and in the window.
-local function snapshotCharacter()
+local function snapshotCharacter(atLogout)
   local db = ns.db
+  local prev = db.chars[ns.CharKey()]
   local className, classFile = UnitClass("player")
   local info = {
     updated = time(),
@@ -337,6 +338,13 @@ local function snapshotCharacter()
         table.insert(info.professions, { name = name, rank = rank, max = maxRank })
       end
     end
+  end
+  -- Gold: at logout (and /reload) the client answers 0, so the last known value stays; the
+  -- same when it answers 0 before the money is loaded. PLAYER_MONEY keeps it current (TradeBook).
+  if prev and prev.money and (atLogout or (info.money == 0 and prev.money > 0)) then
+    info.money, info.moneyT = prev.money, prev.moneyT
+  else
+    info.moneyT = time()
   end
   db.chars[ns.CharKey()] = info
 end
@@ -400,4 +408,4 @@ end)
 ns.On("SKILL_LINES_CHANGED", function() snapshotCharacter() end)
 ns.On("CHAT_MSG_SKILL", function() snapshotCharacter() end)
 ns.On("PLAYER_LEVEL_UP", function() snapshotCharacter() end)
-ns.On("PLAYER_LOGOUT", function() snapshotCharacter() end)
+ns.On("PLAYER_LOGOUT", function() snapshotCharacter(true) end)
