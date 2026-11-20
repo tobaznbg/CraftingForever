@@ -662,67 +662,6 @@ end
 
 -- "Einstand eintragen": a cost per unit typed by hand (ns.Profit.SetManualCost), for an item
 -- bought before the addon logged purchases. Placed at the y cursor of the cost section.
-local editor
-local function costEditor(id)
-  local Style = ns.Style
-  if not (ns.Profit and ns.Profit.SetManualCost) then return end
-  if not editor then
-    editor = CreateFrame("Frame", nil, body)
-    editor:SetHeight(24)
-    editor.label = Style.Text(editor, 12)
-    editor.label:SetPoint("LEFT", 0, 0)
-    editor.label:SetTextColor(unpack(Style.C.muted))
-    editor.label:SetText("Einstand eintragen")
-    editor.box = CreateFrame("EditBox", nil, editor)
-    editor.box:SetSize(90, 20)
-    editor.box:SetPoint("LEFT", editor.label, "RIGHT", 8, 0)
-    editor.box:SetAutoFocus(false)
-    editor.box:SetMaxLetters(16)
-    editor.box:SetFontObject(Style.Font(12))
-    editor.box:SetTextInsets(4, 4, 0, 0)
-    Style.Solid(editor.box, Style.C.button):SetAllPoints()
-    Style.Border(editor.box)
-    local function save()
-      local copper = ns.Profit.ParseMoney(editor.box:GetText())
-      if copper and copper > 0 then
-        ns.Profit.SetManualCost(editor.id, copper)
-        editor.box:SetText("")
-        editor.box:ClearFocus()
-        render()
-      elseif editor.box:GetText() ~= "" then
-        editor.box:SetText("")
-        print("|cffffd100M4:|r Betrag nicht verstanden – z. B. 65g, 65g 20s oder 65")
-      end
-    end
-    editor.box:SetScript("OnEnterPressed", save)
-    editor.box:SetScript("OnEscapePressed", function(self) self:SetText(""); self:ClearFocus() end)
-    editor.save = Style.Button(editor, "Speichern", 76, 20, function() ns.Safe(save) end)
-    editor.save:SetPoint("LEFT", editor.box, "RIGHT", 6, 0)
-    editor.clear = Style.Button(editor, "Entfernen", 76, 20, function()
-      ns.Safe(function() ns.Profit.SetManualCost(editor.id, nil); render() end)
-    end)
-    editor.clear:SetPoint("LEFT", editor.save, "RIGHT", 6, 0)
-    editor:SetScript("OnEnter", function(self)
-      GameTooltip:SetOwner(self, "ANCHOR_TOP")
-      GameTooltip:AddLine("Was hat dich ein Stück gekostet?", 1, 1, 1)
-      GameTooltip:AddLine("Für Käufe, die das Addon nicht gesehen hat.\nZählt in GuV, Einstand und Luft; wird zwischen deinen PCs abgeglichen.", 0.8, 0.8, 0.8, true)
-      GameTooltip:Show()
-    end)
-    editor:SetScript("OnLeave", function() GameTooltip:Hide() end)
-  end
-  editor.id = id
-  editor:ClearAllPoints()
-  editor:SetPoint("TOPLEFT", body, "TOPLEFT", 4, -(y + 2))
-  editor:SetPoint("RIGHT", body, "RIGHT", -4, 0)
-  editor.clear:SetShown(ns.Profit.ManualCost(id) ~= nil)
-  editor:Show()
-  y = y + 28
-end
-
--- The editor only shows while the cost is unknown.
-local function costEditorHide()
-  if editor then editor:Hide() end
-end
 
 render = function()
   if not frame or not frame:IsShown() or not itemID then return end
@@ -823,10 +762,7 @@ render = function()
   section("Einstand")
   if not cost then
     line("Einstand / Stk.", Style.MUTED .. "unbekannt|r")
-    -- only then a way to enter it (bought before the ledger ran)
-    costEditor(itemID)
   else
-    costEditorHide()
     line("Einstand / Stk.", money(math.floor(cost + 0.5)))
     line("Minimalpreis", money(ns.Profit.BreakEven(cost)))
     local other
