@@ -182,16 +182,27 @@ local function addLines(tooltip, itemID)
   tooltip:Show()
 end
 
+-- The game tooltip (bags, AH, hovering a chat link) and the item link window a click on a
+-- chat link opens (ItemRefTooltip). Both get the lines, on every client generation, and
+-- both forget the shown item when cleared (else a second click on the same link stays bare).
+local TOOLTIPS = { GameTooltip, ItemRefTooltip }
 if TooltipDataProcessor and Enum and Enum.TooltipDataType then
   TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Item, function(tooltip, data)
     if tooltip == GameTooltip or tooltip == ItemRefTooltip then
       ns.Safe(addLines, tooltip, data and data.id)
     end
   end)
-else
-  GameTooltip:HookScript("OnTooltipSetItem", function(tooltip)
-    local _, link = tooltip:GetItem()
-    ns.Safe(addLines, tooltip, link and tonumber(link:match("item:(%d+)")))
-  end)
 end
-GameTooltip:HookScript("OnTooltipCleared", function(tooltip) tooltip.cfDone = nil end)
+for _, tt in ipairs(TOOLTIPS) do
+  if tt and tt.HookScript then
+    -- Older clients without the tooltip data processor, and as a fallback when it does not
+    -- report the link window: the classic script (addLines runs once per shown item).
+    if tt.HasScript == nil or tt:HasScript("OnTooltipSetItem") then
+      tt:HookScript("OnTooltipSetItem", function(tooltip)
+        local _, link = tooltip:GetItem()
+        ns.Safe(addLines, tooltip, link and tonumber(link:match("item:(%d+)")))
+      end)
+    end
+    tt:HookScript("OnTooltipCleared", function(tooltip) tooltip.cfDone = nil end)
+  end
+end
