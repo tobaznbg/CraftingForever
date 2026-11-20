@@ -120,3 +120,111 @@ if ns.On then
     if C_Timer then C_Timer.After(0.2, function() ns.Safe(addTab) end) else ns.Safe(addTab) end
   end)
 end
+
+-- Probe (one step, removed later): what the profession window is made of in this client, so
+-- the ledger window can use the very same templates, atlases and side tabs.
+local function regionsOf(f, depth)
+  local out = {}
+  if type(f) ~= "table" or not f.GetRegions then return out end
+  for _, r in ipairs({ f:GetRegions() }) do
+    if r.GetObjectType and r:GetObjectType() == "Texture" then
+      local atlas = r.GetAtlas and r:GetAtlas()
+      local tex = r.GetTexture and r:GetTexture()
+      local layer, sub = r:GetDrawLayer()
+      local p, rel, rp, x, y = r:GetPoint(1)
+      out[#out + 1] = string.format("%s|%s|%s/%s|%s %s %s %.0f %.0f|%.0fx%.0f|shown=%s", tostring(r:GetName() or "-"),
+        tostring(atlas or tex), tostring(layer), tostring(sub), tostring(p),
+        rel == f and "parent" or tostring(rel and rel.GetName and rel:GetName() or (rel and "other") or "nil"),
+        tostring(rp), x or 0, y or 0, r:GetWidth() or 0, r:GetHeight() or 0, tostring(r:IsShown()))
+    end
+  end
+  return out
+end
+
+local function keysOf(t)
+  local k = {}
+  for key, v in pairs(t) do
+    if type(v) == "table" and v.GetObjectType then k[#k + 1] = tostring(key) .. ":" .. v:GetObjectType() end
+  end
+  table.sort(k)
+  return table.concat(k, ",")
+end
+
+function TradeBook.Probe()
+  if not ns.db then return end
+  if not rawget(_G, "ProfessionsFrame") then
+    local load = (C_AddOns and C_AddOns.LoadAddOn) or LoadAddOn
+    if load then pcall(load, "Blizzard_Professions") end
+  end
+  local out = { t = time() }
+  local pf = rawget(_G, "ProfessionsFrame")
+  out.pf = type(pf)
+  if type(pf) == "table" then
+    out.pfKeys = keysOf(pf)
+    out.pfRegions = table.concat(regionsOf(pf), " ;; ")
+    local page = rawget(pf, "CraftingPage")
+    if type(page) == "table" then
+      out.pageKeys = keysOf(page)
+      out.pageRegions = table.concat(regionsOf(page), " ;; ")
+      local list = rawget(page, "RecipeList")
+      if type(list) == "table" then
+        out.listKeys = keysOf(list)
+        out.listRegions = table.concat(regionsOf(list), " ;; ")
+        local sb = rawget(list, "SearchBox")
+        if type(sb) == "table" then
+          local p, rel, rp, x, y = sb:GetPoint(1)
+          out.searchPoint = string.format("%s %s %.0f %.0f %.0fx%.0f", tostring(p), tostring(rp), x or 0, y or 0, sb:GetWidth(), sb:GetHeight())
+        end
+        local fb = rawget(list, "FilterButton") or rawget(list, "FilterDropdown")
+        if type(fb) == "table" then
+          local p, rel, rp, x, y = fb:GetPoint(1)
+          out.filterPoint = string.format("%s %s %.0f %.0f %.0fx%.0f %s", tostring(p), tostring(rp), x or 0, y or 0, fb:GetWidth(), fb:GetHeight(), fb:GetObjectType())
+        end
+        local box = rawget(list, "ScrollBox")
+        if type(box) == "table" and box.ForEachFrame then
+          local rows = {}
+          box:ForEachFrame(function(row)
+            if #rows < 3 then
+              rows[#rows + 1] = keysOf(row) .. " => " .. table.concat(regionsOf(row), " ;; ")
+            end
+          end)
+          out.rows = table.concat(rows, " || ")
+        end
+      end
+      local form = rawget(page, "SchematicForm")
+      if type(form) == "table" then
+        out.formKeys = keysOf(form)
+        out.formRegions = table.concat(regionsOf(form), " ;; ")
+        local bg = rawget(form, "Background")
+        if type(bg) == "table" then out.formBackground = tostring(bg.GetAtlas and bg:GetAtlas() or bg:GetTexture()) end
+      end
+    end
+    -- side tabs: children of the window at its right edge
+    local tabs = {}
+    for _, child in ipairs({ pf:GetChildren() }) do
+      local l, r = child:GetLeft(), pf:GetRight()
+      if l and r and l > r - 10 then
+        tabs[#tabs + 1] = tostring(child:GetName() or "-") .. ":" .. child:GetObjectType() .. " " .. keysOf(child)
+          .. " => " .. table.concat(regionsOf(child), " ;; ")
+      end
+    end
+    out.sideTabs = table.concat(tabs, " || ")
+  end
+  local info = C_XMLUtil and C_XMLUtil.GetTemplateInfo
+  local names = {}
+  for _, n in ipairs({ "ProfessionsRecipeListCategoryTemplate", "ProfessionsRecipeListRecipeTemplate",
+      "ProfessionsRecipeListTemplate", "ProfessionsFrameTabTemplate", "SpellBookSkillLineTabTemplate",
+      "ProfessionsSideTabTemplate", "LargeSideTabButtonTemplate", "SideTabTemplate", "SearchBoxTemplate",
+      "WowStyle1FilterDropdownTemplate", "UIMenuButtonStretchTemplate", "ProfessionsSchematicFormTemplate" }) do
+    local ok, ti = pcall(function() return info and info(n) end)
+    names[#names + 1] = n .. "=" .. tostring(ok and ti ~= nil)
+  end
+  out.templates = table.concat(names, ",")
+  ns.db.tradeBookProbe = out
+end
+
+if ns.On then
+  ns.On("TRADE_SKILL_SHOW", function()
+    if C_Timer then C_Timer.After(0.5, function() ns.Safe(TradeBook.Probe) end) end
+  end)
+end
