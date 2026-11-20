@@ -5,7 +5,8 @@
 --   now        "AH jetzt" in every view: the price it can be bought for right now, i.e. the
 --              cheapest offer (copper per unit), nil if not on offer; from the newest of
 --              collector snapshot, own full scan and single item search
---   offers, quantity   auctions / units listed at that time (internal, not shown)
+--   offers, quantity   auctions / units listed at that time
+--   dataT      time() of the source "now" comes from (collector snapshot, own scan or search)
 --   medToday, medTodayHours  median of the hourly cheapest offers today (Berlin calendar
 --                      day, 0:00-23:59 German time) so far, and the hours behind it (internal,
 --                      not shown)
@@ -116,7 +117,9 @@ function Item.Get(itemID)
   local o = observed[itemID]
   if o and o.t > bestT then
     e.now = o.now
+    bestT = o.t
   end
+  e.dataT = bestT > 0 and bestT or nil
   if row then
     e.demand, e.certain = row[18], row[19]
     e.trend, e.direction = row[16], row[17]

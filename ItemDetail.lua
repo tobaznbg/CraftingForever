@@ -392,8 +392,21 @@ local function drawChart(c, history, limit, sellAt, viewKey)
     return
   end
   c.empty:Hide()
-  local cutLow, cutHigh = Detail.ChartScale(values)
-  local lo, hi
+  -- Scale: the median line (the market value) sets it; the cheapest offers are drawn up to
+  -- 1.5x its highest and down to half its lowest value, beyond that cut with a marker.
+  local med = Detail.RollingMedian(prices, step, MEDIAN_WINDOW)
+  local medLo, medHi
+  for i = 1, SLOTS do
+    local m = med[i]
+    if m and sx(i) then medLo, medHi = math.min(medLo or m, m), math.max(medHi or m, m) end
+  end
+  local cutLow, cutHigh
+  if medLo then
+    cutLow, cutHigh = medLo * 0.5, medHi * 1.5
+  else
+    cutLow, cutHigh = Detail.ChartScale(values)
+  end
+  local lo, hi = medLo, medHi
   for _, p in ipairs(values) do
     if not (cutLow and p < cutLow) and not (cutHigh and p > cutHigh) then
       lo, hi = math.min(lo or p, p), math.max(hi or p, p)
@@ -472,7 +485,6 @@ local function drawChart(c, history, limit, sellAt, viewKey)
   hideFrom(c.lines, nl + 1)
   hideFrom(c.ticks, nt + 1)
   -- median line (24 h, the market value): drawn over the cheapest line
-  local med = Detail.RollingMedian(prices, step, MEDIAN_WINDOW)
   c.view.median = med
   local nm2, prev = 0, nil
   for i = 1, SLOTS do
@@ -556,7 +568,7 @@ local function drawChart(c, history, limit, sellAt, viewKey)
   c.t1:SetText(stamp(axisStart))
   c.t2:SetText(stamp(axisStart + SPAN / 2))
   c.t3:SetText("jetzt")
-  c.legend:SetText((skin == "blizzard" and "|cffffd100" or ns.Style.ACCENT) .. "Linie|r Median 24 h  ·  grau billigstes  ·  Balken Menge  ·  " .. ORANGE .. "orange|r ausverkauft"
+  c.legend:SetText((skin == "blizzard" and "|cffffd100" or ns.Style.ACCENT) .. "Linie|r Median 24 h  ·  grau billigstes  ·  Balken Stück  ·  " .. ORANGE .. "orange|r leer"
     .. (limit and ("  ·  " .. GREEN .. "grün|r Kauf bis  ·  weiß Einstellen") or ""))
 end
 
@@ -704,6 +716,11 @@ local function costEditor(id)
   y = y + 28
 end
 
+-- The editor only shows while the cost is unknown.
+local function costEditorHide()
+  if editor then editor:Hide() end
+end
+
 render = function()
   if not frame or not frame:IsShown() or not itemID then return end
   local Style = ns.Style
@@ -799,43 +816,50 @@ render = function()
   -- 3. Market figures (ns.Item)
   section("Markt")
   local fresh = live and live.itemID == itemID and live
+  local now = item.now
   if fresh and fresh.state == "done" then
     local cheapest = fresh.offers[1]
-    line("AH jetzt", cheapest and (money(cheapest.unit) .. "  " .. Style.MUTED .. "gerade gesucht|r")
-      or (Style.MUTED .. "nicht im AH (gerade gesucht)|r"))
-  elseif fresh and fresh.state == "searching" then
-    line("AH jetzt", (item.now and (money(item.now) .. "  ") or "") .. Style.ACCENT .. "suche …|r")
-  else
-    local cmp = ns.Item.RefCompare(item.now, item)
-    line("AH jetzt", item.now and (money(item.now) .. (cmp and ("  " .. Style.MUTED .. cmp .. "|r") or ""))
-      or (Style.MUTED .. "nicht im AH|r"))
+    now = cheapest and cheapest.unit or nil
   end
+  line("AH jetzt", now and money(now) or (Style.MUTED .. "nicht im AH|r"))
   line("Median heute", item.medToday and money(item.medToday) or "–")
   line("Median gestern", item.medYesterday and money(item.medYesterday) or "–")
   line("Median 7 Tage", item.med7 and money(item.med7) or "–")
-  -- Real sales of guild members (their ledgers, without names; ns.Item). Shown only.
-  local g = item.guildSale
-  line("Gilde verkauft", g and (money(g.median) .. "  " .. Style.MUTED .. string.format(
-    "Median aus %d Verkäufen, %s Stück, %d Tage|r", g.sales, count(g.units), g.days)) or "–")
-  line("Trend", ns.Item.TrendText(item) or "–")
+  local trend = ns.Item.TrendText(item)
+  if trend and item.trend then
+    if item.trend <= -0.03 then trend = "|cffff6b6b" .. trend .. "|r"
+    elseif item.trend >= 0.03 then trend = GREEN .. trend .. "|r" end
+  end
+  line("Trend", trend or "–")
   local demand = ns.Item.DemandText(item)
   if demand and item.certain and item.certain >= 1 then
     demand = demand .. "  ·  mind. " .. count(item.certain) .. " / Tag verkauft"
   end
   line("Nachfrage", demand or "–")
-  line("Im AH", string.format("%s Angebote  ·  %s Stück", count(item.offers), count(item.quantity)))
+  line("Angebot AH", string.format("%s Angebote  ·  %s Stück", count(item.offers), count(item.quantity)))
+  -- How old the figures above are: the search on opening, else the newest source.
+  local dataText
+  if fresh and fresh.state == "searching" then
+    dataText = Style.ACCENT .. "suche …|r"
+  elseif fresh and fresh.state == "done" then
+    dataText = time() - fresh.t < 60 and "gerade gesucht" or ("gesucht " .. ago(fresh.t))
+  elseif item.dataT then
+    dataText = (fresh and fresh.state == "failed" and (Style.MUTED .. "Suche ohne Antwort · |r") or "") .. ago(item.dataT)
+  end
+  line("Daten", dataText or "–")
 
   -- 3b. What one unit cost the player (ns.Profit.UnitCost) and the room left to undercut.
-  local cost, costSource = nil, nil
-  if ns.Profit and ns.Profit.UnitCost then cost, costSource = ns.Profit.UnitCost(itemID) end
-  section("Dein Einstand")
+  local cost = nil
+  if ns.Profit and ns.Profit.UnitCost then cost = ns.Profit.UnitCost(itemID) end
+  section("Einstand")
   if not cost then
-    line("Einstand pro Stück", Style.MUTED .. "unbekannt|r")
-    line("", Style.MUTED .. "kein Kauf, keine Herstellung im Handelsbuch, kein gelerntes Rezept|r")
-  end
-  if cost then
-    line("Einstand pro Stück", money(math.floor(cost + 0.5)) .. "  " .. Style.MUTED .. costSource .. "|r")
-    line("Ohne Verlust ab", money(ns.Profit.BreakEven(cost)) .. "  " .. Style.MUTED .. "nach 5 % Gebühr|r")
+    line("Einstand / Stk.", Style.MUTED .. "unbekannt|r")
+    -- only then a way to enter it (bought before the ledger ran)
+    costEditor(itemID)
+  else
+    costEditorHide()
+    line("Einstand / Stk.", money(math.floor(cost + 0.5)))
+    line("Minimalpreis", money(ns.Profit.BreakEven(cost)))
     local other
     if fresh and fresh.state == "done" then
       for _, o in ipairs(fresh.offers) do
@@ -846,11 +870,10 @@ render = function()
     end
     if other then
       local room = math.floor((other - 1) * 0.95 - cost)
-      line("Luft beim Unterbieten", room >= 0 and ("|cff5fd38d" .. money(room) .. "|r")
-        or ("|cffff6b6b-" .. money(-room) .. " (unter Einstand)|r"))
+      line("Luft beim Unterbieten", room >= 0 and (GREEN .. money(room) .. "|r")
+        or ("|cffff6b6b-" .. money(-room) .. "|r"))
     end
   end
-  costEditor(itemID)
 
   -- 4. Price stair: offers of the sniper's last search, else of the own full scan; left out
   -- without either. With a hit: bought levels green, the level sold under highlighted.
@@ -873,7 +896,7 @@ render = function()
   elseif fresh and fresh.state == "failed" then
     from = "Suche ohne Antwort" .. (from and ("  ·  " .. from) or "")
   end
-  if from then section("Preistreppe (" .. from .. ")") end
+  if from then section("Preistreppe") end
   if fresh and fresh.state == "searching" and not levels then
     line(Style.ACCENT .. "suche …|r", "")
   elseif levels and #levels == 0 then
