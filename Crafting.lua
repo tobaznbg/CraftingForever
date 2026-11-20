@@ -709,7 +709,19 @@ local function farmSpots(e, max)
         right = right, loc = loc, grey = not f.reach }
     end
   else
-    for _, n in ipairs(C and C.node and C.node[e.itemID] or {}) do
+    local nodes = {}
+    for _, n in ipairs(C and C.node and C.node[e.itemID] or {}) do nodes[#nodes + 1] = n end
+    -- gems and stones come out of the ore's veins: the nodes of the items of the same skill
+    if #nodes == 0 then
+      local group = gatherGroup(e.pid)
+      for _, entry in ipairs(group and group.items or {}) do
+        if entry[2] == e.need and entry[1] ~= e.itemID then
+          for _, n in ipairs(C and C.node and C.node[entry[1]] or {}) do nodes[#nodes + 1] = n end
+        end
+      end
+    end
+    table.sort(nodes, function(a, b) return a[6] > b[6] end) -- the zone with the most spawns first
+    for _, n in ipairs(nodes) do
       if #out >= max then break end
       local zone = F.ZoneName(n[3])
       out[#out + 1] = { text = n[2], sub = string.format("%s · %d Fundorte", zone, n[6]), right = "",
