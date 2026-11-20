@@ -5,6 +5,9 @@
 --   ledger    union; a trade counts once (Sync.EventKey, sameTrade), copies complete each other
 --   recipes   per "Name-Realm:Profession" the scan with the newer t
 --   owned     per character the answer with the newer t
+--   chars     per character the snapshot with the newer updated; the gold (money) by its own
+--             moneyT, the last name (fullName) from the other copy when the newer has none
+--   inventory per character bags and bank each by its own time (bagsT, bankT)
 --   settings  ns.db.settings and ns.db.minimap, taken when the synced settingsT is newer than
 --             the local one (or there is none locally yet)
 -- Nothing local is lost, merging the same state again changes nothing. The same rules run on
@@ -164,9 +167,28 @@ local function assign(dst, src)
   end
 end
 
+-- A character snapshot from the sync against the local one (same rule as the server's
+-- mergeChar): the newer updated wins, the gold from whichever copy saw it later, the last name
+-- kept. Returns the new table, nil when nothing changes.
+function Sync.MergeChar(old, new)
+  if type(old) ~= "table" then return copy(new) end
+  local winner, other = old, new
+  if num(new.updated) > num(old.updated) then winner, other = new, old end
+  local out = copy(winner)
+  if num(other.moneyT) > num(out.moneyT) then out.money, out.moneyT = other.money, other.moneyT end
+  if (out.fullName == nil or out.fullName == "") and type(other.fullName) == "string" and other.fullName ~= "" then
+    out.fullName = other.fullName
+  end
+  if num(out.updated) == num(old.updated) and out.money == old.money and out.moneyT == old.moneyT
+    and out.fullName == old.fullName then
+    return nil
+  end
+  return out
+end
+
 -- Merges a synced state into db. Returns what changed.
 function Sync.Apply(db, s)
-  local stats = { added = 0, recipes = 0, owned = 0, settings = false }
+  local stats = { added = 0, recipes = 0, owned = 0, chars = 0, inventory = 0, settings = false }
   if type(db) ~= "table" or type(s) ~= "table" then return stats end
   local keep = ns.Ledger and ns.Ledger.KEEP or DEFAULT_KEEP
   if type(s.ledger) == "table" then
@@ -204,6 +226,36 @@ function Sync.Apply(db, s)
       if type(key) == "string" and newer(db.owned, key, o) then
         db.owned[key] = copy(o)
         stats.owned = stats.owned + 1
+      end
+    end
+  end
+  if type(s.chars) == "table" then
+    db.chars = db.chars or {}
+    for key, c in pairs(s.chars) do
+      if type(key) == "string" and type(c) == "table" then
+        local merged = Sync.MergeChar(db.chars[key], c)
+        if merged then
+          db.chars[key] = merged
+          stats.chars = stats.chars + 1
+        end
+      end
+    end
+  end
+  if type(s.inventory) == "table" then
+    db.inventory = db.inventory or {}
+    for key, inv in pairs(s.inventory) do
+      if type(key) == "string" and type(inv) == "table" then
+        local have = db.inventory[key]
+        if type(have) ~= "table" then have = {}; db.inventory[key] = have end
+        local took = false
+        for _, part in ipairs({ "bags", "bank" }) do
+          local t = part .. "T"
+          if type(inv[part]) == "table" and num(inv[t]) > num(have[t]) then
+            have[part], have[t] = copy(inv[part]), num(inv[t])
+            took = true
+          end
+        end
+        if took then stats.inventory = stats.inventory + 1 end
       end
     end
   end

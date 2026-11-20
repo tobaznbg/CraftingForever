@@ -536,11 +536,17 @@ end
 
 -- Writes the snapshot into the character's own auctions entry (only when it exists: its t
 -- is what the sync needs; a new entry would claim "no running auctions").
+-- The snapshot holds this character's stock only (the server sums the characters' snapshots;
+-- the household stock in every snapshot would count each item twice).
 function Profit.WriteSnapshot()
   local key = ns.CharKey and ns.CharKey()
   local o = key and ns.db and ns.db.owned and ns.db.owned[key]
   if type(o) ~= "table" then return end
-  o.stk = Profit.Snapshot()
+  local before = charFilter
+  charFilter = key
+  local ok, snap = pcall(Profit.Snapshot)
+  charFilter = before
+  if ok then o.stk = snap end
 end
 
 if ns.On then
