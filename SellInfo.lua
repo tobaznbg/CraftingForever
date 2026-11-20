@@ -286,8 +286,17 @@ local function silentColumn(col)
   end })
 end
 
+local wrapped = setmetatable({}, { __mode = "k" }) -- layout functions made by wrapLayout
+
+local function trace(key, value)
+  if not ns.db then return end
+  ns.db.columnsTrace = ns.db.columnsTrace or {}
+  ns.db.columnsTrace[key] = value
+end
+
 local function wrapLayout(original)
-  return function(tableBuilder)
+  local fn
+  fn = function(tableBuilder)
     local replaced = false
     local function addOwn(method, ...)
       local args = { ... }
@@ -316,20 +325,46 @@ local function wrapLayout(original)
       end
       return function(_, ...) return v(tableBuilder, ...) end
     end })
-    original(proxy)
-    SellInfo.columns = replaced
+    local ok, err = pcall(original, proxy)
+    trace("layoutRan", time())
+    trace("layoutOk", ok and true or tostring(err))
+    trace("replaced", replaced)
+    if not ok then original(tableBuilder) end -- Blizzard's table as it was
+    SellInfo.columns = ok and replaced
   end
+  wrapped[fn] = true
+  return fn
 end
 
+-- Every layout Blizzard sets on the list (on load, on showing, on switching views) is wrapped
+-- right after it was set.
 local function installColumns(af)
   local tb = rawget(_G, "AuctionHouseTableBuilder")
-  local list = auctionsList(af)
-  if not (type(tb) == "table" and tb.GetAllAuctionsLayout and list and list.SetTableBuilderLayout) then return end
-  local ok = pcall(function()
-    list:SetTableBuilderLayout(wrapLayout(tb.GetAllAuctionsLayout(af, list)))
+  local list = rawget(af, "AllAuctionsList")
+  trace("install", time())
+  if not (type(tb) == "table" and tb.GetAllAuctionsLayout and list and list.SetTableBuilderLayout) then
+    trace("installMissing", true)
+    return
+  end
+  if not list.m4Hooked then
+    list.m4Hooked = true
+    hooksecurefunc(list, "SetTableBuilderLayout", function(self, layout)
+      if type(layout) == "function" and not wrapped[layout] then
+        trace("blizzardSet", time())
+        self:SetTableBuilderLayout(wrapLayout(layout))
+      end
+    end)
+  end
+  local current = rawget(list, "tableBuilderLayoutFunction")
+  local ok, err = pcall(function()
+    if type(current) == "function" and not wrapped[current] then
+      list:SetTableBuilderLayout(wrapLayout(current))
+    elseif type(current) ~= "function" then
+      list:SetTableBuilderLayout(wrapLayout(tb.GetAllAuctionsLayout(af, list)))
+    end
     if list.RefreshScrollFrame then list:RefreshScrollFrame() end
   end)
-  if not ok then SellInfo.columns = false end
+  trace("installOk", ok and true or tostring(err))
 end
 
 -- The text of a cell of the own columns.
